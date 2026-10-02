@@ -1,0 +1,22 @@
+# Binaries
+/sshr
+/tmp/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.*
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local data (vault lives in ~/.sshr)
+.env
+*.pem
