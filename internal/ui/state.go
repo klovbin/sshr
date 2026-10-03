@@ -137,6 +137,19 @@ func (s *state) handle(gtx layout.Context) {
 		s.langOpen = false
 		s.openAddForm()
 	}
+	if s.form.open {
+		_ = s.form.card.Clicked(gtx) // absorb; never dismiss
+		if s.form.scrim.Clicked(gtx) {
+			if s.form.blockScrim {
+				s.form.blockScrim = false // drain click that opened the modal
+			} else {
+				s.form.close()
+				s.clearForm()
+			}
+		} else if s.form.blockScrim {
+			s.form.blockScrim = false
+		}
+	}
 	if s.form.cancel.Clicked(gtx) {
 		s.form.close()
 		s.clearForm()
@@ -156,6 +169,18 @@ func (s *state) handle(gtx layout.Context) {
 		}
 		if s.hostDelBtns[i].Clicked(gtx) {
 			s.openDeleteConfirm(s.hosts[i])
+		}
+	}
+	if s.modal.open {
+		_ = s.modal.card.Clicked(gtx) // absorb; never dismiss
+		if s.modal.scrim.Clicked(gtx) {
+			if s.modal.blockScrim {
+				s.modal.blockScrim = false // drain click that opened the modal
+			} else {
+				s.modal.close()
+			}
+		} else if s.modal.blockScrim {
+			s.modal.blockScrim = false
 		}
 	}
 	if s.modal.cancel.Clicked(gtx) {
