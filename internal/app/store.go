@@ -1,3 +1,4 @@
+// Package app holds local vault storage and app settings (no UI).
 package app
 
 import (
@@ -16,8 +17,10 @@ import (
 var (
 	ErrHostEmpty    = errors.New("host_empty")
 	ErrUserRequired = errors.New("user_required")
+	ErrNotFound     = errors.New("not_found")
 )
 
+// Host is one SSH target. Passwords are not stored here.
 type Host struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -27,10 +30,12 @@ type Host struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
 type Store struct {
 	Dir string
 }
 
+// DefaultStore creates ~/.sshr/vault/hosts if needed.
 func DefaultStore() (*Store, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -105,6 +110,21 @@ func (s *Store) List() ([]Host, error) {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+func (s *Store) Delete(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ErrNotFound
+	}
+	path := filepath.Join(s.Dir, id+".json")
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) save(h *Host) error {

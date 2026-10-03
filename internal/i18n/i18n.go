@@ -1,3 +1,4 @@
+// Package i18n is key→string catalogs with English fallback.
 package i18n
 
 import "fmt"
@@ -14,12 +15,14 @@ func Languages() []Language {
 	}
 }
 
+// Locale looks up UI strings; missing keys fall back to English, then the key.
 type Locale struct {
 	code     string
 	messages map[string]string
 	fallback map[string]string
 }
 
+// New picks a catalog; unknown codes default to Russian.
 func New(code string) Locale {
 	if _, ok := catalogs[code]; !ok {
 		code = "ru"
@@ -35,6 +38,7 @@ func (l Locale) Code() string {
 	return l.code
 }
 
+// T returns a translated string; optional args go to fmt.Sprintf.
 func (l Locale) T(key string, args ...any) string {
 	s, ok := l.messages[key]
 	if !ok || s == "" {

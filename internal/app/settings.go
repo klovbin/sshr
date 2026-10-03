@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 )
 
+// Settings is ~/.sshr/settings.json (language, etc.).
 type Settings struct {
 	Lang string `json:"lang"`
 }

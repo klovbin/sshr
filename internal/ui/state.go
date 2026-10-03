@@ -14,37 +14,53 @@ import (
 	"sshr.dev/internal/i18n"
 )
 
+// screen is the right-pane mode (hosts list vs settings).
 type screen int
 
 const (
 	screenList screen = iota
-	screenForm
 	screenSettings
 )
 
-type state struct {
-	store    *sshrapp.Store
-	settings sshrapp.Settings
-	locale   i18n.Locale
-	hosts    []sshrapp.Host
-	screen   screen
-	win      *app.Window
+// settingsPane selects the left nav item inside settings.
+type settingsPane int
 
+const (
+	settingsAbout settingsPane = iota
+	settingsLanguage
+)
+
+const appVersion = "0.01 alfa"
+
+// state holds UI widgets, vault data, and transient status/errors.
+type state struct {
+	store        *sshrapp.Store
+	settings     sshrapp.Settings
+	locale       i18n.Locale
+	hosts        []sshrapp.Host
+	screen       screen
+	settingsPane settingsPane
+	win          *app.Window
+
+	// Add-host form editors (shown in form modal).
 	nameEd widget.Editor
 	hostEd widget.Editor
 	userEd widget.Editor
 	portEd widget.Editor
 
 	addBtn      widget.Clickable
-	saveBtn     widget.Clickable
-	cancelBtn   widget.Clickable
 	settingsBtn widget.Clickable
 	hostsBtn    widget.Clickable
 	backBtn     widget.Clickable
+	aboutBtn    widget.Clickable
+	langNavBtn  widget.Clickable
 	langBtns    []widget.Clickable
 	langDropBtn widget.Clickable
 	langOpen    bool
 	list        widget.List
+	hostDelBtns []widget.Clickable // parallel to hosts
+	modal       confirmModal       // delete confirm
+	form        formModal          // add host
 	settingsIC  *widget.Icon
 	hostsIC     *widget.Icon
 	dropIC      *widget.Icon
@@ -52,10 +68,11 @@ type state struct {
 	sidebarW float32
 	split    splitDrag
 
-	status string
-	err    string
+	status string // soft status line under the title
+	err    string // list-level error (form errors live in form.err)
 }
 
+// splitDrag tracks sidebar resize via window-X pointer events.
 type splitDrag struct {
 	dragging bool
 	pid      pointer.ID
@@ -72,6 +89,9 @@ func (s *state) reload() {
 		return
 	}
 	s.hosts = hosts
+	if len(s.hostDelBtns) != len(hosts) {
+		s.hostDelBtns = make([]widget.Clickable, len(hosts))
+	}
 	if len(hosts) == 0 {
 		s.status = s.t("status.empty")
 	} else {
@@ -84,6 +104,7 @@ func (s *state) refreshStatus() {
 	s.reload()
 }
 
+// handle processes clicks for the current frame (before layout).
 func (s *state) handle(gtx layout.Context) {
 	if s.hostsBtn.Clicked(gtx) {
 		s.screen = screenList
@@ -93,8 +114,16 @@ func (s *state) handle(gtx layout.Context) {
 	}
 	if s.settingsBtn.Clicked(gtx) {
 		s.screen = screenSettings
+		s.settingsPane = settingsLanguage
 		s.langOpen = false
 		s.err = ""
+	}
+	if s.aboutBtn.Clicked(gtx) {
+		s.settingsPane = settingsAbout
+		s.langOpen = false
+	}
+	if s.langNavBtn.Clicked(gtx) {
+		s.settingsPane = settingsLanguage
 	}
 	if s.backBtn.Clicked(gtx) {
 		s.screen = screenList
@@ -105,17 +134,14 @@ func (s *state) handle(gtx layout.Context) {
 		s.langOpen = !s.langOpen
 	}
 	if s.addBtn.Clicked(gtx) {
-		s.screen = screenForm
 		s.langOpen = false
-		s.err = ""
+		s.openAddForm()
 	}
-	if s.cancelBtn.Clicked(gtx) {
-		s.screen = screenList
-		s.err = ""
+	if s.form.cancel.Clicked(gtx) {
+		s.form.close()
 		s.clearForm()
-		s.refreshStatus()
 	}
-	if s.saveBtn.Clicked(gtx) {
+	if s.form.save.Clicked(gtx) {
 		s.saveHost()
 	}
 	for i := range s.langBtns {
@@ -123,6 +149,44 @@ func (s *state) handle(gtx layout.Context) {
 			s.setLang(i18n.Languages()[i].Code)
 			s.langOpen = false
 		}
+	}
+	for i := range s.hostDelBtns {
+		if i >= len(s.hosts) {
+			break
+		}
+		if s.hostDelBtns[i].Clicked(gtx) {
+			s.openDeleteConfirm(s.hosts[i])
+		}
+	}
+	if s.modal.cancel.Clicked(gtx) {
+		s.modal.close()
+	}
+	if s.modal.confirm.Clicked(gtx) {
+		s.confirmDelete()
+	}
+}
+
+func (s *state) confirmDelete() {
+	id := s.modal.hostID
+	name := ""
+	for _, h := range s.hosts {
+		if h.ID == id {
+			name = h.Name
+			break
+		}
+	}
+	s.modal.close()
+	if id == "" {
+		return
+	}
+	if err := s.store.Delete(id); err != nil {
+		s.err = s.mapErr(err)
+		return
+	}
+	s.err = ""
+	s.reload()
+	if name != "" {
+		s.status = s.t("status.deleted", name)
 	}
 }
 
@@ -149,6 +213,8 @@ func (s *state) mapErr(err error) string {
 		return s.t("err.host_empty")
 	case errors.Is(err, sshrapp.ErrUserRequired):
 		return s.t("err.user_required")
+	case errors.Is(err, sshrapp.ErrNotFound):
+		return s.t("err.not_found")
 	default:
 		return err.Error()
 	}
@@ -159,19 +225,19 @@ func (s *state) saveHost() {
 	if p := strings.TrimSpace(s.portEd.Text()); p != "" {
 		n, err := strconv.Atoi(p)
 		if err != nil || n <= 0 {
-			s.err = s.t("err.port_invalid")
+			s.form.err = s.t("err.port_invalid")
 			return
 		}
 		port = n
 	}
 	h, err := s.store.Add(s.nameEd.Text(), s.hostEd.Text(), s.userEd.Text(), port)
 	if err != nil {
-		s.err = s.mapErr(err)
+		s.form.err = s.mapErr(err)
 		return
 	}
-	s.screen = screenList
-	s.err = ""
+	s.form.close()
 	s.clearForm()
+	s.err = ""
 	s.reload()
 	s.status = s.t("status.added", h.Name)
 }

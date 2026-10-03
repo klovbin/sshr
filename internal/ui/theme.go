@@ -4,6 +4,7 @@ import (
 	"image/color"
 )
 
+// Shared palette for the shell (light theme).
 var (
 	colAccent = color.NRGBA{R: 0x2f, G: 0x6f, B: 0xed, A: 0xff}
 	colAccentSoft = color.NRGBA{R: 0x2f, G: 0x6f, B: 0xed, A: 0x12}

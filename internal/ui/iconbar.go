@@ -11,6 +11,7 @@ import (
 	"gioui.org/widget/material"
 )
 
+// layoutIconBar is the fixed right rail: hosts, then settings.
 func layoutIconBar(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
 	const barW = unit.Dp(56)
 	w := gtx.Dp(barW)
@@ -31,7 +32,7 @@ func layoutIconBar(gtx layout.Context, th *material.Theme, s *state) layout.Dime
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return iconBarBtn(gtx, th, &s.hostsBtn, s.hostsIC,
-				s.screen == screenList || s.screen == screenForm)
+				s.screen == screenList)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {

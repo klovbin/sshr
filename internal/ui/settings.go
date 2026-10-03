@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 
@@ -14,8 +15,13 @@ import (
 	"sshr.dev/internal/i18n"
 )
 
+// layoutSettings shows About above the language picker.
 func layoutSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutAboutSection(gtx, th)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body1(th, s.t("settings.language"))
 			l.Font.Weight = 600
@@ -24,6 +30,47 @@ func layoutSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dim
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutLangDropdown(gtx, th, s)
+		}),
+	)
+}
+
+func layoutAboutSection(gtx layout.Context, th *material.Theme) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body1(th, "About")
+			l.Font.Weight = 600
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					sz := gtx.Dp(unit.Dp(56))
+					size := image.Pt(sz, sz)
+					radius := gtx.Dp(unit.Dp(12))
+					defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
+					paint.Fill(gtx.Ops, colPanel)
+					return layout.Dimensions{Size: size}
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(14)}.Layout),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							t := material.Body1(th, "sshr")
+							t.Font.Weight = 600
+							t.Color = colFG
+							return t.Layout(gtx)
+						}),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							v := material.Caption(th, fmt.Sprintf("version: %s", appVersion))
+							v.Color = colMuted
+							v.Font.Weight = 500
+							return v.Layout(gtx)
+						}),
+					)
+				}),
+			)
 		}),
 	)
 }

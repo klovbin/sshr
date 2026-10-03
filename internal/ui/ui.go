@@ -1,3 +1,4 @@
+// Package ui is the Gio desktop shell: hosts list, settings, modals.
 package ui
 
 import (
@@ -16,6 +17,7 @@ import (
 	"sshr.dev/internal/i18n"
 )
 
+// Run opens the main window and blocks until the app exits.
 func Run() {
 	go func() {
 		w := new(app.Window)
