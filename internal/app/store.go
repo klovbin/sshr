@@ -110,6 +110,8 @@ func (s *Store) List() ([]Host, error) {
 		if err := json.Unmarshal(b, &h); err != nil {
 			continue
 		}
+		// The file name is the source of truth: Delete builds its path from ID.
+		h.ID = strings.TrimSuffix(e.Name(), ".json")
 		out = append(out, h)
 	}
 	sort.Slice(out, func(i, j int) bool {
