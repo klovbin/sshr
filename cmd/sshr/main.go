@@ -1,8 +1,11 @@
-// Command sshr starts the Gio desktop UI.
 package main
 
-import "sshr.dev/internal/ui"
+import "os"
 
 func main() {
-	ui.Run()
+	if len(os.Args) > 1 {
+		runCLI(os.Args[1:])
+		return
+	}
+	runGUI()
 }

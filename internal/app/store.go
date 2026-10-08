@@ -112,6 +112,33 @@ func (s *Store) List() ([]Host, error) {
 	return out, nil
 }
 
+func (s *Store) Find(query string) (*Host, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, ErrNotFound
+	}
+	hosts, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	for i := range hosts {
+		if hosts[i].ID == query {
+			return &hosts[i], nil
+		}
+	}
+	for i := range hosts {
+		if strings.EqualFold(hosts[i].Name, query) {
+			return &hosts[i], nil
+		}
+	}
+	for i := range hosts {
+		if strings.HasPrefix(hosts[i].ID, query) {
+			return &hosts[i], nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 func (s *Store) Delete(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
