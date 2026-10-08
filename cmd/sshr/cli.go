@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 
 	"sshr.dev/internal/app"
@@ -170,7 +169,13 @@ func cmdConnect(store *app.Store, args []string) {
 		fatal(fmt.Errorf("ssh not found in PATH"))
 	}
 	fmt.Printf("Connecting to %s (%s@%s:%d)...\n", h.Name, h.User, h.Host, h.Port)
-	syscall.Exec(sshBin, sshArgs, os.Environ())
+	cmd := exec.Command(sshBin, sshArgs[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.Exit(1)
+	}
 }
 
 func printUsage() {
