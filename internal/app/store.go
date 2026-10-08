@@ -171,7 +171,11 @@ func (s *Store) save(h *Host) error {
 		return err
 	}
 	path := filepath.Join(s.Dir, h.ID+".json")
-	return os.WriteFile(path, append(b, '\n'), 0o600)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func newID() (string, error) {
