@@ -281,7 +281,11 @@ func findSSHKeys() []string {
 		}
 		path := filepath.Join(sshDir, name)
 		info, err := e.Info()
-		if err != nil || info.Size() > 16384 {
+		if err != nil || info.Size() > 16384 || info.Size() == 0 {
+			continue
+		}
+		b, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(b), "PRIVATE KEY") {
 			continue
 		}
 		keys = append(keys, path)
