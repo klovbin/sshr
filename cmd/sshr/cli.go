@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -50,15 +51,19 @@ func cmdList(store *app.Store) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tID")
+	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tKEY\tID")
 	for _, h := range hosts {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", h.Name, h.Host, h.User, h.Port, h.ID[:8])
+		keyCol := "-"
+		if h.Key != "" {
+			keyCol = filepath.Base(h.Key)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\n", h.Name, h.Host, h.User, h.Port, keyCol, h.ID[:8])
 	}
 	w.Flush()
 }
 
 func cmdAdd(store *app.Store, args []string) {
-	var host, name, user string
+	var host, name, user, key string
 	port := 22
 	positional := make([]string, 0)
 
@@ -73,6 +78,8 @@ func cmdAdd(store *app.Store, args []string) {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				port = n
 			}
+		} else if strings.HasPrefix(a, "--key=") || strings.HasPrefix(a, "-k=") {
+			key = strings.SplitN(a, "=", 2)[1]
 		} else if (a == "-n" || a == "--name") && i+1 < len(args) {
 			i++
 			name = args[i]
@@ -84,6 +91,9 @@ func cmdAdd(store *app.Store, args []string) {
 			if n, err := strconv.Atoi(args[i]); err == nil && n > 0 {
 				port = n
 			}
+		} else if (a == "-k" || a == "--key") && i+1 < len(args) {
+			i++
+			key = args[i]
 		} else if !strings.HasPrefix(a, "-") {
 			positional = append(positional, a)
 		}
@@ -93,18 +103,30 @@ func cmdAdd(store *app.Store, args []string) {
 		host = positional[0]
 	}
 	if host == "" {
-		fmt.Fprintln(os.Stderr, "Usage: sshr add <host> -u <user> [-n <name>] [-p <port>]")
+		fmt.Fprintln(os.Stderr, "Usage: sshr add <host> -u <user> [-n <name>] [-p <port>] [-k <key>]")
 		os.Exit(1)
 	}
 	if user == "" {
 		fmt.Fprintln(os.Stderr, "sshr add: -u <user> required")
 		os.Exit(1)
 	}
-	h, err := store.Add(name, host, user, port)
+	if key != "" {
+		expanded := expandHome(key)
+		if _, err := os.Stat(expanded); err != nil {
+			fmt.Fprintf(os.Stderr, "sshr add: key file not found: %s\n", expanded)
+			os.Exit(1)
+		}
+		key = expanded
+	}
+	h, err := store.Add(name, host, user, key, port)
 	if err != nil {
 		fatal(err)
 	}
-	fmt.Printf("Added %s (%s@%s:%d)\n", h.Name, h.User, h.Host, h.Port)
+	msg := fmt.Sprintf("Added %s (%s@%s:%d)", h.Name, h.User, h.Host, h.Port)
+	if h.Key != "" {
+		msg += fmt.Sprintf(" key=%s", h.Key)
+	}
+	fmt.Println(msg)
 }
 
 func cmdRm(store *app.Store, args []string) {
@@ -135,7 +157,11 @@ func cmdConnect(store *app.Store, args []string) {
 		fmt.Fprintf(os.Stderr, "sshr connect: %s not found\n", query)
 		os.Exit(1)
 	}
-	sshArgs := []string{"ssh", "-p", strconv.Itoa(h.Port), h.User + "@" + h.Host}
+	sshArgs := []string{"ssh"}
+	if h.Key != "" {
+		sshArgs = append(sshArgs, "-i", h.Key)
+	}
+	sshArgs = append(sshArgs, "-p", strconv.Itoa(h.Port), h.User+"@"+h.Host)
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		fatal(fmt.Errorf("ssh not found in PATH"))
@@ -150,11 +176,20 @@ func printUsage() {
 Usage:
   sshr                              open GUI
   sshr list                         list saved hosts
-  sshr add <host> -u <user> [-n <name>] [-p <port>]
+  sshr add <host> -u <user> [-n <name>] [-p <port>] [-k <key>]
                                     add a host
   sshr rm <name or id>              remove a host
   sshr connect <name or id>         ssh into a host
   sshr help                         show this help`)
+}
+
+func expandHome(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
 }
 
 func fatal(err error) {

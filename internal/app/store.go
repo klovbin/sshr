@@ -27,6 +27,7 @@ type Host struct {
 	Host      string    `json:"host"`
 	Port      int       `json:"port"`
 	User      string    `json:"user"`
+	Key       string    `json:"key,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -48,7 +49,7 @@ func DefaultStore() (*Store, error) {
 	return &Store{Dir: dir}, nil
 }
 
-func (s *Store) Add(name, host, user string, port int) (*Host, error) {
+func (s *Store) Add(name, host, user, key string, port int) (*Host, error) {
 	name = strings.TrimSpace(name)
 	host = strings.TrimSpace(host)
 	user = strings.TrimSpace(user)
@@ -69,12 +70,14 @@ func (s *Store) Add(name, host, user string, port int) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
+	key = strings.TrimSpace(key)
 	h := &Host{
 		ID:        id,
 		Name:      name,
 		Host:      host,
 		Port:      port,
 		User:      user,
+		Key:       key,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := s.save(h); err != nil {
@@ -128,6 +131,11 @@ func (s *Store) Find(query string) (*Host, error) {
 	}
 	for i := range hosts {
 		if strings.EqualFold(hosts[i].Name, query) {
+			return &hosts[i], nil
+		}
+	}
+	for i := range hosts {
+		if strings.EqualFold(hosts[i].Host, query) {
 			return &hosts[i], nil
 		}
 	}
