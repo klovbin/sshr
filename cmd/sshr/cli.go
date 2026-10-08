@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -117,6 +118,8 @@ func cmdAdd(store *app.Store, args []string) {
 			os.Exit(1)
 		}
 		key = expanded
+	} else {
+		key = promptAuthMethod()
 	}
 	h, err := store.Add(name, host, user, key, port)
 	if err != nil {
@@ -181,6 +184,104 @@ Usage:
   sshr rm <name or id>              remove a host
   sshr connect <name or id>         ssh into a host
   sshr help                         show this help`)
+}
+
+func promptAuthMethod() string {
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println("\nAuthentication method:")
+	fmt.Println("  [1] Specify private key path")
+	fmt.Println("  [2] Find key automatically (~/.ssh/)")
+	fmt.Println("  [3] Password (no key)")
+	fmt.Print("\nChoice [1/2/3]: ")
+
+	if !scanner.Scan() {
+		return ""
+	}
+	choice := strings.TrimSpace(scanner.Text())
+
+	switch choice {
+	case "1":
+		return promptKeyPath(scanner)
+	case "2":
+		return pickFromSSHKeys(scanner)
+	default:
+		return ""
+	}
+}
+
+func promptKeyPath(scanner *bufio.Scanner) string {
+	fmt.Print("Key path: ")
+	if !scanner.Scan() {
+		return ""
+	}
+	path := strings.TrimSpace(scanner.Text())
+	if path == "" {
+		return ""
+	}
+	expanded := expandHome(path)
+	if _, err := os.Stat(expanded); err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: key file not found: %s\n", expanded)
+		os.Exit(1)
+	}
+	return expanded
+}
+
+func pickFromSSHKeys(scanner *bufio.Scanner) string {
+	keys := findSSHKeys()
+	if len(keys) == 0 {
+		fmt.Println("No keys found in ~/.ssh/")
+		fmt.Print("Enter path manually? [y/N]: ")
+		if scanner.Scan() && strings.ToLower(strings.TrimSpace(scanner.Text())) == "y" {
+			return promptKeyPath(scanner)
+		}
+		return ""
+	}
+
+	fmt.Println("\nFound keys:")
+	for i, k := range keys {
+		fmt.Printf("  [%d] %s\n", i+1, k)
+	}
+	fmt.Printf("\nChoice [1-%d]: ", len(keys))
+
+	if !scanner.Scan() {
+		return ""
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
+	if err != nil || n < 1 || n > len(keys) {
+		fmt.Fprintln(os.Stderr, "sshr: invalid choice")
+		os.Exit(1)
+	}
+	return keys[n-1]
+}
+
+func findSSHKeys() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	entries, err := os.ReadDir(sshDir)
+	if err != nil {
+		return nil
+	}
+	var keys []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".pub") || name == "known_hosts" ||
+			name == "known_hosts.old" || name == "authorized_keys" || name == "config" {
+			continue
+		}
+		path := filepath.Join(sshDir, name)
+		info, err := e.Info()
+		if err != nil || info.Size() > 16384 {
+			continue
+		}
+		keys = append(keys, path)
+	}
+	return keys
 }
 
 func expandHome(path string) string {
