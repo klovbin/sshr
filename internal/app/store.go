@@ -56,6 +56,9 @@ func (s *Store) Add(name, host, user, key string, port int) (*Host, error) {
 	if host == "" {
 		return nil, ErrHostEmpty
 	}
+	if strings.HasPrefix(host, "-") {
+		return nil, fmt.Errorf("host must not start with '-': %s", host)
+	}
 	if user == "" {
 		return nil, ErrUserRequired
 	}

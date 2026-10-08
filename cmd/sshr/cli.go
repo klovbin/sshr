@@ -164,7 +164,7 @@ func cmdConnect(store *app.Store, args []string) {
 	if h.Key != "" {
 		sshArgs = append(sshArgs, "-i", h.Key)
 	}
-	sshArgs = append(sshArgs, "-p", strconv.Itoa(h.Port), h.User+"@"+h.Host)
+	sshArgs = append(sshArgs, "-p", strconv.Itoa(h.Port), "--", h.User+"@"+h.Host)
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		fatal(fmt.Errorf("ssh not found in PATH"))
