@@ -57,7 +57,11 @@ func cmdList(store *app.Store) {
 		if h.Key != "" {
 			keyCol = filepath.Base(h.Key)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\n", h.Name, h.Host, h.User, h.Port, keyCol, h.ID[:8])
+		id := h.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\n", h.Name, h.Host, h.User, h.Port, keyCol, id)
 	}
 	w.Flush()
 }
