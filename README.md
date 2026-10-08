@@ -18,6 +18,8 @@ It currently supports:
 Planned:
 
 - Cross-platform installer with OS auto-detection (Linux/macOS/Windows) and automatic PATH setup
+- REST API for external integrations and automation
+- MCP server for AI assistant access to hosts and connections
 - Sync with key services (1Password, Bitwarden, ssh-agent)
 - Password handling (local secrets, then encrypted vault)
 - GitHub / git vault sync across machines
