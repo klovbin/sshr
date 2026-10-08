@@ -17,6 +17,7 @@ It currently supports:
 
 Planned:
 
+- Cross-platform installer with OS auto-detection (Linux/macOS/Windows) and automatic PATH setup
 - Sync with key services (1Password, Bitwarden, ssh-agent)
 - Password handling (local secrets, then encrypted vault)
 - GitHub / git vault sync across machines
