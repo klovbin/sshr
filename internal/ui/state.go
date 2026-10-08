@@ -255,7 +255,7 @@ func (s *state) saveHost() {
 		}
 		port = n
 	}
-	h, err := s.store.Add(s.nameEd.Text(), s.hostEd.Text(), s.userEd.Text(), port)
+	h, err := s.store.Add(s.nameEd.Text(), s.hostEd.Text(), s.userEd.Text(), "", port)
 	if err != nil {
 		s.form.err = s.mapErr(err)
 		return
