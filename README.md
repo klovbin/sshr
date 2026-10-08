@@ -7,13 +7,17 @@ sshr is a desktop SSH hosts manager that keeps your server list local and under 
 It currently supports:
 
 - Adding and listing SSH hosts (name, host/IP, user, port)
-- Local vault storage per host file
+- CLI commands: `list`, `add`, `rm`, `connect`, `help`
+- Private key support (`-k` flag or interactive selection)
+- Auto-discovery of SSH keys in `~/.ssh/`
+- Interactive authentication method prompt when adding hosts
+- Local vault storage per host file (0600 permissions)
 - Settings with interface language (Russian / English)
 - Resizable sidebar layout and icon navigation
 
 Planned:
 
-- Console commands (`sshr list`, `sshr add`, …)
-- Password / key handling (local secrets, then encrypted vault)
+- Sync with key services (1Password, Bitwarden, ssh-agent)
+- Password handling (local secrets, then encrypted vault)
 - GitHub / git vault sync across machines
 - Connect / session workflows on top of system SSH
