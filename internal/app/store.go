@@ -104,11 +104,11 @@ func (s *Store) List() ([]Host, error) {
 		}
 		b, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
 		if err != nil {
-			return nil, err
+			continue
 		}
 		var h Host
 		if err := json.Unmarshal(b, &h); err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Name(), err)
+			continue
 		}
 		out = append(out, h)
 	}
