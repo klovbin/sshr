@@ -31,6 +31,9 @@ var en = map[string]string{
 
 	"settings.title":    "Settings",
 	"settings.language": "Interface language",
+	"settings.connection": "Connection",
+	"settings.mosh":       "Connect with mosh",
+	"settings.mosh.hint":  "Keeps the session alive when the network changes or the laptop sleeps, and shows typing instantly on a slow link. Needs mosh on this computer and mosh-server plus open UDP 60000–61000 on the server. No port forwarding, no scrollback without tmux, no terminal images, not on Windows. If mosh fails to start, sshr falls back to plain ssh.",
 
 	"sidebar.hosts.title": "Servers",
 	"sidebar.hosts.hint":  "List and filters go here",

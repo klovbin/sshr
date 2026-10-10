@@ -14,8 +14,28 @@ It currently supports:
 - Local vault storage per host file (0600 permissions)
 - Settings with interface language (Russian / English)
 - Resizable sidebar layout and icon navigation
+- Optional mosh transport, off by default (see [Connecting with mosh](#connecting-with-mosh))
 
-Planned:
+## Connecting with mosh
+
+[mosh](https://mosh.org) keeps a session alive when your network changes or your laptop sleeps, and shows what you type immediately even on a slow link. It is **off by default**, because it has real costs:
+
+- needs `mosh` on your computer, and `mosh-server` plus open UDP ports 60000–61000 on the server;
+- no port forwarding and no agent forwarding;
+- no scrollback unless you run tmux/screen on the server;
+- terminal image protocols (kitty, sixel) do not pass through;
+- no native Windows client.
+
+Turn it on in **Settings → Connection → Connect with mosh** (stored as `"mosh": true` in `~/.sshr/settings.json`), or per call:
+
+```sh
+sshr connect --mosh web   # use mosh this time
+sshr connect --ssh web    # plain ssh even if mosh is on
+```
+
+If mosh is not installed, or it fails within the first 20 seconds (no mosh-server, UDP blocked), sshr falls back to plain ssh and says so. A key path with spaces cannot be passed through mosh, so such hosts always use ssh.
+
+## Planned
 
 - Cross-platform installer with OS auto-detection (Linux/macOS/Windows) and automatic PATH setup
 - REST API for external integrations and automation

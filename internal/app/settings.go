@@ -9,6 +9,10 @@ import (
 // Settings is ~/.sshr/settings.json (language, etc.).
 type Settings struct {
 	Lang string `json:"lang"`
+	// Mosh makes connect use mosh instead of plain ssh. Off by default: it
+	// needs mosh-server and open UDP ports on the server, drops port/agent
+	// forwarding and terminal images, and does not run natively on Windows.
+	Mosh bool `json:"mosh"`
 }
 
 func settingsPath() (string, error) {

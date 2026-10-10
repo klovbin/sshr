@@ -69,6 +69,7 @@ func loop(w *app.Window) error {
 		dropIC:     dropIC,
 		win:        w,
 	}
+	s.moshBox.Value = settings.Mosh
 	s.nameEd.SingleLine = true
 	s.hostEd.SingleLine = true
 	s.userEd.SingleLine = true

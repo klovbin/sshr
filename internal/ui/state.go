@@ -57,6 +57,7 @@ type state struct {
 	langBtns    []widget.Clickable
 	langDropBtn widget.Clickable
 	langOpen    bool
+	moshBox     widget.Bool
 	list        widget.List
 	hostDelBtns []widget.Clickable // parallel to hosts
 	modal       confirmModal       // delete confirm
@@ -156,6 +157,10 @@ func (s *state) handle(gtx layout.Context) {
 	}
 	if s.form.save.Clicked(gtx) {
 		s.saveHost()
+	}
+	if s.moshBox.Update(gtx) {
+		s.settings.Mosh = s.moshBox.Value
+		_ = sshrapp.SaveSettings(s.settings)
 	}
 	for i := range s.langBtns {
 		if s.langBtns[i].Clicked(gtx) {

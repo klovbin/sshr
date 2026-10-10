@@ -31,6 +31,35 @@ func layoutSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dim
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutLangDropdown(gtx, th, s)
 		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutConnectionSection(gtx, th, s)
+		}),
+	)
+}
+
+// layoutConnectionSection holds connect options; each one carries a short
+// note on what it does and what it costs.
+func layoutConnectionSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body1(th, s.t("settings.connection"))
+			l.Font.Weight = 600
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			cb := material.CheckBox(th, &s.moshBox, s.t("settings.mosh"))
+			cb.Color = colFG
+			cb.IconColor = colAccent
+			return cb.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Caption(th, s.t("settings.mosh.hint"))
+			l.Color = colMuted
+			return l.Layout(gtx)
+		}),
 	)
 }
 

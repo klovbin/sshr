@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"sshr.dev/internal/app"
 )
@@ -153,36 +154,90 @@ func cmdRm(store *app.Store, args []string) {
 }
 
 func cmdConnect(store *app.Store, args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: sshr connect <name or id>")
+	settings, _ := app.LoadSettings()
+	useMosh := settings.Mosh
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		switch a {
+		case "--mosh":
+			useMosh = true
+		case "--ssh":
+			useMosh = false
+		default:
+			rest = append(rest, a)
+		}
+	}
+	if len(rest) < 1 {
+		fmt.Fprintln(os.Stderr, "Usage: sshr connect [--mosh|--ssh] <name or id>")
 		os.Exit(1)
 	}
-	query := strings.Join(args, " ")
+	query := strings.Join(rest, " ")
 	h, err := store.Find(query)
 	if err != nil {
 		findFailed("connect", query, err)
 	}
-	sshArgs := []string{"ssh"}
+	sshOpts := []string{}
 	if h.Key != "" {
-		sshArgs = append(sshArgs, "-i", h.Key)
+		sshOpts = append(sshOpts, "-i", h.Key)
 	}
-	sshArgs = append(sshArgs, "-p", strconv.Itoa(h.Port), "--", h.User+"@"+h.Host)
+	sshOpts = append(sshOpts, "-p", strconv.Itoa(h.Port))
+	dest := h.User + "@" + h.Host
+
+	if useMosh {
+		if code, ok := runMosh(h, sshOpts, dest); ok {
+			os.Exit(code)
+		}
+	}
+
 	sshBin, err := exec.LookPath("ssh")
 	if err != nil {
 		fatal(fmt.Errorf("ssh not found in PATH"))
 	}
-	fmt.Printf("Connecting to %s (%s@%s:%d)...\n", h.Name, h.User, h.Host, h.Port)
-	cmd := exec.Command(sshBin, sshArgs[1:]...)
+	fmt.Printf("Connecting to %s (%s:%d)...\n", h.Name, dest, h.Port)
+	os.Exit(run(sshBin, append(sshOpts, "--", dest)...))
+}
+
+// moshStartup is how long a failing mosh run still counts as "could not
+// start" (no mosh-server, UDP blocked) rather than a session that ended.
+const moshStartup = 20 * time.Second
+
+// runMosh connects with mosh. ok=false means mosh is unusable here or did not
+// start, and the caller should fall back to plain ssh.
+func runMosh(h *app.Host, sshOpts []string, dest string) (code int, ok bool) {
+	moshBin, err := exec.LookPath("mosh")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sshr: mosh is not installed, using ssh")
+		return 0, false
+	}
+	// mosh splits --ssh on spaces, so a key path with spaces would break it.
+	if strings.ContainsAny(h.Key, " \t") {
+		fmt.Fprintln(os.Stderr, "sshr: key path has spaces, mosh cannot pass it; using ssh")
+		return 0, false
+	}
+	fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
+	started := time.Now()
+	code = run(moshBin, "--ssh=ssh "+strings.Join(sshOpts, " "), "--", dest)
+	if code != 0 && time.Since(started) < moshStartup {
+		fmt.Fprintln(os.Stderr, "sshr: mosh did not start, falling back to ssh")
+		return 0, false
+	}
+	return code, true
+}
+
+// run starts a terminal program attached to ours and returns its exit code.
+func run(bin string, args ...string) int {
+	cmd := exec.Command(bin, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			os.Exit(exitErr.ExitCode())
+			return exitErr.ExitCode()
 		}
 		fatal(err)
 	}
+	return 0
 }
 
 func printUsage() {
@@ -194,7 +249,9 @@ Usage:
   sshr add <host> -u <user> [-n <name>] [-p <port>] [-k <key>]
                                     add a host
   sshr rm <name or id>              remove a host
-  sshr connect <name or id>         ssh into a host
+  sshr connect [--mosh|--ssh] <name or id>
+                                    ssh into a host (mosh if enabled
+                                    in settings or with --mosh)
   sshr help                         show this help`)
 }
 
