@@ -24,3 +24,8 @@ Planned:
 - Password handling (local secrets, then encrypted vault)
 - GitHub / git vault sync across machines
 - Connect / session workflows on top of system SSH
+
+Future ideas:
+
+- Zero-knowledge sync with device-bound keys ([#10](https://github.com/klovbin/sshr/issues/10)) — the sync backend stores only ciphertext; each device keeps its own key pair (TPM where available) and the vault key is encrypted to every device, so there is no master password to brute-force; new devices are approved from an existing one by fingerprint / QR; paper recovery key; SSH private keys never leave their device
+- Optional hardware keys (YubiKey / FIDO2 `ed25519-sk`) — not required, buying a dedicated device just for sshr is a big ask
