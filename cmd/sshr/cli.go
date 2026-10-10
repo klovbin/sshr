@@ -144,8 +144,7 @@ func cmdRm(store *app.Store, args []string) {
 	query := strings.Join(args, " ")
 	h, err := store.Find(query)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sshr rm: %s not found\n", query)
-		os.Exit(1)
+		findFailed("rm", query, err)
 	}
 	if err := store.Delete(h.ID); err != nil {
 		fatal(err)
@@ -161,8 +160,7 @@ func cmdConnect(store *app.Store, args []string) {
 	query := strings.Join(args, " ")
 	h, err := store.Find(query)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sshr connect: %s not found\n", query)
-		os.Exit(1)
+		findFailed("connect", query, err)
 	}
 	sshArgs := []string{"ssh"}
 	if h.Key != "" {
@@ -309,6 +307,24 @@ func expandHome(path string) string {
 		}
 	}
 	return path
+}
+
+// findFailed reports a failed Find and exits; on ambiguity it lists the
+// matches so the user can retry with an ID.
+func findFailed(cmd, query string, err error) {
+	var amb *app.AmbiguousError
+	switch {
+	case errors.As(err, &amb):
+		fmt.Fprintf(os.Stderr, "sshr %s: %q matches several hosts, use the ID:\n", cmd, query)
+		for _, h := range amb.Hosts {
+			fmt.Fprintf(os.Stderr, "  %s  %s (%s@%s:%d)\n", h.ID, h.Name, h.User, h.Host, h.Port)
+		}
+	case errors.Is(err, app.ErrNotFound):
+		fmt.Fprintf(os.Stderr, "sshr %s: %s not found\n", cmd, query)
+	default:
+		fmt.Fprintf(os.Stderr, "sshr %s: %v\n", cmd, err)
+	}
+	os.Exit(1)
 }
 
 func fatal(err error) {

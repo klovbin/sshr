@@ -20,6 +20,17 @@ var (
 	ErrNotFound     = errors.New("not_found")
 )
 
+// AmbiguousError means a query matched several hosts; Hosts lists them so the
+// caller can ask for an exact ID instead of guessing.
+type AmbiguousError struct {
+	Query string
+	Hosts []Host
+}
+
+func (e *AmbiguousError) Error() string {
+	return fmt.Sprintf("%q matches %d hosts", e.Query, len(e.Hosts))
+}
+
 // Host is one SSH target. Passwords are not stored here.
 type Host struct {
 	ID        string    `json:"id"`
@@ -120,6 +131,9 @@ func (s *Store) List() ([]Host, error) {
 	return out, nil
 }
 
+// Find resolves a query by exact ID, then name, then host address, then ID
+// prefix. A tier with several matches is an error: picking one would let rm or
+// connect hit the wrong server.
 func (s *Store) Find(query string) (*Host, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -129,24 +143,26 @@ func (s *Store) Find(query string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range hosts {
-		if hosts[i].ID == query {
-			return &hosts[i], nil
-		}
+	tiers := []func(h Host) bool{
+		func(h Host) bool { return h.ID == query },
+		func(h Host) bool { return strings.EqualFold(h.Name, query) },
+		func(h Host) bool { return strings.EqualFold(h.Host, query) },
+		func(h Host) bool { return strings.HasPrefix(h.ID, query) },
 	}
-	for i := range hosts {
-		if strings.EqualFold(hosts[i].Name, query) {
-			return &hosts[i], nil
+	for _, match := range tiers {
+		var found []Host
+		for _, h := range hosts {
+			if match(h) {
+				found = append(found, h)
+			}
 		}
-	}
-	for i := range hosts {
-		if strings.EqualFold(hosts[i].Host, query) {
-			return &hosts[i], nil
-		}
-	}
-	for i := range hosts {
-		if strings.HasPrefix(hosts[i].ID, query) {
-			return &hosts[i], nil
+		switch len(found) {
+		case 0:
+			continue
+		case 1:
+			return &found[0], nil
+		default:
+			return nil, &AmbiguousError{Query: query, Hosts: found}
 		}
 	}
 	return nil, ErrNotFound
