@@ -65,18 +65,21 @@ func layoutSidebarHosts(gtx layout.Context, th *material.Theme, s *state) layout
 }
 
 func layoutSidebarSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return sidebarNavItem(gtx, th, &s.aboutBtn, s.t("sidebar.about"), s.settingsPane == settingsAbout)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return sidebarNavItem(gtx, th, &s.langNavBtn, s.t("settings.language"), s.settingsPane == settingsLanguage)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: gtx.Constraints.Min}
-		}),
-	)
+	items := s.settingsNav()
+	children := make([]layout.FlexChild, 0, len(items)*2+1)
+	for i, item := range items {
+		item := item
+		if i > 0 {
+			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout))
+		}
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return sidebarNavItem(gtx, th, item.btn, item.label, s.settingsPane == item.pane)
+		}))
+	}
+	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: gtx.Constraints.Min}
+	}))
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func sidebarNavItem(gtx layout.Context, th *material.Theme, btn *widget.Clickable, label string, active bool) layout.Dimensions {

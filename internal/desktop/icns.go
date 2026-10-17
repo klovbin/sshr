@@ -10,19 +10,35 @@ import (
 	"sshr.dev/assets"
 )
 
-// icnsTypes maps the icns element types to the PNG size they hold, the
-// @2x types are the retina variants of the size half as large
+// icnsTypes maps icns OSTypes to PNG pixel size.
+// See https://en.wikipedia.org/wiki/Apple_Icon_Image_format
 var icnsTypes = []struct {
 	typ  string
 	size int
 }{
-	{"icp4", 16}, {"icp5", 32}, {"ic11", 32}, {"ic12", 64}, {"ic07", 128},
-	{"ic13", 256}, {"ic08", 256}, {"ic14", 512}, {"ic09", 512},
+	{"icp4", 16},
+	{"icp5", 32},
+	{"icp6", 64},
+	{"ic07", 128},
+	{"ic08", 256},
+	{"ic09", 512},
+	{"ic10", 1024}, // 512@2x — needed so 1Password / macOS do not upscale 16px mush
+	{"ic11", 32},   // 16@2x
+	{"ic12", 64},   // 32@2x
+	{"ic13", 256},  // 128@2x
+	{"ic14", 512},  // 256@2x
 }
 
-// icns builds the bundle icon from the PNGs, an icns file is "icns", the
-// total length and then elements of type, length and PNG data
+// icns builds the bundle icon from the PNGs. Prefer iconutil on macOS.
 func icns() ([]byte, error) {
+	if b, err := icnsNative(); err == nil && len(b) > 0 {
+		return b, nil
+	}
+	return icnsFromPNGs()
+}
+
+// icnsFromPNGs packs PNGs into an icns container (fallback / non-darwin).
+func icnsFromPNGs() ([]byte, error) {
 	var body bytes.Buffer
 	for _, t := range icnsTypes {
 		png, err := assets.Icons.ReadFile(fmt.Sprintf("icons/sshr-%d.png", t.size))

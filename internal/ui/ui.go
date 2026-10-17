@@ -79,17 +79,19 @@ func loop(w *app.Window) error {
 		return err
 	}
 	s := &state{
-		store:      store,
-		settings:   settings,
-		locale:     locale,
-		status:     locale.T("status.ready"),
-		list:       widget.List{List: layout.List{Axis: layout.Vertical}},
-		langBtns:   make([]widget.Clickable, len(langs)),
-		hostsIC:    hostsIC,
-		settingsIC: settingsIC,
-		dropIC:     dropIC,
-		logo:       logo,
-		win:        w,
+		store:            store,
+		settings:         settings,
+		locale:           locale,
+		status:           locale.T("status.ready"),
+		list:             widget.List{List: layout.List{Axis: layout.Vertical}},
+		settingsList:     widget.List{List: layout.List{Axis: layout.Vertical}},
+		settingsScrollTo: -1,
+		langBtns:         make([]widget.Clickable, len(langs)),
+		hostsIC:          hostsIC,
+		settingsIC:       settingsIC,
+		dropIC:           dropIC,
+		logo:             logo,
+		win:              w,
 	}
 	s.moshBox.Value = settings.Mosh
 	s.reuseBox.Value = settings.Reuse

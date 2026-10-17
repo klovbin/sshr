@@ -16,13 +16,41 @@ import (
 	"sshr.dev/internal/i18n"
 )
 
-// layoutSettings shows About above the language picker.
+// settingsNavItem is one entry in the settings sidebar; click scrolls to that section.
+type settingsNavItem struct {
+	btn   *widget.Clickable
+	label string
+	pane  settingsPane
+}
+
+func (s *state) settingsNav() []settingsNavItem {
+	return []settingsNavItem{
+		{btn: &s.aboutBtn, label: s.t("sidebar.about"), pane: settingsAbout},
+		{btn: &s.langNavBtn, label: s.t("settings.language"), pane: settingsLanguage},
+		{btn: &s.integrBtn, label: s.t("sidebar.integrations"), pane: settingsIntegrations},
+	}
+}
+
+// layoutSettings is one scrollable page; sidebar categories jump to a section.
 func layoutSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
+	s.settingsList.Axis = layout.Vertical
+	if s.settingsScrollTo >= 0 {
+		s.settingsList.Position.First = s.settingsScrollTo
+		s.settingsList.Position.Offset = 0
+		s.settingsScrollTo = -1
+	}
+	sections := []layout.Widget{
+		func(gtx layout.Context) layout.Dimensions { return layoutAboutSection(gtx, th, s) },
+		func(gtx layout.Context) layout.Dimensions { return layoutLanguageSection(gtx, th, s) },
+		func(gtx layout.Context) layout.Dimensions { return layoutIntegrations(gtx, th, s) },
+	}
+	return material.List(th, &s.settingsList).Layout(gtx, len(sections), func(gtx layout.Context, i int) layout.Dimensions {
+		return layout.Inset{Bottom: unit.Dp(24)}.Layout(gtx, sections[i])
+	})
+}
+
+func layoutLanguageSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutAboutSection(gtx, th, s)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body1(th, s.t("settings.language"))
 			l.Font.Weight = 600
@@ -36,11 +64,86 @@ func layoutSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dim
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutConnectionSection(gtx, th, s)
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
+	)
+}
+
+func layoutIntegrations(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := material.Body1(th, s.t("sidebar.integrations"))
+			l.Font.Weight = 600
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layoutImportSection(gtx, th, s)
 		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layoutOPSection(gtx, th, s)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+		layoutNote(th, s.t("settings.bw.title"), s.t("settings.bw.hint")),
 	)
+}
+
+func layoutOPSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
+	label := s.t("btn.opConnect")
+	if s.opConnecting {
+		label = s.t("status.opConnecting")
+	} else if s.settings.OPAccount != "" {
+		label = s.t("btn.opReconnect")
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layoutNote(th, s.t("settings.op.title"), s.t("settings.op.hint")),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if s.settings.OPAccount == "" {
+				return layout.Dimensions{}
+			}
+			l := material.Caption(th, s.t("settings.op.connected", s.settings.OPAccount))
+			l.Color = colOK
+			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, l.Layout)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			b := material.Button(th, &s.opSignInBtn, label)
+			b.Background = colAccent
+			return b.Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			msg := s.opMsg
+			if msg == "" {
+				return layout.Dimensions{}
+			}
+			c := colMuted
+			if s.err != "" {
+				c = colErr
+			} else if !s.opConnecting {
+				c = colOK
+			}
+			l := material.Caption(th, msg)
+			l.Color = c
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, l.Layout)
+		}),
+	)
+}
+
+func layoutNote(th *material.Theme, title, hint string) layout.FlexChild {
+	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Body1(th, title)
+				l.Font.Weight = 600
+				return l.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := material.Caption(th, hint)
+				l.Color = colMuted
+				return l.Layout(gtx)
+			}),
+		)
+	})
 }
 
 // layoutImportSection brings hosts in from ~/.ssh/config

@@ -25,18 +25,36 @@ type managerCLI struct {
 	stuck string
 	// hint may add what to do to the tool's own message
 	hint func(msg string) string
+	// resolve finds the binary when LookPath is not enough (signed op paths).
+	resolve func() (string, error)
+	// env builds the process environment; nil keeps the default.
+	env func(args []string) []string
+	// errMsg picks the useful stderr line; nil uses the last line.
+	errMsg func(stderr string) string
 }
 
 func (m managerCLI) run(stdin []byte, args ...string) ([]byte, error) {
-	bin, err := exec.LookPath(*m.bin)
+	bin := ""
+	var err error
+	if m.resolve != nil {
+		bin, err = m.resolve()
+	} else {
+		bin, err = exec.LookPath(*m.bin)
+		if err != nil {
+			err = fmt.Errorf("%w: the %s CLI (%s) is not installed, see %s", m.missing, m.name, *m.bin, m.url)
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: the %s CLI (%s) is not installed, see %s", m.missing, m.name, *m.bin, m.url)
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	if m.env != nil {
+		cmd.Env = m.env(args)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -45,12 +63,17 @@ func (m managerCLI) run(stdin []byte, args ...string) ([]byte, error) {
 		if ctx.Err() != nil {
 			return nil, errors.New(m.stuck)
 		}
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
-		if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
-			msg = msg[i+1:]
+		msg := ""
+		if m.errMsg != nil {
+			msg = m.errMsg(stderr.String())
+		} else {
+			msg = strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = strings.TrimSpace(stdout.String())
+			}
+			if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
+				msg = msg[i+1:]
+			}
 		}
 		if msg == "" {
 			msg = err.Error()

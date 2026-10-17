@@ -10,4 +10,4 @@ import "embed"
 var Icons embed.FS
 
 // IconSizes are the sizes of Icons in pixels
-var IconSizes = []int{16, 32, 48, 64, 128, 256, 512}
+var IconSizes = []int{16, 32, 48, 64, 128, 256, 512, 1024}

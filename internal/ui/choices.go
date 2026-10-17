@@ -44,6 +44,17 @@ func (s *state) authOpts() []authOpt {
 			load:   loadPassword,
 		},
 		{
+			kind: authAsk, btn: &s.passAskBtn, labelKey: "auth.pass.ask", rank: 55,
+			apply: func(_ *state, d *authDraft) string {
+				d.passMode = sshrapp.PasswordAsk
+				return ""
+			},
+			match: func(h sshrapp.Host) bool {
+				return h.Key == "" && h.KeyMode == "" && h.PasswordMode == sshrapp.PasswordAsk
+			},
+			load: clearKeyField,
+		},
+		{
 			kind: authKey, btn: &s.authKeyBtn, labelKey: "auth.key", rank: 50,
 			fields: func(th *material.Theme, s *state) []layout.FlexChild {
 				return []layout.FlexChild{spacer(10), field(th, s.t("field.key"), &s.keyEd)}
@@ -120,15 +131,6 @@ func (s *state) passOpts() []passOpt {
 			active: is(sshrapp.PasswordBitwarden),
 			fields: bwPassFields,
 			apply:  applyBWPass,
-		},
-		{
-			mode: sshrapp.PasswordAsk, btn: &s.passAskBtn,
-			label:  func(s *state) string { return s.t("auth.pass.ask") },
-			active: is(sshrapp.PasswordAsk),
-			apply: func(_ *state, d *authDraft) string {
-				d.passMode = sshrapp.PasswordAsk
-				return ""
-			},
 		},
 	}
 }
@@ -308,7 +310,7 @@ func loadVault(s *state, h sshrapp.Host) {
 
 func loadPassword(s *state, h sshrapp.Host) {
 	s.keyEd.SetText("")
-	for _, mode := range []string{sshrapp.PasswordAsk, sshrapp.PasswordOnePassword, sshrapp.PasswordBitwarden} {
+	for _, mode := range []string{sshrapp.PasswordOnePassword, sshrapp.PasswordBitwarden} {
 		if h.PasswordMode == mode {
 			s.passMode = h.PasswordMode
 			break
@@ -495,6 +497,8 @@ var uiErrs = []struct {
 	{sshrapp.ErrKeyPassphrase, "err.keyPassphrase"},
 	{sshrapp.ErrKeyRequired, "err.keyPaste_required"},
 	{sshrapp.ErrNoOP, "err.noOP"},
+	{sshrapp.ErrOPIntegrationOff, "err.opIntegration"},
+	{sshrapp.ErrOPPrivacy, "err.opPrivacy"},
 }
 
 func (s *state) mapErr(err error) string {
