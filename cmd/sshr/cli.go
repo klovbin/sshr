@@ -146,27 +146,7 @@ func cmdList(store *app.Store, args []string) {
 	}
 	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tAUTH\tTAGS\tID")
 	for _, h := range hosts {
-		keyCol := "-"
-		switch {
-		case h.Key != "":
-			keyCol = filepath.Base(h.Key)
-		case h.KeyMode == app.KeyVault:
-			keyCol = "key (sshr)"
-		case h.KeyMode == app.KeyOnePassword:
-			keyCol = "key (1password)"
-		case h.KeyMode == app.KeyBitwarden:
-			keyCol = "key (bitwarden)"
-		case h.KeyMode == app.KeyAgent:
-			keyCol = "agent (" + agentLabel(h.Agent) + ")"
-		case h.PasswordMode == app.PasswordOnePassword:
-			keyCol = "password (1password)"
-		case h.PasswordMode == app.PasswordBitwarden:
-			keyCol = "password (bitwarden)"
-		case h.PasswordMode == app.PasswordSaved:
-			keyCol = "password"
-		case h.PasswordMode == app.PasswordAsk:
-			keyCol = "ask"
-		}
+		keyCol := h.AuthShort()
 		id := h.ID
 		if len(id) > 8 {
 			id = id[:8]
@@ -372,27 +352,11 @@ func cmdAdd(store *app.Store, args []string) {
 		fatal(err)
 	}
 	msg := fmt.Sprintf("Added %s (%s@%s:%d)", h.Name, h.User, h.Host, h.Port)
-	if h.Key != "" {
-		msg += fmt.Sprintf(" key=%s", h.Key)
-	} else if h.KeyMode == app.KeyVault {
-		msg += " key stored in sshr (" + h.KeyFingerprint() + ")"
-	} else if h.KeyMode == app.KeyOnePassword {
-		msg += " key in 1Password (" + h.KeyFingerprint() + ")"
-	} else if h.KeyMode == app.KeyBitwarden {
-		msg += " key in Bitwarden (" + h.KeyFingerprint() + ")"
-	} else if h.KeyMode == app.KeyAgent {
-		msg += " key from the " + agentLabel(h.Agent) + " agent"
-		if fp := h.KeyFingerprint(); fp != "" {
-			msg += " (" + fp + ")"
-		}
-	} else if h.PasswordMode == app.PasswordOnePassword {
-		msg += " auth=password in 1Password (" + h.PasswordRef + ")"
-	} else if h.PasswordMode == app.PasswordBitwarden {
-		msg += " auth=password in Bitwarden (" + h.PasswordRef + ")"
-	} else if h.PasswordMode == app.PasswordSaved {
-		msg += " auth=password (encrypted)"
-	} else if h.PasswordMode == app.PasswordAsk {
-		msg += " auth=ask"
+	msg += " auth=" + h.AuthShort()
+	if fp := h.KeyFingerprint(); fp != "" {
+		msg += " (" + fp + ")"
+	} else if h.PasswordRef != "" {
+		msg += " (" + h.PasswordRef + ")"
 	}
 	if h.Jump != "" {
 		msg += " via " + h.Jump

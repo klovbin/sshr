@@ -1,5 +1,10 @@
 package app
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // HostSummary is what other programs (MCP, the REST API) may know about a
 // host, no passwords, keys or references to them
 type HostSummary struct {
@@ -22,22 +27,43 @@ func (h *Host) AuthLabel() string {
 		return "key file"
 	case h.KeyMode == KeyVault:
 		return "key stored in sshr"
-	case h.KeyMode == KeyOnePassword:
-		return "key in 1Password"
-	case h.KeyMode == KeyBitwarden:
-		return "key in Bitwarden"
 	case h.KeyMode == KeyAgent:
 		return "key from an ssh agent"
+	case managerName(h.KeyMode) != "":
+		return "key in " + managerName(h.KeyMode)
 	case h.PasswordMode == PasswordSaved:
 		return "saved password"
-	case h.PasswordMode == PasswordOnePassword:
-		return "password in 1Password"
-	case h.PasswordMode == PasswordBitwarden:
-		return "password in Bitwarden"
+	case managerName(h.PasswordMode) != "":
+		return "password in " + managerName(h.PasswordMode)
 	case h.PasswordMode == PasswordAsk:
 		return "password asked every time (not usable without a terminal)"
 	}
 	return "ssh config or agent"
+}
+
+// AuthShort is the same in a word or two, for the AUTH column of sshr list
+func (h *Host) AuthShort() string {
+	switch {
+	case h.Key != "":
+		return filepath.Base(h.Key)
+	case h.KeyMode == KeyVault:
+		return "key (sshr)"
+	case h.KeyMode == KeyAgent:
+		agent := h.Agent
+		if agent == "" {
+			agent = "system"
+		}
+		return "agent (" + agent + ")"
+	case managerName(h.KeyMode) != "":
+		return "key (" + strings.ToLower(managerName(h.KeyMode)) + ")"
+	case h.PasswordMode == PasswordSaved:
+		return "password"
+	case managerName(h.PasswordMode) != "":
+		return "password (" + strings.ToLower(managerName(h.PasswordMode)) + ")"
+	case h.PasswordMode == PasswordAsk:
+		return "ask"
+	}
+	return "-"
 }
 
 // Summary is h without its secrets
