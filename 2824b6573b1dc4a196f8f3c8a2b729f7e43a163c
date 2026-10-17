@@ -1,0 +1,7 @@
+What it is for: start the app like any other program with its own icon
+
+Why it helps: no terminal needed to open the GUI
+
+Why this way: the icons are inside the binary, so nothing is downloaded,
+the macOS bundle holds a copy because the Dock shows a bundle icon only
+for a program inside it
