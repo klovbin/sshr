@@ -1,0 +1,6 @@
+What it is for: editor plugins, launchers and scripts
+
+Why it helps: they integrate without parsing CLI output
+
+Why this way: a 0600 unix socket by default, a loopback port only with a
+token, web pages and DNS rebinding are refused, no secrets in or out
