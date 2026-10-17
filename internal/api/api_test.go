@@ -34,6 +34,12 @@ func TestAPIHosts(t *testing.T) {
 	if code != 400 || !strings.Contains(body, "not taken through the API") {
 		t.Errorf("add with a password = %d %s", code, body)
 	}
+	for _, f := range []string{"op_password", "op_key", "bw_password", "bw_key"} {
+		code, body = do(t, srv, "POST", "/v1/hosts", `{"host":"10.0.0.2","user":"u","`+f+`":"op://v/i/password"}`, nil)
+		if code != 400 || !strings.Contains(body, "references are not taken") {
+			t.Errorf("add with %s = %d %s", f, code, body)
+		}
+	}
 	code, body = do(t, srv, "POST", "/v1/hosts", `{"host":"10.0.0.2","user":"u","bogus":1}`, nil)
 	if code != 400 {
 		t.Errorf("unknown field = %d %s", code, body)

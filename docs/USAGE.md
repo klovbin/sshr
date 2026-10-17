@@ -255,7 +255,7 @@ curl -H "Authorization: Bearer $(cat ~/.sshr/api-token)" http://127.0.0.1:7522/v
 | Method and path | |
 |----|----|
 | `GET /v1/hosts`, `GET /v1/hosts/{host}` | list, one host by name, address or ID |
-| `POST /v1/hosts` | add: `name`, `host`, `user`, `port`, `key`, `agent`, `agent_key`, `ask_password`, `op_password`, `op_key`, `bw_password`, `bw_key`, `jump`, `session`, `forwards`, `tags` |
+| `POST /v1/hosts` | add: `name`, `host`, `user`, `port`, `key`, `agent`, `agent_key`, `ask_password`, `jump`, `session`, `forwards`, `tags` |
 | `DELETE /v1/hosts/{host}` | remove |
 | `GET /v1/hosts/{host}/connect` | the ssh command line as `{"argv": [...]}` |
 | `POST /v1/hosts/{host}/upload?ext=png` | the body is the file, returns its remote path, removed after 15 minutes |
