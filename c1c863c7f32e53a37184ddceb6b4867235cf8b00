@@ -1,0 +1,6 @@
+What it is for: installing without root or a package manager
+
+Why it helps: one command, and `--uninstall` removes everything it added
+
+Why this way: an unchecked binary is never installed, the GUI falls back
+to the CLI when build tools are missing, packages are planned in #17
