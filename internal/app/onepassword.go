@@ -195,10 +195,14 @@ var opPathCandidates = []string{
 	"/usr/local/bin/op",
 }
 
-func resolveOpBin() (string, error) {
-	if opBin != "op" {
-		return exec.LookPath(opBin)
-	}
+	func resolveOpBin() (string, error) {
+		if opBin != "op" {
+			bin, err := exec.LookPath(opBin)
+			if err != nil {
+				return "", fmt.Errorf("%w: %v", ErrNoOP, err)
+			}
+			return bin, nil
+		}
 	// Use a properly signed op only (Team ID 2BUA8C4S2C). An ad-hoc copy
 	// next to sshr.app cannot talk to the desktop app over XPC.
 	if bin, err := exec.LookPath(opBin); err == nil {
