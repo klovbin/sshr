@@ -1,0 +1,6 @@
+What it is for: Bitwarden and self-hosted Vaultwarden users
+
+Why it helps: the same as 1Password, nothing secret on the machine
+
+Why this way: the master password never passes through sshr, the key
+comes from the item JSON because `bw` has no command for it
