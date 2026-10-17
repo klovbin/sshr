@@ -46,3 +46,21 @@ func TestProxyCommandQuotesHops(t *testing.T) {
 		t.Fatalf("ProxyCommand = %s", line)
 	}
 }
+
+// a plain user@host hop must not see the target's saved password (#43)
+func TestSavedPasswordHostAvoidsDashJ(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	plain, _ := s.JumpArgs(&Host{Jump: "ops@gw:2222", PasswordMode: PasswordAsk})
+	if strings.Join(plain, " ") != "-J ops@gw:2222" {
+		t.Errorf("ask host = %v", plain)
+	}
+	for _, mode := range []string{PasswordSaved, PasswordOnePassword, PasswordBitwarden} {
+		args, err := s.JumpArgs(&Host{Jump: "ops@gw:2222", PasswordMode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line := strings.Join(args, " "); strings.Contains(line, "-J") || !strings.Contains(line, "ProxyCommand=") {
+			t.Errorf("%s host = %s", mode, line)
+		}
+	}
+}
