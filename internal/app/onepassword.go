@@ -1,16 +1,11 @@
 package app
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // Modes for hosts whose secrets live in 1Password, read with the op CLI on
@@ -30,37 +25,14 @@ const opTimeout = 2 * time.Minute
 // opBin is the op executable, tests point it at a fake
 var opBin = "op"
 
-// opRun runs op with stdin and returns its output, an error carries the
-// last line op printed to stderr
-func opRun(stdin []byte, args ...string) ([]byte, error) {
-	bin, err := exec.LookPath(opBin)
-	if err != nil {
-		return nil, fmt.Errorf("%w: the 1Password CLI (op) is not installed, see https://developer.1password.com/docs/cli/get-started/", ErrNoOP)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, args...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, errors.New("1Password did not answer in time, is the app locked?")
-		}
-		msg := strings.TrimSpace(stderr.String())
-		if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
-			msg = msg[i+1:]
-		}
-		if msg == "" {
-			msg = err.Error()
-		}
-		return nil, fmt.Errorf("1Password: %s", msg)
-	}
-	return stdout.Bytes(), nil
-}
+// opCLI is the 1Password CLI, op asks the app for a fingerprint or the
+// account password, the timeout leaves time for that
+var opCLI = managerCLI{name: "1Password", bin: &opBin, missing: ErrNoOP,
+	url: "https://developer.1password.com/docs/cli/get-started/", timeout: opTimeout,
+	stuck: "1Password did not answer in time, is the app locked?"}
+
+// opRun runs op with stdin and returns its output
+func opRun(stdin []byte, args ...string) ([]byte, error) { return opCLI.run(stdin, args...) }
 
 // checkOPRef refuses anything that is not an op:// secret reference
 func checkOPRef(ref string) error {
@@ -92,15 +64,7 @@ func opKeyPub(ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, err := ssh.ParseRawPrivateKey(plain)
-	if err != nil {
-		return "", fmt.Errorf("%s is not a private key: %v", ref, err)
-	}
-	signer, err := ssh.NewSignerFromKey(raw)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))), nil
+	return publicKeyOf(plain, ref)
 }
 
 // opStorePassword creates a 1Password item for a password typed with

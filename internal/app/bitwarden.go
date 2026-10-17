@@ -2,15 +2,11 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 // Modes for hosts whose secrets live in Bitwarden, read with the bw CLI on
@@ -30,40 +26,20 @@ const bwTimeout = time.Minute
 // bwBin is the bw executable, tests point it at a fake
 var bwBin = "bw"
 
-// bwRun runs bw without prompts, it reads the unlocked session from
-// BW_SESSION in the environment, an error carries the last line bw printed
-func bwRun(args ...string) ([]byte, error) {
-	bin, err := exec.LookPath(bwBin)
-	if err != nil {
-		return nil, fmt.Errorf("%w: the Bitwarden CLI (bw) is not installed, see https://bitwarden.com/help/cli/", ErrNoBW)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), bwTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, append(args, "--nointeraction")...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, errors.New("Bitwarden did not answer in time")
-		}
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
-		if i := strings.LastIndexByte(msg, '\n'); i >= 0 {
-			msg = msg[i+1:]
-		}
-		if msg == "" {
-			msg = err.Error()
-		}
+// bwCLI is the Bitwarden CLI, it reads the unlocked session from
+// BW_SESSION in the environment
+var bwCLI = managerCLI{name: "Bitwarden", bin: &bwBin, missing: ErrNoBW,
+	url: "https://bitwarden.com/help/cli/", timeout: bwTimeout,
+	stuck: "Bitwarden did not answer in time",
+	hint: func(msg string) string {
 		if strings.Contains(msg, "locked") || strings.Contains(msg, "not logged in") {
 			msg += ", run bw unlock and export BW_SESSION"
 		}
-		return nil, fmt.Errorf("Bitwarden: %s", msg)
-	}
-	return stdout.Bytes(), nil
-}
+		return msg
+	}}
+
+// bwRun runs bw without prompts
+func bwRun(args ...string) ([]byte, error) { return bwCLI.run(nil, append(args, "--nointeraction")...) }
 
 // checkBWRef refuses what bw would read as an option or cannot be an item
 func checkBWRef(ref string) error {
@@ -112,13 +88,5 @@ func bwKeyPub(ref string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw, err := ssh.ParseRawPrivateKey(plain)
-	if err != nil {
-		return "", fmt.Errorf("Bitwarden item %s holds no usable private key: %v", ref, err)
-	}
-	signer, err := ssh.NewSignerFromKey(raw)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))), nil
+	return publicKeyOf(plain, "Bitwarden item "+ref)
 }
