@@ -1,0 +1,7 @@
+What it is for: mobile links and laptops that sleep
+
+Why it helps: the shell survives network changes and typing echoes at
+once
+
+Why this way: off by default, it needs UDP ports and mosh-server,
+carries no forwards and has no Windows client
