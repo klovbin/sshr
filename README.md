@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icons/sshr-256.png" width="128" height="128" alt="sshr logo"></p>
+<p align="center"><img src="assets/icons/sshr-logo.png" width="128" height="128" alt="sshr logo"></p>
 
 # sshr
 
