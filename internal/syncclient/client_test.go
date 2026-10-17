@@ -415,3 +415,23 @@ func TestSyncWonConflictMakesOneCopy(t *testing.T) {
 		t.Fatalf("devices disagree after the push: ports %d %d, copies on x %d", hx.Port, hy.Port, copies(x))
 	}
 }
+
+func TestSyncUnreadableHostIsNotDeleted(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	path := filepath.Join(w.b.Store.Dir, db.ID+".json")
+	must(t, os.WriteFile(path, []byte("{broken"), 0o600))
+	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if _, err := w.a.Store.Find(db.ID); err != nil {
+		t.Fatalf("a host file broken on b was deleted on a: %v\n%s", err, w.log.String())
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{broken" {
+		t.Fatal("the broken file was overwritten")
+	}
+	if !strings.Contains(w.log.String(), "does not load") {
+		t.Errorf("no word about the broken file:\n%s", w.log.String())
+	}
+}

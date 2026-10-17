@@ -2,6 +2,8 @@ package app
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -82,5 +84,19 @@ func TestAskedPasswordRetries(t *testing.T) {
 	args := strings.Join(SSHArgs(&Host{Port: 22, PasswordMode: PasswordAsk}), " ")
 	if strings.Contains(args, "NumberOfPasswordPrompts") || !strings.Contains(args, "keyboard-interactive,password") {
 		t.Errorf("SSHArgs = %q", args)
+	}
+}
+
+func TestListAllNamesUnreadableFiles(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Host: "10.0.0.1", User: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Repeat("a", 32)
+	os.WriteFile(filepath.Join(s.Dir, bad+".json"), []byte("{"), 0o600)
+	hosts, broken, err := s.ListAll()
+	if err != nil || len(hosts) != 1 || hosts[0].ID != h.ID || len(broken) != 1 || broken[0] != bad {
+		t.Fatalf("ListAll = %v %v %v", hosts, broken, err)
 	}
 }

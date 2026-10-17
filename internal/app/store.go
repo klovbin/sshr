@@ -291,24 +291,34 @@ func cleanHost(h Host) (Host, error) {
 }
 
 func (s *Store) List() ([]Host, error) {
+	hosts, _, err := s.ListAll()
+	return hosts, err
+}
+
+// ListAll is List that also names the IDs of host files that exist but do
+// not load, the sync must not take such a host for a deleted one
+func (s *Store) ListAll() ([]Host, []string, error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]Host, 0, len(entries))
+	var broken []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
 		if err != nil {
+			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
 		var h Host
 		if err := json.Unmarshal(b, &h); err != nil {
+			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
 		// The file name is the source of truth: Delete builds its path from ID.
@@ -321,7 +331,7 @@ func (s *Store) List() ([]Host, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
-	return out, nil
+	return out, broken, nil
 }
 
 // Find resolves a query by exact ID, then name, then host address, then ID

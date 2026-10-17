@@ -639,7 +639,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	if err != nil {
 		return err
 	}
-	local, err := c.localHosts()
+	local, broken, err := c.localHosts()
 	if err != nil {
 		return err
 	}
@@ -650,6 +650,10 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := m.Entries[id]
+		if broken[id] {
+			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", id[:8], id)
+			continue
+		}
 		known, seen := c.st.Entries[id]
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
 		if seen && e.Lamport == known.Lamport && e.Device == known.Device {
@@ -773,20 +777,26 @@ func conflictName(name, device string) string {
 	return fmt.Sprintf("%s (conflict %s %s)", name, device[:6], time.Now().Format("2006-01-02 15:04"))
 }
 
-func (c *Client) localHosts() (map[string][]byte, error) {
-	hosts, err := c.Store.List()
+// localHosts returns the payload of every host here and the IDs of host
+// files that do not load, those are neither deleted nor overwritten
+func (c *Client) localHosts() (map[string][]byte, map[string]bool, error) {
+	hosts, unreadable, err := c.Store.ListAll()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string][]byte{}
 	for _, h := range hosts {
 		p, err := payloadOf(h)
 		if err != nil {
-			return nil, fmt.Errorf("host %s: %v", h.Name, err)
+			return nil, nil, fmt.Errorf("host %s: %v", h.Name, err)
 		}
 		out[h.ID] = p
 	}
-	return out, nil
+	broken := map[string]bool{}
+	for _, id := range unreadable {
+		broken[id] = true
+	}
+	return out, broken, nil
 }
 
 // Push sends the hosts changed here, it pulls first
@@ -820,7 +830,7 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	local, err := c.localHosts()
+	local, broken, err := c.localHosts()
 	if err != nil {
 		return false, err
 	}
@@ -855,6 +865,10 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		changed = true
 	}
 	for id, known := range c.st.Entries {
+		if broken[id] {
+			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", id[:8], id)
+			continue
+		}
 		if _, ok := local[id]; !ok && !known.Deleted {
 			e := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID, Deleted: true}
 			entries[id] = e
