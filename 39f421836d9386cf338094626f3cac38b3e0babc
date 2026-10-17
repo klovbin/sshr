@@ -1,0 +1,9 @@
+What it is for: databases, admin panels and internal services that must
+not be public
+
+Why it helps: `sshr tunnel prod db` instead of remembering `-L
+5432:localhost:5432`, `-R` for webhooks and showing a local dev server,
+`-D` as a SOCKS proxy
+
+Why this way: `ExitOnForwardFailure` makes a busy port fail at once, and
+a stopped sshr stops its ssh too, so no tunnel is left holding a port
