@@ -668,3 +668,38 @@ func TestRemoveDeviceFinishesAfterACrash(t *testing.T) {
 		t.Error("key-pending left in the keychain")
 	}
 }
+
+func TestApproveDoesNotBringBackARemovedDevice(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	d := w.client("d-")
+	code, err := w.a.Invite()
+	must(t, err)
+	_, err = d.Join(w.srv.URL, code, "d")
+	must(t, err)
+	pending, err := w.a.Pending()
+	must(t, err)
+	raced := false
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if isManifestPut(r) && !raced {
+			// b removes c and changes the key just before a pushes
+			raced = true
+			_, err := w.b.RemoveDevice(c.st.DeviceID[:8])
+			must(t, err)
+		}
+		return nil, nil
+	}}}
+	_, err = w.a.Approve(pending[0].ID)
+	must(t, err)
+	for _, x := range w.a.st.Trusted {
+		if x.ID == c.st.DeviceID {
+			t.Fatal("approve wrote the removed device back")
+		}
+	}
+	must(t, d.Pull())
+	if d.st.Epoch != w.a.st.Epoch || d.st.Epoch != 2 {
+		t.Fatalf("d is on epoch %d, a on %d", d.st.Epoch, w.a.st.Epoch)
+	}
+}

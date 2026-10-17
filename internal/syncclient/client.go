@@ -464,15 +464,26 @@ func (c *Client) Approve(prefix string) (*syncproto.DeviceRecord, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
+	// the list is taken from the state each attempt pulled, a device
+	// another one removed meanwhile is not written back
+	plan := func() (pushPlan, error) {
+		for _, t := range c.st.Trusted {
+			if t.ID == d.ID {
+				return pushPlan{}, nil
+			}
+		}
+		return pushPlan{devices: append(append([]syncproto.Device(nil), c.st.Trusted...), d.Device)}, nil
+	}
+	if err := c.push(plan); err != nil {
+		return nil, err
+	}
+	// the envelope is sealed for the epoch that was committed, the device
+	// cannot read anything before it is activated below
 	key, err := c.vaultKey(c.st.Epoch)
 	if err != nil {
 		return nil, err
 	}
 	if err := c.putEnvelope(d.Device, c.st.Epoch, key); err != nil {
-		return nil, err
-	}
-	devices := append(append([]syncproto.Device(nil), c.st.Trusted...), d.Device)
-	if err := c.push(func() (pushPlan, error) { return pushPlan{devices: devices}, nil }); err != nil {
 		return nil, err
 	}
 	code, b, _, err := c.call("POST", "/devices/"+d.ID+"/activate", nil, nil)
