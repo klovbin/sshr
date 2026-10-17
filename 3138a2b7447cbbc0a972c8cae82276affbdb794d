@@ -1,0 +1,7 @@
+What it is for: teams and people whose secrets already live in 1Password
+
+Why it helps: one place for secrets, changes apply at once, access
+follows vault sharing and revocation
+
+Why this way: the `op` CLI handles unlock and Touch ID, the new item
+gets the password through stdin, never argv
