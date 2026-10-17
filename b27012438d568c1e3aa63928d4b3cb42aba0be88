@@ -1,0 +1,7 @@
+What it is for: know which servers are down before waiting on an ssh
+timeout
+
+Why it helps: a glance at the list shows what answers
+
+Why this way: no login is tried, but sshd still logs each check and
+strict fail2ban modes count it, so it is off until you choose it
