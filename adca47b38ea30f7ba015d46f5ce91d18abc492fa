@@ -1,0 +1,7 @@
+What it is for: past a dozen hosts you remember a role, not a name
+
+Why it helps: find a host in two keystrokes, act on a group with `sshr
+run -t`
+
+Why this way: lower case letters, digits and `.-_` only, so a tag reads
+the same in a search, a file and a shell
