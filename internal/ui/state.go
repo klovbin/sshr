@@ -21,12 +21,13 @@ const (
 	screenSettings
 )
 
-// settingsPane selects the left nav item inside settings.
+// settingsPane is the highlighted settings sidebar item (page scrolls to it).
 type settingsPane int
 
 const (
 	settingsAbout settingsPane = iota
 	settingsLanguage
+	settingsIntegrations
 )
 
 const appVersion = "0.01 alfa"
@@ -35,6 +36,8 @@ type authKind int
 
 const (
 	authPassword authKind = iota
+	// authAsk is a password ssh asks for on every connect
+	authAsk
 	authKey
 	// authVault is a private key pasted into the form, stored in sshr
 	authVault
@@ -94,33 +97,41 @@ type state struct {
 	sessionTmuxBtn   widget.Clickable
 	sessionZellijBtn widget.Clickable
 
-	addBtn      widget.Clickable
-	settingsBtn widget.Clickable
-	hostsBtn    widget.Clickable
-	backBtn     widget.Clickable
-	aboutBtn    widget.Clickable
-	langNavBtn  widget.Clickable
-	langBtns    []widget.Clickable
-	langDropBtn widget.Clickable
-	langOpen    bool
-	moshBox     widget.Bool
-	reuseBox    widget.Bool
-	healthBox   widget.Bool
-	list        widget.List
-	hostRows    []hostRowHit // parallel to hosts; secondary-click targets
-	hostMenu    hostContextMenu
-	uploads     chan uploadResult // finished image uploads from goroutines
-	importBtn   widget.Clickable
-	exportBox   widget.Bool
-	importing   bool
-	imports     chan importResult
-	uploading   bool
-	modal       confirmModal // delete confirm
-	form        formModal    // add/edit host
-	settingsIC  *widget.Icon
-	hostsIC     *widget.Icon
-	dropIC      *widget.Icon
-	logo        paint.ImageOp // About + branding, from assets/icons
+	addBtn           widget.Clickable
+	settingsBtn      widget.Clickable
+	hostsBtn         widget.Clickable
+	backBtn          widget.Clickable
+	aboutBtn         widget.Clickable
+	langNavBtn       widget.Clickable
+	integrBtn        widget.Clickable
+	langBtns         []widget.Clickable
+	langDropBtn      widget.Clickable
+	langOpen         bool
+	moshBox          widget.Bool
+	reuseBox         widget.Bool
+	healthBox        widget.Bool
+	list             widget.List
+	settingsList     widget.List
+	settingsScrollTo int          // section index to jump to; -1 means none
+	hostRows         []hostRowHit // parallel to hosts; secondary-click targets
+	hostMenu         hostContextMenu
+	uploads          chan uploadResult // finished image uploads from goroutines
+	importBtn        widget.Clickable
+	opSignInBtn      widget.Clickable
+	exportBox        widget.Bool
+	importing        bool
+	imports          chan importResult
+	opConnecting     bool
+	opMsg            string // feedback under Connect 1Password (settings hides global status)
+	opResults        chan opResult
+	opModal          opModal
+	uploading        bool
+	modal            confirmModal // delete confirm
+	form             formModal    // add/edit host
+	settingsIC       *widget.Icon
+	hostsIC          *widget.Icon
+	dropIC           *widget.Icon
+	logo             paint.ImageOp // About + branding, from assets/icons
 
 	sidebarW float32
 	split    splitDrag
@@ -220,17 +231,18 @@ func (s *state) handle(gtx layout.Context) {
 	}
 	if s.settingsBtn.Clicked(gtx) {
 		s.screen = screenSettings
-		s.settingsPane = settingsLanguage
+		s.settingsPane = settingsAbout
+		s.settingsScrollTo = int(settingsAbout)
 		s.langOpen = false
 		s.hostMenu.close()
 		s.err = ""
 	}
-	if s.aboutBtn.Clicked(gtx) {
-		s.settingsPane = settingsAbout
-		s.langOpen = false
-	}
-	if s.langNavBtn.Clicked(gtx) {
-		s.settingsPane = settingsLanguage
+	for _, item := range s.settingsNav() {
+		if item.btn.Clicked(gtx) {
+			s.settingsPane = item.pane
+			s.settingsScrollTo = int(item.pane)
+			s.langOpen = false
+		}
 	}
 	if s.backBtn.Clicked(gtx) {
 		s.screen = screenList
@@ -295,8 +307,37 @@ func (s *state) handle(gtx layout.Context) {
 	}
 	s.finishUploads(gtx)
 	s.finishImport(gtx)
+	s.finishOPConnect(gtx)
 	if s.importBtn.Clicked(gtx) {
 		s.startImport()
+	}
+	if s.opSignInBtn.Clicked(gtx) {
+		s.startOPConnect()
+	}
+	if s.opModal.open {
+		_ = s.opModal.card.Clicked(gtx)
+		if s.opModal.scrim.Clicked(gtx) {
+			if s.opModal.blockScrim {
+				s.opModal.blockScrim = false
+			} else {
+				s.opModal.close()
+			}
+		} else if s.opModal.blockScrim {
+			s.opModal.blockScrim = false
+		}
+		for i := range s.opModal.pickBtns {
+			if s.opModal.pickBtns[i].Clicked(gtx) {
+				s.opModal.selected = i
+			}
+		}
+		if s.opModal.cancel.Clicked(gtx) {
+			s.opModal.close()
+		}
+		if s.opModal.connect.Clicked(gtx) {
+			if i := s.opModal.selected; i >= 0 && i < len(s.opModal.accounts) {
+				s.authorizeOP(s.opModal.accounts[i])
+			}
+		}
 	}
 	if s.exportBox.Update(gtx) {
 		s.setExport(s.exportBox.Value)

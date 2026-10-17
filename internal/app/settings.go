@@ -24,6 +24,9 @@ type Settings struct {
 	// keeps its password in 1Password, empty means the account's default
 	// vault
 	OPVault string `json:"op_vault,omitempty"`
+	// OPAccount is the 1Password account (url, email or uuid) chosen when the
+	// user connects CLI integration in settings, empty lets op pick
+	OPAccount string `json:"op_account,omitempty"`
 	// MCPCommands lets AI assistants run commands on saved hosts through
 	// sshr mcp, off by default: an assistant that can run commands on every
 	// server can also break them, most clients ask before each tool call,

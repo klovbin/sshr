@@ -27,7 +27,8 @@ const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 	<key>CFBundleIdentifier</key><string>dev.sshr.app</string>
 	<key>CFBundleName</key><string>sshr</string>
 	<key>CFBundleDisplayName</key><string>sshr</string>
-	<key>CFBundleIconFile</key><string>sshr</string>
+	<key>CFBundleIconFile</key><string>sshr.icns</string>
+	<key>CFBundleIconName</key><string>sshr</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 	<key>NSHighResolutionCapable</key><true/>
@@ -56,23 +57,34 @@ func Install() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := writeFile(filepath.Join(app, "Contents", "MacOS", "sshr"), bin, 0o755); err != nil {
+	macOS := filepath.Join(app, "Contents", "MacOS")
+	if err := writeFile(filepath.Join(macOS, "sshr"), bin, 0o755); err != nil {
 		return "", err
 	}
+	// Never ship op inside the bundle: codesign --deep (or re-signing the
+	// bundle) strips 1Password's Team ID and the desktop app refuses IPC.
+	_ = os.Remove(filepath.Join(macOS, "op"))
 	if err := writeFile(filepath.Join(app, "Contents", "Resources", "sshr.icns"), icon, 0o644); err != nil {
 		return "", err
 	}
 	if err := writeFile(filepath.Join(app, "Contents", "Info.plist"), []byte(infoPlist), 0o644); err != nil {
 		return "", err
 	}
-	// sign the bundle ad hoc, the linker signed the binary alone, Apple
-	// silicon refuses to run unsigned code
+	// Ad-hoc sign the bundle only — do not use --deep (would break nested tools).
 	if p, err := exec.LookPath("codesign"); err == nil {
 		exec.Command(p, "--force", "--sign", "-", app).Run()
 	}
-	// Finder caches icons by the bundle's change time
+	// Finder / LaunchServices cache icons by bundle mtime and registration.
 	now := time.Now()
 	os.Chtimes(app, now, now)
+	os.Chtimes(filepath.Join(app, "Contents", "Info.plist"), now, now)
+	os.Chtimes(filepath.Join(app, "Contents", "Resources", "sshr.icns"), now, now)
+	if ls, err := exec.LookPath("lsregister"); err == nil {
+		exec.Command(ls, "-f", app).Run()
+	} else {
+		// Common path when lsregister is not on PATH.
+		exec.Command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-f", app).Run()
+	}
 	return app, nil
 }
 

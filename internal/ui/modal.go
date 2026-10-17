@@ -109,6 +109,7 @@ func (m *formModal) close() {
 
 func layoutModals(gtx layout.Context, th *material.Theme, s *state) {
 	layoutConfirmModal(gtx, th, s)
+	layoutOPModal(gtx, th, s)
 	layoutFormModal(gtx, th, s)
 }
 

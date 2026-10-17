@@ -93,6 +93,14 @@ func runCLI(args []string) {
 		cmdImportSSHConfig(store, args[1:])
 	case "desktop-entry":
 		cmdDesktopEntry(args[1:])
+	case "op-accounts":
+		acc, err := app.ListOPAccounts()
+		if err != nil {
+			fatal(err)
+		}
+		for _, a := range acc {
+			fmt.Printf("%s\t%s\t%s\n", a.Email, a.URL, a.Ref())
+		}
 	case "export-ssh-config":
 		cmdExportSSHConfig(store, args[1:])
 	case app.ProxyCommandName:
