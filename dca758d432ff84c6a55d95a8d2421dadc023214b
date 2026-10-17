@@ -1,0 +1,8 @@
+What it is for: a crash, a hand edit or a synced host must not lose the
+list or run commands on your machine
+
+Why it helps: the vault stays readable and safe whatever ends up in it
+
+Why this way: values from files, sync and the API reach ssh command
+lines and `ProxyCommand`, which a shell runs, so they are checked on
+save and again before use
