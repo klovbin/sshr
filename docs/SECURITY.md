@@ -1,6 +1,6 @@
 # How sshr protects hosts and secrets
 
-What happens to passwords, keys and synced data, the README says how to use each feature, [WHY.md](WHY.md) says why it was built this way (Russian)
+What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how to use each feature, [WHY.md](WHY.md) says why it was built this way (Russian)
 
 ## Saved passwords and keys
 

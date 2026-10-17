@@ -1,6 +1,6 @@
 # Roadmap
 
-What is done, what is being worked on and what comes next, each item links its issue, the board is [SSHR](https://github.com/users/klovbin/projects/3), reasons for each decision are in [WHY.md](WHY.md) (Russian), how to use each feature is in the [README](../README.md), how secrets are protected in [SECURITY.md](SECURITY.md)
+What is done, what is being worked on and what comes next, each item links its issue, the board is [SSHR](https://github.com/users/klovbin/projects/3), reasons for each decision are in [WHY.md](WHY.md) (Russian), how to use each feature is in [USAGE.md](USAGE.md), how secrets are protected in [SECURITY.md](SECURITY.md)
 
 ## Done
 
