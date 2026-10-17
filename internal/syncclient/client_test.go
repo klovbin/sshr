@@ -492,3 +492,40 @@ func TestSyncImportErrorSkipsOneHost(t *testing.T) {
 		t.Fatalf("the push of b undid the change of a: %+v", h)
 	}
 }
+
+func (w *world) join(c *Client) {
+	code, err := w.a.Invite()
+	must(w.t, err)
+	_, err = c.Join(w.srv.URL, code, "x")
+	must(w.t, err)
+	pending, err := w.a.Pending()
+	must(w.t, err)
+	_, err = w.a.Approve(pending[0].ID)
+	must(w.t, err)
+	must(w.t, c.Pull())
+}
+
+func TestSyncTwoRotationsWhileOffline(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	c := w.client("c-")
+	d := w.client("d-")
+	w.join(c)
+	w.join(d)
+	_, err := w.a.RemoveDevice(w.b.st.DeviceID[:8])
+	must(t, err)
+	_, err = w.a.RemoveDevice(d.st.DeviceID[:8])
+	must(t, err)
+	h, err := w.a.Store.Find(web.ID)
+	must(t, err)
+	h.Port = 2222
+	_, err = w.a.Store.Update(web.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	if err := c.Pull(); err != nil {
+		t.Fatalf("device c after two rotations: %v", err)
+	}
+	if h, _ := c.Store.Find(web.ID); h == nil || h.Port != 2222 {
+		t.Fatalf("change after the rotations not applied: %+v", h)
+	}
+}

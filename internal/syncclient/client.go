@@ -536,8 +536,10 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 }
 
 // verify checks one manifest against what this device trusts and returns
-// it, it then becomes the trusted state
-func (c *Client) verify(sm *syncproto.Signed) (*syncproto.Manifest, error) {
+// it, it then becomes the trusted state, the MAC is checked only when
+// withMAC, the signature already vouches for a manifest in the middle of
+// the chain and the server keeps the vault key of the newest epoch only
+func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest, error) {
 	var m syncproto.Manifest
 	if err := json.Unmarshal(sm.Body, &m); err != nil {
 		return nil, err
@@ -573,12 +575,14 @@ func (c *Client) verify(sm *syncproto.Signed) (*syncproto.Manifest, error) {
 	if m.Epoch < c.st.Epoch {
 		return nil, errors.New("manifest of an old vault key epoch")
 	}
-	key, err := c.vaultKey(m.Epoch)
-	if err != nil {
-		return nil, err
-	}
-	if err := verifyMAC(sm, key); err != nil {
-		return nil, err
+	if withMAC {
+		key, err := c.vaultKey(m.Epoch)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyMAC(sm, key); err != nil {
+			return nil, err
+		}
 	}
 	inside := false
 	for _, d := range m.Devices {
@@ -623,7 +627,9 @@ func (c *Client) Pull() error {
 	}
 	var last *syncproto.Manifest
 	for i := range history {
-		if last, err = c.verify(&history[i]); err != nil {
+		// a device offline through several key rotations can open only
+		// the newest epoch, so only the manifest it applies needs the key
+		if last, err = c.verify(&history[i], i == len(history)-1); err != nil {
 			return err
 		}
 	}
