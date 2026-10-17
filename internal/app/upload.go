@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +62,12 @@ func (h *Host) Dest() string {
 func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (string, error) {
 	if _, err := exec.LookPath("ssh"); err != nil {
 		return "", errors.New("ssh not found in PATH")
+	}
+	// the name goes into the sh -c script on the server, an extension
+	// like $(cmd) would run there
+	ext = strings.ToLower(ext)
+	if !uploadExtRe.MatchString(ext) {
+		return "", fmt.Errorf("file extension %q: only letters and digits, up to 10", ext)
 	}
 	name := fmt.Sprintf("paste-%d.%s", time.Now().UnixMilli(), ext)
 	mins := int(UploadTTL / time.Minute)
@@ -122,6 +129,9 @@ func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (strin
 	}
 	return "", fmt.Errorf("upload to %s failed: %s", h.Name, msg)
 }
+
+// uploadExtRe is what an upload's file extension may be
+var uploadExtRe = regexp.MustCompile(`^[a-z0-9]{1,10}$`)
 
 // shQuote wraps s in single quotes for a POSIX shell.
 func shQuote(s string) string {
