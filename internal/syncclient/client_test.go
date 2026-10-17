@@ -371,3 +371,47 @@ func TestSyncOnePasswordRefsStayLocal(t *testing.T) {
 		t.Fatalf("forged references kept: %+v", ev)
 	}
 }
+
+func TestSyncWonConflictMakesOneCopy(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	for i, c := range []*Client{w.a, w.b} {
+		h, err := c.Store.Find(db.ID)
+		must(t, err)
+		h.Port = 3000 + i
+		_, err = c.Store.Update(db.ID, *h)
+		must(t, err)
+	}
+	// the device with the smaller ID pushes first and loses, the other
+	// one wins the conflict on pull and keeps pulling before it pushes
+	x, y := w.a, w.b
+	if x.st.DeviceID > y.st.DeviceID {
+		x, y = y, x
+	}
+	must(t, x.Push())
+	must(t, y.Pull())
+	_, err := x.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, x.Push())
+	must(t, y.Pull())
+	copies := func(c *Client) int {
+		hosts, _ := c.Store.List()
+		n := 0
+		for _, h := range hosts {
+			if strings.Contains(h.Name, "(conflict ") {
+				n++
+			}
+		}
+		return n
+	}
+	if n := copies(y); n != 1 {
+		t.Fatalf("%d conflict copies of one conflict\n%s", n, w.log.String())
+	}
+	must(t, y.Push())
+	must(t, x.Pull())
+	hx, _ := x.Store.Find(db.ID)
+	hy, _ := y.Store.Find(db.ID)
+	if hx.Port != hy.Port || copies(x) != 1 {
+		t.Fatalf("devices disagree after the push: ports %d %d, copies on x %d", hx.Port, hy.Port, copies(x))
+	}
+}

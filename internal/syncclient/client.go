@@ -686,6 +686,11 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 						c.logf("%s: %s", cp.Name, n)
 					}
 				}
+				// the remote version is handled, the entry moves to it
+				// and keeps the old local hash, the change made here
+				// still counts as not pushed and the next push outranks
+				// the remote one, a later pull makes no second copy
+				c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
 				continue
 			}
 			var name string
