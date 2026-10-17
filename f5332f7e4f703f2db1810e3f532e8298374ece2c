@@ -1,0 +1,10 @@
+What it is for: routers, NAS boxes, cheap VPS panels and client machines
+where a key is not an option
+
+Why it helps: no more retyping, no password in a note or alias, no
+`sshpass` exposing it on the command line
+
+Why this way: sshr is its own askpass and serves the password over a
+one-shot socket, never in argv, the environment or a file, only the
+password prompt gets it and only once, so a wrong password does not feed
+fail2ban
