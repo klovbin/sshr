@@ -64,3 +64,21 @@ func TestSavedPasswordHostAvoidsDashJ(t *testing.T) {
 		}
 	}
 }
+
+// an address reaches %h in the shell-run ProxyCommand (#44)
+func TestAddressRefusesShellCharacters(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	for _, bad := range []string{"a;id", "a$(id)", "a b", "-oProxyCommand=x", "a\nb", "a|b", "a%h"} {
+		if _, err := s.Add(Host{Host: bad, User: "u", PasswordMode: PasswordAsk}); err == nil {
+			t.Errorf("address %q saved", bad)
+		}
+	}
+	for _, ok := range []string{"web.example.com", "10.0.0.5", "::1", "[fe80::1]", "my_alias", "host-1"} {
+		if _, err := s.Add(Host{Host: ok, User: "u", PasswordMode: PasswordAsk}); err != nil {
+			t.Errorf("address %q refused: %v", ok, err)
+		}
+	}
+	if _, err := s.ConnectArgs(&Host{Host: "a;id", User: "u", Port: 22}); err == nil {
+		t.Error("ConnectArgs used a bad address from disk")
+	}
+}

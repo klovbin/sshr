@@ -137,6 +137,10 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 
 // ConnectArgs is SSHArgs plus the jump options for h
 func (s *Store) ConnectArgs(h *Host) ([]string, error) {
+	// the host file may come from another device or an older version
+	if err := checkAddress(h.Host); err != nil {
+		return nil, err
+	}
 	jump, err := s.JumpArgs(h)
 	if err != nil {
 		return nil, err

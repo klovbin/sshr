@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -167,8 +168,8 @@ func cleanHost(h Host) (Host, error) {
 	if h.Host == "" {
 		return h, ErrHostEmpty
 	}
-	if strings.HasPrefix(h.Host, "-") {
-		return h, fmt.Errorf("host must not start with '-': %s", h.Host)
+	if err := checkAddress(h.Host); err != nil {
+		return h, err
 	}
 	if h.User == "" {
 		return h, ErrUserRequired
@@ -489,6 +490,20 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 		in.KeyRef = ""
 	}
 	return in, notes
+}
+
+// addressRe is a host name, an ssh config alias, an IPv4 or an IPv6
+// address, the address reaches %h in ProxyCommand, which ssh runs with the
+// shell and does not sanitize before OpenSSH 9.6
+var addressRe = regexp.MustCompile(`^(?:[A-Za-z0-9_][A-Za-z0-9._-]*|\[?[0-9A-Fa-f:.]+\]?)$`)
+
+// checkAddress refuses an address with characters a shell or ssh would
+// read as more than a name
+func checkAddress(addr string) error {
+	if !addressRe.MatchString(addr) {
+		return fmt.Errorf("address %q: use a host name or an IP address", addr)
+	}
+	return nil
 }
 
 // sameDestination tells whether two versions of a host go to the same
