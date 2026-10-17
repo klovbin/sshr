@@ -1,0 +1,8 @@
+What it is for: sleep, Wi-Fi switches and VPN drops kill an ssh shell
+and its jobs
+
+Why it helps: the job keeps running and you return to the same place
+
+Why this way: it works over plain ssh on every OS with forwards and
+images, so it covers most of what people want from mosh without its
+costs
