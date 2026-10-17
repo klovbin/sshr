@@ -1,7 +1,5 @@
-//go:build !windows
-
-// Package assets holds the logo, sshr installs it as its icon on Linux
-// and macOS, on Windows the icon is a resource of the .exe (cmd/sshr/*.syso)
+// Package assets holds the logo. Linux and macOS install it via desktop-entry;
+// Windows links the same PNGs into .exe resources (cmd/sshr/*.syso).
 package assets
 
 import "embed"

@@ -2,17 +2,22 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/png"
 	"os"
 
 	"gioui.org/app"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 
+	"sshr.dev/assets"
 	sshrapp "sshr.dev/internal/app"
 	"sshr.dev/internal/i18n"
 )
@@ -29,6 +34,18 @@ func Run() {
 		os.Exit(0)
 	}()
 	app.Main()
+}
+
+func loadLogo() (paint.ImageOp, error) {
+	b, err := assets.Icons.ReadFile("icons/sshr-128.png")
+	if err != nil {
+		return paint.ImageOp{}, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(b))
+	if err != nil {
+		return paint.ImageOp{}, err
+	}
+	return paint.NewImageOp(img), nil
 }
 
 func loop(w *app.Window) error {
@@ -57,6 +74,10 @@ func loop(w *app.Window) error {
 	if err != nil {
 		return err
 	}
+	logo, err := loadLogo()
+	if err != nil {
+		return err
+	}
 	s := &state{
 		store:      store,
 		settings:   settings,
@@ -67,6 +88,7 @@ func loop(w *app.Window) error {
 		hostsIC:    hostsIC,
 		settingsIC: settingsIC,
 		dropIC:     dropIC,
+		logo:       logo,
 		win:        w,
 	}
 	s.moshBox.Value = settings.Mosh

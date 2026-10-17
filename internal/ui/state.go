@@ -7,6 +7,7 @@ import (
 	"gioui.org/app"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op/paint"
 	"gioui.org/widget"
 
 	sshrapp "sshr.dev/internal/app"
@@ -118,6 +119,7 @@ type state struct {
 	settingsIC   *widget.Icon
 	hostsIC      *widget.Icon
 	dropIC       *widget.Icon
+	logo         paint.ImageOp // About + branding, from assets/icons
 
 	sidebarW float32
 	split    splitDrag

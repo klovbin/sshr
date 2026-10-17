@@ -19,7 +19,7 @@ import (
 func layoutSettings(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layoutAboutSection(gtx, th)
+			return layoutAboutSection(gtx, th, s)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -129,7 +129,7 @@ func layoutConnectionSection(gtx layout.Context, th *material.Theme, s *state) l
 	)
 }
 
-func layoutAboutSection(gtx layout.Context, th *material.Theme) layout.Dimensions {
+func layoutAboutSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body1(th, "About")
@@ -144,8 +144,17 @@ func layoutAboutSection(gtx layout.Context, th *material.Theme) layout.Dimension
 					size := image.Pt(sz, sz)
 					radius := gtx.Dp(unit.Dp(12))
 					defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
-					paint.Fill(gtx.Ops, colPanel)
-					return layout.Dimensions{Size: size}
+					if s.logo.Size() == (image.Point{}) {
+						paint.Fill(gtx.Ops, colPanel)
+						return layout.Dimensions{Size: size}
+					}
+					gtx.Constraints.Min = size
+					gtx.Constraints.Max = size
+					return widget.Image{
+						Src:      s.logo,
+						Fit:      widget.Cover,
+						Position: layout.Center,
+					}.Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(14)}.Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
