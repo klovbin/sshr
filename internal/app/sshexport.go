@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -291,15 +290,20 @@ func (s *Store) editUserConfig(add bool) error {
 	want := s.includeLine()
 	var kept []string
 	found := false
-	sc := bufio.NewScanner(bytes.NewReader(old))
-	for sc.Scan() {
-		if strings.TrimSpace(sc.Text()) == want {
+	// split by hand, bufio.Scanner stops at a line over 64 KiB and the
+	// rewrite would drop the rest of the file
+	var lines []string
+	if text := strings.TrimSuffix(string(old), "\n"); text != "" {
+		lines = strings.Split(text, "\n")
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == want {
 			found = true
 			if !add {
 				continue
 			}
 		}
-		kept = append(kept, sc.Text())
+		kept = append(kept, line)
 	}
 	if add == found {
 		return nil

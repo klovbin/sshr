@@ -153,3 +153,29 @@ func TestExportLeavesLinkedConfig(t *testing.T) {
 		t.Fatal("export not written when only the Include line is left")
 	}
 }
+
+func TestExportKeepsLongConfigLines(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config")
+	long := "# " + strings.Repeat("x", 100<<10)
+	orig := "Host a\r\n" + long + "\nHost b\n  HostName 10.0.0.2\n"
+	os.WriteFile(cfg, []byte(orig), 0o600)
+	old := sshConfigFile
+	sshConfigFile = cfg
+	defer func() { sshConfigFile = old }()
+	s := &Store{Dir: filepath.Join(dir, "hosts"), SSHConfigOut: filepath.Join(dir, "ssh_config")}
+	os.MkdirAll(s.Dir, 0o700)
+	if _, err := s.InstallSSHConfig(); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(cfg)
+	if want := s.includeLine() + "\n" + orig; string(b) != want {
+		t.Fatalf("install changed the rest of the file, got %d bytes, want %d", len(b), len(want))
+	}
+	if err := s.UninstallSSHConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != orig {
+		t.Fatalf("uninstall did not restore the file, got %d bytes, want %d", len(b), len(orig))
+	}
+}
