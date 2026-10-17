@@ -543,11 +543,12 @@ func (s *Store) Duplicate(id, name string) (*Host, error) {
 		return nil, err
 	}
 	h := *cur
-	if err := Unlock(&h); err != nil && h.PasswordMode == PasswordSaved {
-		return nil, err
-	}
-	if h.PasswordMode == PasswordOnePassword {
-		h.Password = ""
+	// only a password sealed by sshr has to be opened and sealed again, a
+	// password manager entry keeps its reference and is not read at all
+	if h.PasswordMode == PasswordSaved {
+		if err := Unlock(&h); err != nil {
+			return nil, err
+		}
 	}
 	if h.KeyMode == KeyVault && h.KeySealed != "" {
 		plain, err := unseal(h.KeySealed, h.ID, "key")

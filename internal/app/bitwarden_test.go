@@ -123,3 +123,22 @@ func TestManagerRefDroppedWhenDestinationChanges(t *testing.T) {
 		t.Errorf("an edit that keeps the destination lost the reference: %+v", out)
 	}
 }
+
+func TestDuplicateDoesNotReadManagerSecret(t *testing.T) {
+	dir := fakeBW(t)
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Host: "h", User: "u", PasswordMode: PasswordBitwarden, PasswordRef: "web1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.Duplicate(h.ID, "h copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "args")); err == nil {
+		t.Fatalf("Duplicate ran bw: %s", b)
+	}
+	if cp.PasswordMode != PasswordBitwarden || cp.PasswordRef != "web1" || cp.Password != "" {
+		t.Fatalf("copy = %+v", cp)
+	}
+}
