@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -71,22 +72,19 @@ func cmdRun(store *app.Store, args []string) {
 				fmt.Printf("== %s: skipped, it asks for its password every time\n", h.Name)
 				failed = append(failed, h.Name)
 			case err != nil:
+				// a stopped command still has the output it printed so far
 				fmt.Printf("== %s: %v\n", h.Name, err)
+				if res != nil {
+					writeOutput(os.Stdout, res)
+				}
 				failed = append(failed, h.Name)
 			default:
 				note := ""
-				if res.ExitCode == 124 {
-					note = ", stopped after " + strconv.Itoa(timeout) + " s"
-				}
 				if res.Truncated {
-					note += ", output cut at 64 KiB"
+					note = ", output cut at 64 KiB"
 				}
 				fmt.Printf("== %s (exit %d%s)\n", h.Name, res.ExitCode, note)
-				os.Stdout.Write(res.Stdout)
-				os.Stdout.Write(res.Stderr)
-				if n := len(res.Stdout) + len(res.Stderr); n > 0 && !strings.HasSuffix(string(res.Stdout)+string(res.Stderr), "\n") {
-					fmt.Println()
-				}
+				writeOutput(os.Stdout, res)
 				if res.ExitCode != 0 {
 					failed = append(failed, h.Name)
 				}
@@ -99,6 +97,15 @@ func cmdRun(store *app.Store, args []string) {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "%s, all succeeded\n", plural(len(hosts), "host"))
+}
+
+// writeOutput prints what the command wrote, ending with a newline
+func writeOutput(w io.Writer, res *app.RemoteResult) {
+	w.Write(res.Stdout)
+	w.Write(res.Stderr)
+	if n := len(res.Stdout) + len(res.Stderr); n > 0 && !strings.HasSuffix(string(res.Stdout)+string(res.Stderr), "\n") {
+		fmt.Fprintln(w)
+	}
 }
 
 // pickHosts returns the named hosts and the hosts having every tag, each

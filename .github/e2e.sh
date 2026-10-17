@@ -75,6 +75,9 @@ mcp inner 'echo via-jump-$((40+2))' | tee "$w/out2" | grep 'via-jump-42'
 "$sshr" tag inner +e2e
 # shellcheck disable=SC2016
 test "$("$sshr" run -t e2e -- 'echo run-$((40+2))' | grep -c '^run-42$')" = 2
+# a command stopped by --timeout still shows what it printed before
+"$sshr" run --timeout 2 key -- 'echo started-run; sleep 20' >"$w/out3" || true
+grep -q '^started-run$' "$w/out3"
 
 # send a folder through the jump host and get it back
 mkdir -p "$w/tree/sub"
