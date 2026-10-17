@@ -45,6 +45,7 @@ type formModal struct {
 	scrim         widget.Clickable
 	card          widget.Clickable
 	blockScrim    bool
+	list          widget.List // scrolls the form body when the card is tall
 }
 
 func (s *state) openDeleteConfirm(h sshrapp.Host) {
@@ -78,35 +79,7 @@ func (s *state) openEditForm(h sshrapp.Host) {
 	s.passEd.SetText("")
 	s.keyRefEd.SetText(h.KeyRef)
 	s.passRefEd.SetText(h.PasswordRef)
-	if h.KeyMode == sshrapp.KeyAgent {
-		s.authKind = authAgent
-		s.keyEd.SetText("")
-		s.agentEd.SetText(h.Agent)
-		s.agentKeyEd.SetText(h.KeyFingerprint())
-	} else if h.KeyMode == sshrapp.KeyOnePassword {
-		s.authKind = authOP
-		s.keyEd.SetText("")
-	} else if h.KeyMode == sshrapp.KeyBitwarden {
-		s.authKind = authBW
-		s.keyEd.SetText("")
-	} else if h.KeyMode == sshrapp.KeyVault {
-		s.authKind = authVault
-		s.keyEd.SetText("")
-		s.form.vaultKeyPrint = h.KeyFingerprint()
-		if s.form.vaultKeyPrint == "" {
-			s.form.vaultKeyPrint = "?"
-		}
-	} else if h.Key != "" {
-		s.authKind = authKey
-		s.keyEd.SetText(h.Key)
-	} else {
-		s.authKind = authPassword
-		s.keyEd.SetText("")
-		if h.PasswordMode == sshrapp.PasswordAsk || h.PasswordMode == sshrapp.PasswordOnePassword || h.PasswordMode == sshrapp.PasswordBitwarden {
-			s.passMode = h.PasswordMode
-		}
-		s.form.hasSavedPassword = h.PasswordMode == sshrapp.PasswordSaved
-	}
+	s.loadAuth(h)
 	s.passEd.Mask = '•'
 	s.jumpEd.SetText(h.Jump)
 	s.tagsEd.SetText(strings.Join(h.Tags, " "))
@@ -141,7 +114,8 @@ func layoutModals(gtx layout.Context, th *material.Theme, s *state) {
 
 // layoutModalCard draws scrim and card as Stack siblings.
 // Card Clickable sits above the scrim so in-card presses never dismiss.
-func layoutModalCard(gtx layout.Context, maxW unit.Dp, scrim, card *widget.Clickable, content layout.Widget) {
+// maxH caps the card height (0 = grow with content).
+func layoutModalCard(gtx layout.Context, maxW, maxH unit.Dp, scrim, card *widget.Clickable, content layout.Widget) {
 	layout.Stack{Alignment: layout.Center}.Layout(gtx,
 		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
 			return scrim.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -159,6 +133,14 @@ func layoutModalCard(gtx layout.Context, maxW unit.Dp, scrim, card *widget.Click
 			}
 			gtx.Constraints.Min.X = w
 			gtx.Constraints.Max.X = w
+			if maxH > 0 {
+				h := gtx.Dp(maxH)
+				vpad := gtx.Dp(unit.Dp(48))
+				if gtx.Constraints.Max.Y > vpad && h > gtx.Constraints.Max.Y-vpad {
+					h = gtx.Constraints.Max.Y - vpad
+				}
+				gtx.Constraints.Max.Y = h
+			}
 
 			return card.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return widget.Border{
@@ -187,7 +169,7 @@ func layoutConfirmModal(gtx layout.Context, th *material.Theme, s *state) {
 	if !s.modal.open {
 		return
 	}
-	layoutModalCard(gtx, unit.Dp(360), &s.modal.scrim, &s.modal.card, func(gtx layout.Context) layout.Dimensions {
+	layoutModalCard(gtx, unit.Dp(360), 0, &s.modal.scrim, &s.modal.card, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				t := material.H6(th, s.modal.title)
@@ -236,7 +218,8 @@ func layoutFormModal(gtx layout.Context, th *material.Theme, s *state) {
 	if s.form.editID != "" {
 		title = s.t("modal.edit.title")
 	}
-	layoutModalCard(gtx, unit.Dp(420), &s.form.scrim, &s.form.card, func(gtx layout.Context) layout.Dimensions {
+	s.form.list.Axis = layout.Vertical
+	layoutModalCard(gtx, unit.Dp(420), unit.Dp(640), &s.form.scrim, &s.form.card, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				t := material.H6(th, title)
@@ -244,17 +227,23 @@ func layoutFormModal(gtx layout.Context, th *material.Theme, s *state) {
 				return t.Layout(gtx)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layoutForm(gtx, th, s)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if s.form.err == "" {
-					return layout.Dimensions{}
-				}
-				return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					e := material.Caption(th, s.form.err)
-					e.Color = colErr
-					return e.Layout(gtx)
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return material.List(th, &s.form.list).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layoutForm(gtx, th, s)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if s.form.err == "" {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								e := material.Caption(th, s.form.err)
+								e.Color = colErr
+								return e.Layout(gtx)
+							})
+						}),
+					)
 				})
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),

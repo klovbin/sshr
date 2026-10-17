@@ -80,14 +80,15 @@ func (s *state) finishHealth() {
 }
 
 // healthColor is the color of a host's status
+var healthColors = map[string]color.NRGBA{
+	sshrapp.HealthUp:     colOK,
+	sshrapp.HealthDown:   colErr,
+	sshrapp.HealthNotSSH: colWarn,
+}
+
 func healthColor(state string) color.NRGBA {
-	switch state {
-	case sshrapp.HealthUp:
-		return colOK
-	case sshrapp.HealthDown:
-		return colErr
-	case sshrapp.HealthNotSSH:
-		return colWarn
+	if c, ok := healthColors[state]; ok {
+		return c
 	}
 	return colMutedSoft
 }

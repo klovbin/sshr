@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"errors"
 	"strings"
 
 	"gioui.org/app"
@@ -69,6 +68,8 @@ type state struct {
 	searchEd     widget.Editor // filters the host list
 	fwdEd        widget.Editor // one forward per line, "db -L 5432:localhost:5432"
 	authKind     authKind
+	authDropBtn  widget.Clickable
+	authOpen     bool
 	authPassBtn  widget.Clickable
 	authKeyBtn   widget.Clickable
 	authVaultBtn widget.Clickable
@@ -93,33 +94,33 @@ type state struct {
 	sessionTmuxBtn   widget.Clickable
 	sessionZellijBtn widget.Clickable
 
-	addBtn       widget.Clickable
-	settingsBtn  widget.Clickable
-	hostsBtn     widget.Clickable
-	backBtn      widget.Clickable
-	aboutBtn     widget.Clickable
-	langNavBtn   widget.Clickable
-	langBtns     []widget.Clickable
-	langDropBtn  widget.Clickable
-	langOpen     bool
-	moshBox      widget.Bool
-	reuseBox     widget.Bool
-	healthBox    widget.Bool
-	list         widget.List
-	hostDelBtns  []widget.Clickable // parallel to hosts
-	hostEditBtns []widget.Clickable // parallel to hosts
-	uploads      chan uploadResult  // finished image uploads from goroutines
-	importBtn    widget.Clickable
-	exportBox    widget.Bool
-	importing    bool
-	imports      chan importResult
-	uploading    bool
-	modal        confirmModal // delete confirm
-	form         formModal    // add/edit host
-	settingsIC   *widget.Icon
-	hostsIC      *widget.Icon
-	dropIC       *widget.Icon
-	logo         paint.ImageOp // About + branding, from assets/icons
+	addBtn      widget.Clickable
+	settingsBtn widget.Clickable
+	hostsBtn    widget.Clickable
+	backBtn     widget.Clickable
+	aboutBtn    widget.Clickable
+	langNavBtn  widget.Clickable
+	langBtns    []widget.Clickable
+	langDropBtn widget.Clickable
+	langOpen    bool
+	moshBox     widget.Bool
+	reuseBox    widget.Bool
+	healthBox   widget.Bool
+	list        widget.List
+	hostRows    []hostRowHit // parallel to hosts; secondary-click targets
+	hostMenu    hostContextMenu
+	uploads     chan uploadResult // finished image uploads from goroutines
+	importBtn   widget.Clickable
+	exportBox   widget.Bool
+	importing   bool
+	imports     chan importResult
+	uploading   bool
+	modal       confirmModal // delete confirm
+	form        formModal    // add/edit host
+	settingsIC  *widget.Icon
+	hostsIC     *widget.Icon
+	dropIC      *widget.Icon
+	logo        paint.ImageOp // About + branding, from assets/icons
 
 	sidebarW float32
 	split    splitDrag
@@ -128,7 +129,7 @@ type state struct {
 	err    string // list-level error (form errors live in form.err)
 
 	// allHosts is every saved host, hosts is what the search keeps of it,
-	// the row buttons follow hosts
+	// hostRows follows hosts
 	allHosts   []sshrapp.Host
 	lastSearch string
 
@@ -138,6 +139,22 @@ type state struct {
 	healthRes  chan map[string]sshrapp.Health
 	healthStop chan struct{}
 	healthKick chan struct{}
+}
+
+// hostRowHit is an event.Tag for secondary-click on one host row.
+type hostRowHit struct{}
+
+// hostContextMenu is the right-click Edit/Delete menu for one host.
+type hostContextMenu struct {
+	open   bool
+	hostID string
+	edit   widget.Clickable
+	del    widget.Clickable
+}
+
+func (m *hostContextMenu) close() {
+	m.open = false
+	m.hostID = ""
 }
 
 // splitDrag tracks sidebar resize via window-X pointer events.
@@ -170,9 +187,20 @@ func (s *state) reload() {
 func (s *state) applySearch() {
 	s.lastSearch = s.searchEd.Text()
 	s.hosts = sshrapp.Filter(s.allHosts, s.lastSearch)
-	if len(s.hostDelBtns) != len(s.hosts) {
-		s.hostDelBtns = make([]widget.Clickable, len(s.hosts))
-		s.hostEditBtns = make([]widget.Clickable, len(s.hosts))
+	if len(s.hostRows) != len(s.hosts) {
+		s.hostRows = make([]hostRowHit, len(s.hosts))
+	}
+	if s.hostMenu.open {
+		found := false
+		for _, h := range s.hosts {
+			if h.ID == s.hostMenu.hostID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.hostMenu.close()
+		}
 	}
 }
 
@@ -186,6 +214,7 @@ func (s *state) handle(gtx layout.Context) {
 	if s.hostsBtn.Clicked(gtx) {
 		s.screen = screenList
 		s.langOpen = false
+		s.hostMenu.close()
 		s.clearForm()
 		s.refreshStatus()
 	}
@@ -193,6 +222,7 @@ func (s *state) handle(gtx layout.Context) {
 		s.screen = screenSettings
 		s.settingsPane = settingsLanguage
 		s.langOpen = false
+		s.hostMenu.close()
 		s.err = ""
 	}
 	if s.aboutBtn.Clicked(gtx) {
@@ -212,6 +242,7 @@ func (s *state) handle(gtx layout.Context) {
 	}
 	if s.addBtn.Clicked(gtx) {
 		s.langOpen = false
+		s.hostMenu.close()
 		s.openAddForm()
 	}
 	if s.form.open {
@@ -234,58 +265,11 @@ func (s *state) handle(gtx layout.Context) {
 	if s.form.save.Clicked(gtx) {
 		s.saveHost()
 	}
-	if s.authPassBtn.Clicked(gtx) {
-		s.authKind = authPassword
+	if s.authDropBtn.Clicked(gtx) {
+		s.authOpen = !s.authOpen
 	}
-	if s.authKeyBtn.Clicked(gtx) {
-		s.authKind = authKey
-	}
-	if s.authVaultBtn.Clicked(gtx) {
-		s.authKind = authVault
-	}
-	if s.authOPBtn.Clicked(gtx) {
-		s.authKind = authOP
-	}
-	if s.authBWBtn.Clicked(gtx) {
-		s.authKind = authBW
-	}
-	if s.passBWBtn.Clicked(gtx) {
-		s.passMode = sshrapp.PasswordBitwarden
-	}
-	if s.authAgentBtn.Clicked(gtx) {
-		s.authKind = authAgent
-	}
-	if s.passOPBtn.Clicked(gtx) {
-		s.passMode = sshrapp.PasswordOnePassword
-	}
-	if s.passSavedBtn.Clicked(gtx) {
-		s.passMode = sshrapp.PasswordSaved
-	}
-	if s.passAskBtn.Clicked(gtx) {
-		s.passMode = sshrapp.PasswordAsk
-	}
-	if s.sessionOffBtn.Clicked(gtx) {
-		s.session = ""
-	}
-	if s.sessionTmuxBtn.Clicked(gtx) {
-		s.session = sshrapp.SessionTmux
-	}
-	if s.sessionZellijBtn.Clicked(gtx) {
-		s.session = sshrapp.SessionZellij
-	}
-	if s.moshBox.Update(gtx) {
-		s.settings.Mosh = s.moshBox.Value
-		_ = sshrapp.SaveSettings(s.settings)
-	}
-	if s.reuseBox.Update(gtx) {
-		s.settings.Reuse = s.reuseBox.Value
-		_ = sshrapp.SaveSettings(s.settings)
-	}
-	if s.healthBox.Update(gtx) {
-		s.settings.HealthCheck = s.healthBox.Value
-		_ = sshrapp.SaveSettings(s.settings)
-		s.setHealth(s.healthBox.Value)
-	}
+	s.clickChoices(gtx)
+	s.clickSettings(gtx)
 	s.finishHealth()
 	for i := range s.langBtns {
 		if s.langBtns[i].Clicked(gtx) {
@@ -293,15 +277,17 @@ func (s *state) handle(gtx layout.Context) {
 			s.langOpen = false
 		}
 	}
-	for i := range s.hostDelBtns {
-		if i >= len(s.hosts) {
-			break
+	s.handleHostRows(gtx)
+	if s.hostMenu.edit.Clicked(gtx) {
+		if h := s.hostByID(s.hostMenu.hostID); h != nil {
+			s.hostMenu.close()
+			s.openEditForm(*h)
 		}
-		if i < len(s.hostEditBtns) && s.hostEditBtns[i].Clicked(gtx) {
-			s.openEditForm(s.hosts[i])
-		}
-		if s.hostDelBtns[i].Clicked(gtx) {
-			s.openDeleteConfirm(s.hosts[i])
+	}
+	if s.hostMenu.del.Clicked(gtx) {
+		if h := s.hostByID(s.hostMenu.hostID); h != nil {
+			s.hostMenu.close()
+			s.openDeleteConfirm(*h)
 		}
 	}
 	if s.searchEd.Text() != s.lastSearch {
@@ -332,6 +318,59 @@ func (s *state) handle(gtx layout.Context) {
 	}
 	if s.modal.confirm.Clicked(gtx) {
 		s.confirmDelete()
+	}
+}
+
+func (s *state) hostByID(id string) *sshrapp.Host {
+	if id == "" {
+		return nil
+	}
+	for i := range s.hosts {
+		if s.hosts[i].ID == id {
+			return &s.hosts[i]
+		}
+	}
+	for i := range s.allHosts {
+		if s.allHosts[i].ID == id {
+			return &s.allHosts[i]
+		}
+	}
+	return nil
+}
+
+// handleHostRows opens/closes the host context menu from pointer presses.
+func (s *state) handleHostRows(gtx layout.Context) {
+	for i := range s.hostRows {
+		if i >= len(s.hosts) {
+			break
+		}
+		for {
+			ev, ok := gtx.Event(pointer.Filter{
+				Target: &s.hostRows[i],
+				Kinds:  pointer.Press,
+			})
+			if !ok {
+				break
+			}
+			e, ok := ev.(pointer.Event)
+			if !ok {
+				continue
+			}
+			id := s.hosts[i].ID
+			switch {
+			case e.Buttons.Contain(pointer.ButtonSecondary):
+				if s.hostMenu.open && s.hostMenu.hostID == id {
+					s.hostMenu.close()
+				} else {
+					s.hostMenu.open = true
+					s.hostMenu.hostID = id
+				}
+			case e.Buttons.Contain(pointer.ButtonPrimary):
+				if s.hostMenu.open {
+					s.hostMenu.close()
+				}
+			}
+		}
 	}
 }
 
@@ -382,6 +421,7 @@ func (s *state) clearForm() {
 	s.fwdEd.SetText("")
 	s.session = ""
 	s.authKind = authPassword
+	s.authOpen = false
 	s.passMode = sshrapp.PasswordSaved
 	s.keyPasteEd.SetText("")
 	s.keyPassEd.SetText("")
@@ -392,33 +432,6 @@ func (s *state) clearForm() {
 	s.form.editID = ""
 	s.form.vaultKeyPrint = ""
 	s.form.hasSavedPassword = false
-}
-
-func (s *state) mapErr(err error) string {
-	switch {
-	case errors.Is(err, sshrapp.ErrHostEmpty):
-		return s.t("err.host_empty")
-	case errors.Is(err, sshrapp.ErrUserRequired):
-		return s.t("err.user_required")
-	case errors.Is(err, sshrapp.ErrPortInvalid):
-		return s.t("err.port_invalid")
-	case errors.Is(err, sshrapp.ErrNotFound):
-		return s.t("err.not_found")
-	case errors.Is(err, sshrapp.ErrNoKeychain):
-		return s.t("err.noKeychain")
-	case errors.Is(err, sshrapp.ErrPasswordRequired):
-		return s.t("err.password_required")
-	case errors.Is(err, sshrapp.ErrAsksPassword):
-		return s.t("err.asksPassword")
-	case errors.Is(err, sshrapp.ErrKeyPassphrase):
-		return s.t("err.keyPassphrase")
-	case errors.Is(err, sshrapp.ErrKeyRequired):
-		return s.t("err.keyPaste_required")
-	case errors.Is(err, sshrapp.ErrNoOP):
-		return s.t("err.noOP")
-	default:
-		return err.Error()
-	}
 }
 
 // editedHost is the saved host the form edits, nil for a new one
@@ -441,82 +454,10 @@ func (s *state) saveHost() {
 		}
 		port = n
 	}
-	key := ""
-	password := ""
-	passMode := ""
-	keyMode, passphrase, keyRef, passRef := "", "", "", ""
-	agentName, agentKey, keyPub := "", "", ""
-	var keyData []byte
-	if s.authKind == authAgent {
-		keyMode = sshrapp.KeyAgent
-		agentName = strings.TrimSpace(s.agentEd.Text())
-		agentKey = strings.TrimSpace(s.agentKeyEd.Text())
-		// the key chosen before is kept without asking the agent again
-		if cur := s.editedHost(); cur != nil && cur.KeyMode == sshrapp.KeyAgent && cur.Agent == agentName && agentKey != "" && agentKey == cur.KeyFingerprint() {
-			agentKey, keyPub = "", cur.KeyPub
-		}
-	} else if s.authKind == authOP {
-		keyMode = sshrapp.KeyOnePassword
-		keyRef = strings.TrimSpace(s.keyRefEd.Text())
-		if keyRef == "" {
-			s.form.err = s.t("err.opRef_required")
-			return
-		}
-	} else if s.authKind == authBW {
-		keyMode = sshrapp.KeyBitwarden
-		keyRef = strings.TrimSpace(s.keyRefEd.Text())
-		if keyRef == "" {
-			s.form.err = s.t("err.bwRef_required")
-			return
-		}
-		if cur := s.editedHost(); cur != nil && cur.KeyMode == sshrapp.KeyBitwarden && cur.KeyRef == keyRef {
-			keyPub = cur.KeyPub
-		}
-	} else if s.authKind == authVault {
-		keyMode = sshrapp.KeyVault
-		if t := strings.TrimSpace(s.keyPasteEd.Text()); t != "" {
-			keyData = []byte(t)
-			passphrase = s.keyPassEd.Text()
-		} else if s.form.vaultKeyPrint == "" {
-			s.form.err = s.t("err.keyPaste_required")
-			return
-		}
-	} else if s.authKind == authKey {
-		key = strings.TrimSpace(s.keyEd.Text())
-		if key == "" {
-			s.form.err = s.t("err.key_required")
-			return
-		}
-		key = sshrapp.ExpandHome(key)
-		if err := sshrapp.CheckPrivateKey(key); err != nil {
-			s.form.err = err.Error()
-			return
-		}
-	} else if s.passMode == sshrapp.PasswordAsk {
-		passMode = sshrapp.PasswordAsk
-	} else if s.passMode == sshrapp.PasswordBitwarden {
-		passMode = sshrapp.PasswordBitwarden
-		passRef = strings.TrimSpace(s.passRefEd.Text())
-		if passRef == "" {
-			s.form.err = s.t("err.bwRef_required")
-			return
-		}
-	} else if s.passMode == sshrapp.PasswordOnePassword {
-		passMode = sshrapp.PasswordOnePassword
-		passRef = strings.TrimSpace(s.passRefEd.Text())
-		password = s.passEd.Text()
-		if passRef == "" && password == "" {
-			s.form.err = s.t("err.opPassword_required")
-			return
-		}
-	} else {
-		passMode = sshrapp.PasswordSaved
-		// kept as typed, spaces at the ends can be part of a password
-		password = s.passEd.Text()
-		if password == "" && !s.form.hasSavedPassword {
-			s.form.err = s.t("err.password_required")
-			return
-		}
+	var d authDraft
+	if msg := s.applyAuth(&d); msg != "" {
+		s.form.err = msg
+		return
 	}
 	forwards, err := sshrapp.ParseForwards(s.fwdEd.Text())
 	if err != nil {
@@ -529,17 +470,17 @@ func (s *state) saveHost() {
 		Host:          s.hostEd.Text(),
 		User:          s.userEd.Text(),
 		Port:          port,
-		Key:           key,
-		KeyMode:       keyMode,
-		KeyData:       keyData,
-		KeyPassphrase: passphrase,
-		KeyRef:        keyRef,
-		Agent:         agentName,
-		AgentKey:      agentKey,
-		KeyPub:        keyPub,
-		PasswordRef:   passRef,
-		PasswordMode:  passMode,
-		Password:      password,
+		Key:           d.key,
+		KeyMode:       d.keyMode,
+		KeyData:       d.keyData,
+		KeyPassphrase: d.passphrase,
+		KeyRef:        d.keyRef,
+		Agent:         d.agentName,
+		AgentKey:      d.agentKey,
+		KeyPub:        d.keyPub,
+		PasswordRef:   d.passRef,
+		PasswordMode:  d.passMode,
+		Password:      d.password,
 		Jump:          s.jumpEd.Text(),
 		Session:       s.session,
 		Forwards:      forwards,

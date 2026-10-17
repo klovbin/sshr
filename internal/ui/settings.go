@@ -12,6 +12,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
+	sshrapp "sshr.dev/internal/app"
 	"sshr.dev/internal/i18n"
 )
 
@@ -81,52 +82,66 @@ func layoutImportSection(gtx layout.Context, th *material.Theme, s *state) layou
 // layoutConnectionSection holds connect options; each one carries a short
 // note on what it does and what it costs.
 func layoutConnectionSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	rows := s.settingRows()
+	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Body1(th, s.t("settings.connection"))
 			l.Font.Weight = 600
 			return l.Layout(gtx)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+	}
+	for i, row := range rows {
+		row := row
+		if i > 0 {
+			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout))
+		}
+		children = append(children, layoutCheckRow(th, row)...)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+type checkRow struct {
+	box         *widget.Bool
+	label, hint string
+	set         func(*state, bool)
+}
+
+func (s *state) clickSettings(gtx layout.Context) {
+	for _, row := range s.settingRows() {
+		if row.box.Update(gtx) {
+			row.set(s, row.box.Value)
+			_ = sshrapp.SaveSettings(s.settings)
+		}
+	}
+}
+
+func (s *state) settingRows() []checkRow {
+	return []checkRow{
+		{box: &s.moshBox, label: s.t("settings.mosh"), hint: s.t("settings.mosh.hint"), set: func(s *state, v bool) { s.settings.Mosh = v }},
+		{box: &s.reuseBox, label: s.t("settings.reuse"), hint: s.t("settings.reuse.hint"), set: func(s *state, v bool) { s.settings.Reuse = v }},
+		{box: &s.healthBox, label: s.t("settings.health"), hint: s.t("settings.health.hint"), set: func(s *state, v bool) {
+			s.settings.HealthCheck = v
+			s.setHealth(v)
+		}},
+	}
+}
+
+func layoutCheckRow(th *material.Theme, row checkRow) []layout.FlexChild {
+	return []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			cb := material.CheckBox(th, &s.moshBox, s.t("settings.mosh"))
+			cb := material.CheckBox(th, row.box, row.label)
 			cb.Color = colFG
 			cb.IconColor = colAccent
 			return cb.Layout(gtx)
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Caption(th, s.t("settings.mosh.hint"))
+			l := material.Caption(th, row.hint)
 			l.Color = colMuted
 			return l.Layout(gtx)
 		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			cb := material.CheckBox(th, &s.reuseBox, s.t("settings.reuse"))
-			cb.Color = colFG
-			cb.IconColor = colAccent
-			return cb.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Caption(th, s.t("settings.reuse.hint"))
-			l.Color = colMuted
-			return l.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			cb := material.CheckBox(th, &s.healthBox, s.t("settings.health"))
-			cb.Color = colFG
-			cb.IconColor = colAccent
-			return cb.Layout(gtx)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Caption(th, s.t("settings.health.hint"))
-			l.Color = colMuted
-			return l.Layout(gtx)
-		}),
-	)
+	}
 }
 
 func layoutAboutSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
