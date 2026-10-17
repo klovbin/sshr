@@ -1,0 +1,8 @@
+What it is for: one stolen device must not make the others read their
+secrets and send them to its server
+
+Why it helps: sync cannot turn into a way to collect your passwords
+
+Why this way: a synced password is a value you typed, a reference points
+at a secret only this machine can read, so only the machine itself may
+set it
