@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+// OPLinkedAccount is one 1Password account the user authorized in settings.
+type OPLinkedAccount struct {
+	Ref   string `json:"ref"`
+	Email string `json:"email,omitempty"`
+}
+
+// Label is the account name shown in the UI.
+func (a OPLinkedAccount) Label() string {
+	if a.Email != "" {
+		return a.Email
+	}
+	return a.Ref
+}
+
 // Settings is ~/.sshr/settings.json (language, etc.).
 type Settings struct {
 	Lang string `json:"lang"`
@@ -24,9 +38,12 @@ type Settings struct {
 	// keeps its password in 1Password, empty means the account's default
 	// vault
 	OPVault string `json:"op_vault,omitempty"`
-	// OPAccount is the 1Password account (url, email or uuid) chosen when the
-	// user connects CLI integration in settings, empty lets op pick
+	// OPAccount is the default 1Password account for OP_ACCOUNT (url, email or uuid)
 	OPAccount string `json:"op_account,omitempty"`
+	// OPEmail is the human label for OPAccount (legacy; prefer OPAccounts)
+	OPEmail string `json:"op_email,omitempty"`
+	// OPAccounts are all linked 1Password accounts (user can add several)
+	OPAccounts []OPLinkedAccount `json:"op_accounts,omitempty"`
 	// MCPCommands lets AI assistants run commands on saved hosts through
 	// sshr mcp, off by default: an assistant that can run commands on every
 	// server can also break them, most clients ask before each tool call,
@@ -84,10 +101,67 @@ func LoadSettings() (Settings, error) {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return Settings{Lang: "ru"}, err
 	}
-	if s.Lang == "" {
-		s.Lang = "ru"
+		if s.Lang == "" {
+			s.Lang = "ru"
+		}
+		s.NormalizeOPAccounts()
+		return s, nil
 	}
-	return s, nil
+
+// NormalizeOPAccounts migrates legacy OPAccount/OPEmail into OPAccounts.
+func (s *Settings) NormalizeOPAccounts() {
+	if len(s.OPAccounts) == 0 && s.OPAccount != "" {
+		s.OPAccounts = []OPLinkedAccount{{Ref: s.OPAccount, Email: s.OPEmail}}
+	}
+	for i := range s.OPAccounts {
+		if s.OPAccounts[i].Ref == "" {
+			s.OPAccounts[i].Ref = s.OPAccounts[i].Email
+		}
+	}
+	if s.OPAccount == "" && len(s.OPAccounts) > 0 {
+		s.OPAccount = s.OPAccounts[0].Ref
+		s.OPEmail = s.OPAccounts[0].Email
+	}
+}
+
+// HasOPAccount reports whether any 1Password account is linked.
+func (s Settings) HasOPAccount() bool {
+	return len(s.OPAccounts) > 0 || s.OPAccount != ""
+}
+
+// AddOPAccount links an account (no-op if Ref already present). Sets it as default.
+func (s *Settings) AddOPAccount(ref, email string) {
+	s.NormalizeOPAccounts()
+	for i, a := range s.OPAccounts {
+		if a.Ref == ref || (email != "" && a.Email == email) {
+			if email != "" {
+				s.OPAccounts[i].Email = email
+			}
+			s.OPAccount = s.OPAccounts[i].Ref
+			s.OPEmail = s.OPAccounts[i].Email
+			return
+		}
+	}
+	s.OPAccounts = append(s.OPAccounts, OPLinkedAccount{Ref: ref, Email: email})
+	s.OPAccount = ref
+	s.OPEmail = email
+}
+
+// RemoveOPAccount drops the account at i and fixes the default.
+func (s *Settings) RemoveOPAccount(i int) {
+	s.NormalizeOPAccounts()
+	if i < 0 || i >= len(s.OPAccounts) {
+		return
+	}
+	was := s.OPAccounts[i].Ref
+	s.OPAccounts = append(s.OPAccounts[:i], s.OPAccounts[i+1:]...)
+	if s.OPAccount == was {
+		s.OPAccount, s.OPEmail = "", ""
+		if len(s.OPAccounts) > 0 {
+			s.OPAccount = s.OPAccounts[0].Ref
+			s.OPEmail = s.OPAccounts[0].Email
+		}
+	}
 }
 
 func SaveSettings(s Settings) error {

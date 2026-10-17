@@ -93,11 +93,14 @@ func loop(w *app.Window) error {
 		logo:             logo,
 		win:              w,
 	}
-	s.moshBox.Value = settings.Mosh
-	s.reuseBox.Value = settings.Reuse
-	s.healthBox.Value = settings.HealthCheck
-	s.setHealth(settings.HealthCheck)
-	s.exportBox.Value = store.SSHConfigExported()
+		s.moshBox.Value = settings.Mosh
+		s.reuseBox.Value = settings.Reuse
+		s.healthBox.Value = settings.HealthCheck
+		s.setHealth(settings.HealthCheck)
+		s.exportBox.Value = store.SSHConfigExported()
+		if label := opAccountLabel(settings); label != "" {
+			s.opMsg = locale.T("status.opConnected", label)
+		}
 	s.nameEd.SingleLine = true
 	s.hostEd.SingleLine = true
 	s.userEd.SingleLine = true

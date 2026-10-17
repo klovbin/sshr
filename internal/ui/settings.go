@@ -88,31 +88,80 @@ func layoutIntegrations(gtx layout.Context, th *material.Theme, s *state) layout
 }
 
 func layoutOPSection(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
-	label := s.t("btn.opConnect")
+	connected := s.settings.HasOPAccount()
+	chip := s.t("btn.opConnect")
+	chipActive := true
 	if s.opConnecting {
-		label = s.t("status.opConnecting")
-	} else if s.settings.OPAccount != "" {
-		label = s.t("btn.opReconnect")
+		chip = s.t("status.opConnecting")
+		chipActive = false
+	} else if connected {
+		chip = s.t("btn.opReconnect")
+		chipActive = false
 	}
+	account := opAccountLabel(s.settings)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layoutNote(th, s.t("settings.op.title"), s.t("settings.op.hint")),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if s.settings.OPAccount == "" {
+			// Whole card opens the account modal; the chip is visual only.
+			return s.opSignInBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Background{}.Layout(gtx,
+					func(gtx layout.Context) layout.Dimensions {
+						bg := colPanel
+						if s.opSignInBtn.Hovered() {
+							bg = colHover
+						}
+						r := gtx.Dp(unit.Dp(14))
+						defer clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, r).Push(gtx.Ops).Pop()
+						paint.Fill(gtx.Ops, bg)
+						return layout.Dimensions{Size: gtx.Constraints.Min}
+					},
+					func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(14)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layoutOPMark(gtx, unit.Dp(44))
+								}),
+								layout.Rigid(layout.Spacer{Width: unit.Dp(14)}.Layout),
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											t := material.Body1(th, s.t("settings.op.title"))
+											t.Font.Weight = 600
+											t.Color = colFG
+											return t.Layout(gtx)
+										}),
+										layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if account != "" {
+												l := material.Caption(th, s.t("settings.op.connected", account))
+												l.Color = colOK
+												return l.Layout(gtx)
+											}
+											l := material.Caption(th, s.t("settings.op.hint"))
+											l.Color = colMuted
+											return l.Layout(gtx)
+										}),
+									)
+								}),
+								layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layoutOPChip(gtx, th, chip, chipActive)
+								}),
+							)
+						})
+					},
+				)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if s.opModal.open {
 				return layout.Dimensions{}
 			}
-			l := material.Caption(th, s.t("settings.op.connected", s.settings.OPAccount))
-			l.Color = colOK
-			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, l.Layout)
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			b := material.Button(th, &s.opSignInBtn, label)
-			b.Background = colAccent
-			return b.Layout(gtx)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			msg := s.opMsg
 			if msg == "" {
+				return layout.Dimensions{}
+			}
+			// Success line lives in the card via settings; skip duplicate.
+			if !s.opConnecting && s.err == "" && account != "" {
 				return layout.Dimensions{}
 			}
 			c := colMuted
@@ -123,8 +172,37 @@ func layoutOPSection(gtx layout.Context, th *material.Theme, s *state) layout.Di
 			}
 			l := material.Caption(th, msg)
 			l.Color = c
-			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, l.Layout)
+			return layout.Inset{Top: unit.Dp(8), Left: unit.Dp(4)}.Layout(gtx, l.Layout)
 		}),
+	)
+}
+
+// layoutOPChip is a non-clickable status/action pill on the 1Password card.
+func layoutOPChip(gtx layout.Context, th *material.Theme, label string, active bool) layout.Dimensions {
+	bg := colAccent
+	fg := colWhite
+	if !active {
+		bg = colBorder
+		fg = colMuted
+	}
+	return layout.Background{}.Layout(gtx,
+		func(gtx layout.Context) layout.Dimensions {
+			r := gtx.Dp(unit.Dp(8))
+			defer clip.UniformRRect(image.Rectangle{Max: gtx.Constraints.Min}, r).Push(gtx.Ops).Pop()
+			paint.Fill(gtx.Ops, bg)
+			return layout.Dimensions{Size: gtx.Constraints.Min}
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{
+				Top: unit.Dp(8), Bottom: unit.Dp(8),
+				Left: unit.Dp(16), Right: unit.Dp(16),
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Label(th, unit.Sp(13), label)
+				l.Color = fg
+				l.Font.Weight = 600
+				return l.Layout(gtx)
+			})
+		},
 	)
 }
 
