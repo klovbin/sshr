@@ -32,7 +32,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - a new device is trusted only after comparing its fingerprint on both screens, the invite code carries the inviting device's fingerprint, so the server can neither add its own device nor impersonate the inviter
 - saved passwords travel inside the encryption and are sealed again on the receiving machine, private keys kept in sshr never leave their device
 - 1Password and Bitwarden references never sync, a host from another device keeps the reference set on this machine only while its address, user, port and jump stay the same, otherwise it falls back to asking, otherwise one stolen device could point every other device at a different 1Password item and collect it
-- removing a device rotates the vault key, re-encrypts every host and revokes its token
+- removing a device rotates the vault key, re-encrypts every host and revokes its token, the new key is delivered to the other devices only after the manifest without that device is written, a removal that loses the race to another push plans again from the newer state, a delivery cut short resumes on the next sync of that device and the others wait for it
 - limits: a new device trusts whatever the server shows first, a server can show two devices different histories (compare the state fingerprint in `sshr sync status`), the server sees host count, push times, addresses and device names, and can hold back changes, a removed device keeps what it downloaded
 
 ## Sync server

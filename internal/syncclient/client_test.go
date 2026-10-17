@@ -3,7 +3,10 @@ package syncclient
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -527,5 +530,141 @@ func TestSyncTwoRotationsWhileOffline(t *testing.T) {
 	}
 	if h, _ := c.Store.Find(web.ID); h == nil || h.Port != 2222 {
 		t.Fatalf("change after the rotations not applied: %+v", h)
+	}
+}
+
+// hookRT lets a test act on a request before it reaches the server, a
+// non-nil response or error from before replaces the server's answer
+type hookRT struct {
+	before func(*http.Request) (*http.Response, error)
+}
+
+func (h hookRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	if resp, err := h.before(r); resp != nil || err != nil {
+		return resp, err
+	}
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func answer(code int) *http.Response {
+	return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}
+}
+
+func isManifestPut(r *http.Request) bool {
+	return r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/manifest")
+}
+
+func isEnvelopePut(r *http.Request) bool {
+	return r.Method == "PUT" && strings.Contains(r.URL.Path, "/envelopes/")
+}
+
+func TestRemoveDeviceRetriesALostRace(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	c := w.client("c-")
+	w.join(c)
+	raced, committed := false, false
+	envelopesBefore := 0
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		switch {
+		case isManifestPut(r) && !raced:
+			// b pushes first, the manifest of a loses
+			raced = true
+			h, err := w.b.Store.Find(web.ID)
+			must(t, err)
+			h.Port = 2222
+			_, err = w.b.Store.Update(web.ID, *h)
+			must(t, err)
+			must(t, w.b.Push())
+		case isManifestPut(r):
+			committed = true
+		case isEnvelopePut(r) && !committed:
+			envelopesBefore++
+		}
+		return nil, nil
+	}}}
+	if _, err := w.a.RemoveDevice(c.st.DeviceID[:8]); err != nil {
+		t.Fatalf("remove after a lost race: %v\n%s", err, w.log.String())
+	}
+	if envelopesBefore != 0 {
+		t.Errorf("%d envelopes written before the manifest won", envelopesBefore)
+	}
+	for _, d := range w.a.st.Trusted {
+		if d.ID == c.st.DeviceID {
+			t.Fatal("the removed device is still trusted")
+		}
+	}
+	if w.a.st.Epoch != 2 || w.a.st.Rotation != nil {
+		t.Fatalf("epoch %d, rotation %+v", w.a.st.Epoch, w.a.st.Rotation)
+	}
+	must(t, w.b.Pull())
+	if w.b.st.Epoch != 2 {
+		t.Fatalf("b is on epoch %d", w.b.st.Epoch)
+	}
+	if h, _ := w.a.Store.Find(web.ID); h == nil || h.Port != 2222 {
+		t.Fatalf("the change of b was lost: %+v", h)
+	}
+	if strings.Contains(w.log.String(), "conflict") {
+		t.Fatalf("the retry made conflicts:\n%s", w.log.String())
+	}
+}
+
+func TestRemoveDeviceGivesUpCleanly(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		switch {
+		case isManifestPut(r):
+			return answer(http.StatusPreconditionFailed), nil
+		case isEnvelopePut(r):
+			t.Error("an envelope was written though no manifest won")
+		}
+		return nil, nil
+	}}}
+	if _, err := w.a.RemoveDevice(c.st.DeviceID[:8]); err == nil {
+		t.Fatal("remove reported success though every push lost")
+	}
+	if w.a.st.Epoch != 1 || w.a.st.Rotation != nil {
+		t.Fatalf("epoch %d, rotation %+v", w.a.st.Epoch, w.a.st.Rotation)
+	}
+	if _, ok, _ := app.SecretGet(w.a.prefix() + "key-pending"); ok {
+		t.Error("key-pending left in the keychain")
+	}
+	w.a.HTTP = nil
+	must(t, w.a.Pull())
+	must(t, c.Pull())
+}
+
+func TestRemoveDeviceFinishesAfterACrash(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	committed := false
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if isManifestPut(r) {
+			committed = true
+		}
+		if committed && isEnvelopePut(r) {
+			return nil, errors.New("cut off")
+		}
+		return nil, nil
+	}}}
+	if _, err := w.a.RemoveDevice(c.st.DeviceID[:8]); err == nil || !strings.Contains(err.Error(), "not delivered") {
+		t.Fatalf("remove with no envelope delivered = %v", err)
+	}
+	if err := w.b.Pull(); !errors.Is(err, ErrKeyPending) {
+		t.Fatalf("b before the key arrives = %v", err)
+	}
+	w.a.HTTP = nil
+	must(t, w.a.Pull())
+	must(t, w.b.Pull())
+	if w.b.st.Epoch != 2 {
+		t.Fatalf("b is on epoch %d", w.b.st.Epoch)
+	}
+	if _, ok, _ := app.SecretGet(w.a.prefix() + "key-pending"); ok {
+		t.Error("key-pending left in the keychain")
 	}
 }
