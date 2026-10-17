@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -26,12 +27,18 @@ func SplitJump(spec string) []string {
 	return out
 }
 
+// hopRe is one jump hop: a saved host name or ID, or [user@]host[:port]
+// with an IPv6 address in brackets, nothing a shell, ssh config or a
+// %-token would read as more than a name, the hops end up in ProxyCommand,
+// which ssh runs with the shell, and in the ssh config export
+var hopRe = regexp.MustCompile(`^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9._][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$`)
+
 // normalizeJump checks a jump spec and returns it in canonical "a,b" form
 func normalizeJump(spec string) (string, error) {
 	parts := SplitJump(spec)
 	for _, p := range parts {
-		if strings.HasPrefix(p, "-") || strings.ContainsAny(p, " \t\"'%") {
-			return "", fmt.Errorf("invalid jump host %q", p)
+		if !hopRe.MatchString(p) {
+			return "", fmt.Errorf("invalid jump host %q, use a saved host name or ID, or [user@]host[:port]", p)
 		}
 	}
 	return strings.Join(parts, ","), nil
@@ -93,7 +100,12 @@ func (s *Store) resolveHop(part string) (h *Host, saved bool, err error) {
 // sshr itself as ProxyCommand instead, because -J would not pass that hop's
 // key or password
 func (s *Store) JumpArgs(h *Host) ([]string, error) {
-	parts := SplitJump(h.Jump)
+	// the host file may come from another device or an older version
+	spec, err := normalizeJump(h.Jump)
+	if err != nil {
+		return nil, err
+	}
+	parts := SplitJump(spec)
 	if len(parts) == 0 {
 		return nil, nil
 	}
@@ -114,7 +126,9 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	}
 	// ssh expands %-tokens in ProxyCommand, so a literal % must be doubled
 	exe = strings.ReplaceAll(exe, "%", "%%")
-	cmd := fmt.Sprintf("%q %s %s %%h %%p", exe, ProxyCommandName, strings.Join(parts, ","))
+	// the hops are checked by hopRe, quoting them as well keeps the shell
+	// out even if that check is ever loosened
+	cmd := fmt.Sprintf("%q %s %s %%h %%p", exe, ProxyCommandName, shQuote(strings.Join(parts, ",")))
 	return []string{"-o", "ProxyCommand=" + cmd}, nil
 }
 

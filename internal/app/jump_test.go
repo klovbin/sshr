@@ -1,0 +1,48 @@
+package app
+
+import (
+	"strings"
+	"testing"
+)
+
+// a jump hop from sync or the REST API must not reach the shell that runs
+// ProxyCommand or add lines to the ssh config export (#40)
+func TestJumpRejectsShellAndConfigInjection(t *testing.T) {
+	for _, bad := range []string{
+		"j1,a;touch${IFS}/tmp/p",
+		"j1,x\nHost=*\nPermitLocalCommand=yes",
+		"a|b", "a$(id)", "a`id`", "-oProxyCommand=x", "a b", "a'b", "a%h",
+	} {
+		if _, err := normalizeJump(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for _, ok := range []string{"bastion", "ops@gw:2222", "gw,bastion", "u@[::1]:22", "web.prod-1", "0123abcd"} {
+		if _, err := normalizeJump(ok); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
+	}
+	s := &Store{Dir: t.TempDir()}
+	if _, err := s.Add(Host{Host: "h", User: "u", PasswordMode: PasswordAsk, Jump: "j;id"}); err == nil {
+		t.Error("a host with a shell character in its jump was saved")
+	}
+	// a bad value already on disk is refused at connect too
+	if _, err := s.JumpArgs(&Host{Jump: "a\nLocalCommand=id"}); err == nil {
+		t.Error("JumpArgs used a bad jump from disk")
+	}
+}
+
+func TestProxyCommandQuotesHops(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	bastion, err := s.Add(Host{Name: "bastion", Host: "10.0.0.1", User: "u", PasswordMode: PasswordAsk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := s.JumpArgs(&Host{Jump: bastion.Name + ",gw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line := strings.Join(args, " "); !strings.Contains(line, " __proxy 'bastion,gw' %h %p") {
+		t.Fatalf("ProxyCommand = %s", line)
+	}
+}
