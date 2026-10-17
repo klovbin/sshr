@@ -1,0 +1,8 @@
+What it is for: hosts added in sshr should work in ssh, scp, rsync, git
+and editors
+
+Why it helps: no second list to maintain
+
+Why this way: one Include line in your file, everything else in sshr's
+own file, secrets and values that could add ssh options never get there,
+a linked config is not edited
