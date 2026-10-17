@@ -1,0 +1,9 @@
+What it is for: servers in private networks reachable only through a
+bastion
+
+Why it helps: one command instead of two logins, keys stay on your
+machine, forwards, copies, `run` and paste follow the same path
+
+Why this way: saved hops run through sshr as `ProxyCommand` so each logs
+in with its own key or password, a host with a saved password never uses
+`-J`, so a plain hop cannot see that password
