@@ -1,0 +1,8 @@
+What it is for: starting with the hosts you already have
+
+Why it helps: one command instead of retyping, running it again adds
+only new ones
+
+Why this way: each host is resolved with `ssh -G`, so `Match` and
+defaults come out exactly as ssh sees them, a parser of our own would
+differ
