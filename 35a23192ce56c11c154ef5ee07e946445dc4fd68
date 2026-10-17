@@ -1,0 +1,8 @@
+What it is for: sshr has to work on three systems the developers do not
+all use
+
+Why it helps: Windows and macOS bugs show up before users see them,
+several did
+
+Why this way: emulation (Wine) misses real Windows behavior, hosted
+runners are the real systems
