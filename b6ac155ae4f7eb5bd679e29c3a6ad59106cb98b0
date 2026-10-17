@@ -1,0 +1,8 @@
+What it is for: checking or fixing many servers at once
+
+Why it helps: one command instead of a loop of logins, a clear answer
+which host failed
+
+Why this way: each host uses its own login and jump, the command is
+stopped on the server after the timeout, hosts that ask for a password
+are skipped instead of hanging
