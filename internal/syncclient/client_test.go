@@ -435,3 +435,60 @@ func TestSyncUnreadableHostIsNotDeleted(t *testing.T) {
 		t.Errorf("no word about the broken file:\n%s", w.log.String())
 	}
 }
+
+// writeRaw edits a host file behind the Store, the way a newer sshr would
+// write a field this one does not know
+func writeRaw(t *testing.T, s *app.Store, id string, edit func(map[string]any)) {
+	t.Helper()
+	path := filepath.Join(s.Dir, id+".json")
+	b, err := os.ReadFile(path)
+	must(t, err)
+	var m map[string]any
+	must(t, json.Unmarshal(b, &m))
+	edit(m)
+	b, err = json.Marshal(m)
+	must(t, err)
+	must(t, os.WriteFile(path, b, 0o600))
+}
+
+func TestSyncImportErrorSkipsOneHost(t *testing.T) {
+	w := newWorld(t)
+	web, db := w.pair()
+	// db changes on both devices and b cannot take the version of a,
+	// whichever side wins the conflict, web changes on a only
+	h, err := w.b.Store.Find(db.ID)
+	must(t, err)
+	h.Port = 2201
+	_, err = w.b.Store.Update(db.ID, *h)
+	must(t, err)
+	writeRaw(t, w.a.Store, db.ID, func(m map[string]any) { m["password_mode"] = "from-the-future"; m["port"] = 2202 })
+	h, err = w.a.Store.Find(web.ID)
+	must(t, err)
+	h.Port = 2222
+	_, err = w.a.Store.Update(web.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	for i := 0; i < 2; i++ {
+		must(t, w.b.Pull())
+	}
+	if h, _ := w.b.Store.Find(web.ID); h == nil || h.Port != 2222 {
+		t.Fatalf("web did not sync past the host that failed: %+v\n%s", h, w.log.String())
+	}
+	hosts, _ := w.b.Store.List()
+	for _, h := range hosts {
+		if strings.Contains(h.Name, "(conflict ") {
+			t.Fatalf("a copy was left for a host that was not imported: %s", h.Name)
+		}
+	}
+	if !strings.Contains(w.log.String(), "skipped db") {
+		t.Errorf("no word about the skipped host:\n%s", w.log.String())
+	}
+	// a push from b keeps the version of a on the server
+	_, err = w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if h, _ := w.a.Store.Find(db.ID); h == nil || h.Port != 2202 {
+		t.Fatalf("the push of b undid the change of a: %+v", h)
+	}
+}

@@ -52,7 +52,11 @@ type state struct {
 	// trusts only it until it has verified its first manifest
 	Approver string                `json:"approver,omitempty"`
 	Entries  map[string]entryState `json:"entries"`
-	LastSync time.Time             `json:"last_sync"`
+	// Skipped are remote entries this device could not import (a mode of a
+	// newer sshr, a host that fails validation), a push carries them on
+	// unchanged and every pull tries them again
+	Skipped  map[string]syncproto.Entry `json:"skipped,omitempty"`
+	LastSync time.Time                  `json:"last_sync"`
 }
 
 // Client syncs one Store
@@ -643,6 +647,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	if err != nil {
 		return err
 	}
+	if c.st.Skipped == nil {
+		c.st.Skipped = map[string]syncproto.Entry{}
+	}
 	ids := make([]string, 0, len(m.Entries))
 	for id := range m.Entries {
 		ids = append(ids, id)
@@ -654,6 +661,8 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", id[:8], id)
 			continue
 		}
+		delete(c.st.Skipped, id)
+		var dup *app.Host
 		known, seen := c.st.Entries[id]
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
 		if seen && e.Lamport == known.Lamport && e.Device == known.Device {
@@ -683,7 +692,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 					p.Host, notes = app.FromOtherDevice(p.Host, nil)
 					cp, err := c.Store.Add(p.Host)
 					if err != nil {
-						return fmt.Errorf("keeping the other version of %s: %v", p.Host.Name, err)
+						c.st.Skipped[id] = e
+						c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+						continue
 					}
 					c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", id[:8], e.Device[:8], cp.Name)
 					for _, n := range notes {
@@ -705,9 +716,12 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			if err != nil {
 				return fmt.Errorf("keeping the local version of %s: %v", name, err)
 			}
-			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], cp.Name)
+			dup = cp
 		}
 		next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
+		if dup != nil && e.Deleted {
+			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], dup.Name)
+		}
 		if e.Deleted {
 			if _, ok := local[id]; ok {
 				if err := c.Store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
@@ -730,7 +744,17 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		_, notes := app.FromOtherDevice(p.Host, cur)
 		h, err := c.Store.Import(p.Host)
 		if err != nil {
-			return fmt.Errorf("host %s: %v", p.Host.Name, err)
+			// one host this version cannot take must not stop the others,
+			// the copy made for it goes too, the next pull makes it again
+			if dup != nil {
+				c.Store.Delete(dup.ID)
+			}
+			c.st.Skipped[id] = e
+			c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+			continue
+		}
+		if dup != nil {
+			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], dup.Name)
 		}
 		for _, n := range notes {
 			c.logf("%s: %s", h.Name, n)
@@ -840,8 +864,16 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		entries[id] = syncproto.Entry{Hash: e.Blob, Lamport: e.Lamport, Device: e.Device, Deleted: e.Deleted}
 		next[id] = e
 	}
+	// a skipped entry goes on as the other device wrote it, the host here
+	// is neither pushed over it nor deleted
+	for id, e := range c.st.Skipped {
+		entries[id] = e
+	}
 	changed := devices != nil || c.st.Counter == 0
 	for id, plain := range local {
+		if _, ok := c.st.Skipped[id]; ok {
+			continue
+		}
 		known, seen := c.st.Entries[id]
 		lh := c.localHash(plain)
 		if seen && !known.Deleted && known.Local == lh {
@@ -865,6 +897,9 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		changed = true
 	}
 	for id, known := range c.st.Entries {
+		if _, ok := c.st.Skipped[id]; ok {
+			continue
+		}
 		if broken[id] {
 			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", id[:8], id)
 			continue
