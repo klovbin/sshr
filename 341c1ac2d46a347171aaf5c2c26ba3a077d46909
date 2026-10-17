@@ -1,0 +1,7 @@
+What it is for: copying to hosts behind bastions or with agent keys
+without rebuilding scp options
+
+Why it helps: the same short command as connect, folders included
+
+Why this way: scp from OpenSSH behaves the way people know, the old
+protocol covers minimal servers
