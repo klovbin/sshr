@@ -461,8 +461,15 @@ func (s *Store) Import(in Host) (*Host, error) {
 // their fields to this list
 func FromOtherDevice(in Host, local *Host) (Host, []string) {
 	var notes []string
+	// a reference set here is only for the place it was set for, a host
+	// whose address, user, port or jump changed on the other device would
+	// carry this machine's secret to a new server
+	same := local != nil && sameDestination(in, *local)
+	if local != nil && !same && (local.PasswordRef != "" || local.KeyRef != "") {
+		notes = append(notes, "the host now points elsewhere ("+in.Dest()+"), the password manager reference set here is dropped, set it again if that is right")
+	}
 	if name := managerName(in.PasswordMode); name != "" {
-		if local != nil && local.PasswordMode == in.PasswordMode && local.PasswordRef != "" {
+		if same && local.PasswordMode == in.PasswordMode && local.PasswordRef != "" {
 			in.PasswordRef = local.PasswordRef
 		} else {
 			in.PasswordMode, in.PasswordRef = PasswordAsk, ""
@@ -472,7 +479,7 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 		in.PasswordRef = ""
 	}
 	if name := managerName(in.KeyMode); name != "" {
-		if local != nil && local.KeyMode == in.KeyMode && local.KeyRef != "" {
+		if same && local.KeyMode == in.KeyMode && local.KeyRef != "" {
 			in.KeyRef, in.KeyPub = local.KeyRef, local.KeyPub
 		} else {
 			in.KeyMode, in.KeyRef, in.KeyPub = "", "", ""
@@ -482,6 +489,22 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 		in.KeyRef = ""
 	}
 	return in, notes
+}
+
+// sameDestination tells whether two versions of a host go to the same
+// server the same way
+func sameDestination(a, b Host) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Host), strings.TrimSpace(b.Host)) &&
+		strings.TrimSpace(a.User) == strings.TrimSpace(b.User) &&
+		effectivePort(a.Port) == effectivePort(b.Port) &&
+		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "")
+}
+
+func effectivePort(p int) int {
+	if p == 0 {
+		return 22
+	}
+	return p
 }
 
 // managerName names the password manager a mode reads from, empty for

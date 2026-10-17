@@ -339,14 +339,26 @@ func TestSyncOnePasswordRefsStayLocal(t *testing.T) {
 	}
 	ah, _ := w.a.Store.Find(h.ID)
 	ain := *ah
+	ain.Tags = []string{"edited"}
+	_, err = w.a.Store.Update(h.ID, ain)
+	must(t, err)
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	got, _ = w.b.Store.Find(h.ID)
+	if !got.HasTag("edited") || got.PasswordRef != "op://Mine/server/password" {
+		t.Fatalf("b after a's edit: tags %v ref %q", got.Tags, got.PasswordRef)
+	}
+	// a's move to another port drops the reference b set (#42)
+	ah, _ = w.a.Store.Find(h.ID)
+	ain = *ah
 	ain.Port = 2200
 	_, err = w.a.Store.Update(h.ID, ain)
 	must(t, err)
 	must(t, w.a.Push())
 	must(t, w.b.Pull())
 	got, _ = w.b.Store.Find(h.ID)
-	if got.Port != 2200 || got.PasswordRef != "op://Mine/server/password" {
-		t.Fatalf("b after a's edit: port %d ref %q", got.Port, got.PasswordRef)
+	if got.Port != 2200 || got.PasswordRef != "" || got.PasswordMode != app.PasswordAsk {
+		t.Fatalf("b after a moved the host: port %d ref %q mode %q", got.Port, got.PasswordRef, got.PasswordMode)
 	}
 
 	// a forged payload with a reference, as an old or hostile client sends it

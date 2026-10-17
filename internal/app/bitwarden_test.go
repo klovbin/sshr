@@ -103,3 +103,23 @@ func TestBitwardenRefsStayLocal(t *testing.T) {
 		t.Fatalf("local reference lost: %+v", out)
 	}
 }
+
+// a stolen device must not send this machine's secret to a new address (#42)
+func TestManagerRefDroppedWhenDestinationChanges(t *testing.T) {
+	local := &Host{Host: "10.0.0.5", User: "deploy", Port: 22, PasswordMode: PasswordBitwarden, PasswordRef: "mine"}
+	for _, in := range []Host{
+		{Host: "attacker.example", User: "deploy", Port: 22, PasswordMode: PasswordBitwarden},
+		{Host: "10.0.0.5", User: "root", Port: 22, PasswordMode: PasswordBitwarden},
+		{Host: "10.0.0.5", User: "deploy", Port: 2222, PasswordMode: PasswordBitwarden},
+		{Host: "10.0.0.5", User: "deploy", Port: 22, Jump: "evil", PasswordMode: PasswordBitwarden},
+	} {
+		out, notes := FromOtherDevice(in, local)
+		if out.PasswordRef != "" || out.PasswordMode != PasswordAsk || len(notes) == 0 {
+			t.Errorf("%+v kept the reference: %+v", in, out)
+		}
+	}
+	out, _ := FromOtherDevice(Host{Host: "10.0.0.5", User: "deploy", PasswordMode: PasswordBitwarden, Tags: []string{"new"}}, local)
+	if out.PasswordRef != "mine" {
+		t.Errorf("an edit that keeps the destination lost the reference: %+v", out)
+	}
+}
