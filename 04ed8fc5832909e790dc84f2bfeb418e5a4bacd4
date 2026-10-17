@@ -1,0 +1,8 @@
+What it is for: the most common way to log in, with keys you already
+have
+
+Why it helps: a typo or a public key given by mistake fails when you
+save, not later at connect with a vague ssh error
+
+Why this way: ssh reads the file itself, sshr only passes `-i`, nothing
+is copied
