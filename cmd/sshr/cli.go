@@ -566,7 +566,16 @@ func run(h *app.Host, bin string, args ...string) int {
 		fatal(err)
 	}
 	defer cleanup()
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		fatal(err)
+	}
+	// a signal sent to sshr alone (kill, systemd stop) would end sshr and
+	// leave ssh running, a tunnel would keep its port, it goes to the child
+	// and sshr waits for it, Ctrl+C reaches both through the process group
+	stop := forwardSignals(cmd.Process)
+	err = cmd.Wait()
+	stop()
+	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
