@@ -633,8 +633,18 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		if err != nil {
 			return nil, err
 		}
-		if err := verifyMAC(sm, key); err != nil {
-			return nil, err
+		if verifyMAC(sm, key) != nil {
+			// the key cached in the keychain may be a wrong one, read the
+			// envelope on the server once more before giving up
+			if err := app.SecretDelete(c.prefix() + "key-" + strconv.Itoa(m.Epoch)); err != nil {
+				return nil, err
+			}
+			if key, err = c.vaultKey(m.Epoch); err != nil {
+				return nil, err
+			}
+			if err := verifyMAC(sm, key); err != nil {
+				return nil, err
+			}
 		}
 	}
 	inside := false

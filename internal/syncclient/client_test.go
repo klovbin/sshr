@@ -745,3 +745,24 @@ func TestSyncRotationResealsSkippedEntries(t *testing.T) {
 		t.Fatalf("d did not reach the entry:\n%s", w.log.String())
 	}
 }
+
+func TestSyncReplacesAWrongCachedKey(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	name := w.b.prefix() + "key-1"
+	good, _, err := app.SecretGet(name)
+	must(t, err)
+	must(t, app.SecretSet(name, bytes.Repeat([]byte{7}, 32)))
+	h, err := w.a.Store.Find(web.ID)
+	must(t, err)
+	h.Port = 2222
+	_, err = w.a.Store.Update(web.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	if err := w.b.Pull(); err != nil {
+		t.Fatalf("pull with a wrong cached key: %v", err)
+	}
+	if got, _, _ := app.SecretGet(name); !bytes.Equal(got, good) {
+		t.Error("the wrong key is still cached")
+	}
+}
