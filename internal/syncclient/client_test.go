@@ -703,3 +703,45 @@ func TestApproveDoesNotBringBackARemovedDevice(t *testing.T) {
 		t.Fatalf("d is on epoch %d, a on %d", d.st.Epoch, w.a.st.Epoch)
 	}
 }
+
+func TestSyncRotationResealsCarriedEntries(t *testing.T) {
+	w := newWorld(t)
+	web, db := w.pair()
+	c := w.client("c-")
+	w.join(c)
+	// b cannot load db, it still carries the entry when it changes the key
+	must(t, os.WriteFile(filepath.Join(w.b.Store.Dir, db.ID+".json"), []byte("{broken"), 0o600))
+	_, err := w.b.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	must(t, w.a.Pull())
+	// a device joining now reads every entry with the new key only
+	d := w.client("d-")
+	w.join(d)
+	for _, id := range []string{web.ID, db.ID} {
+		if _, err := d.Store.Find(id); err != nil {
+			t.Fatalf("host %s lost: %v", id[:8], err)
+		}
+	}
+}
+
+func TestSyncRotationResealsSkippedEntries(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	c := w.client("c-")
+	w.join(c)
+	// a writes a db that b cannot import, b carries it as skipped
+	writeRaw(t, w.a.Store, db.ID, func(m map[string]any) { m["password_mode"] = "from-the-future" })
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	if _, ok := w.b.st.Skipped[db.ID]; !ok {
+		t.Fatal("db is not skipped on b")
+	}
+	_, err := w.b.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	must(t, w.a.Pull())
+	d := w.client("d-")
+	w.join(d)
+	if !strings.Contains(w.log.String(), "skipped db") {
+		t.Fatalf("d did not reach the entry:\n%s", w.log.String())
+	}
+}

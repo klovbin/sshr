@@ -832,19 +832,41 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	return nil
 }
 
-// fetchPayload downloads and opens the blob of entry id
-func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch int) (*payload, error) {
-	code, blob, _, err := c.call("GET", "/blobs/"+e.Hash, nil, nil)
+// fetchBlob downloads the blob hash of entry id and opens it
+func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
+	code, blob, _, err := c.call("GET", "/blobs/"+hash, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	if code != http.StatusOK {
 		return nil, serverError(code, blob)
 	}
-	if blobHash(blob) != e.Hash {
+	if blobHash(blob) != hash {
 		return nil, fmt.Errorf("blob of %s does not match its hash", id[:8])
 	}
-	plain, err := openEntry(key, c.st.Account, id, epoch, blob)
+	return openEntry(key, c.st.Account, id, epoch, blob)
+}
+
+// putBlob seals the plain payload of entry id and uploads it
+func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string, error) {
+	blob, err := sealEntry(key, c.st.Account, id, epoch, plain)
+	if err != nil {
+		return "", err
+	}
+	h := blobHash(blob)
+	code, b, _, err := c.call("PUT", "/blobs/"+h, blob, nil)
+	if err != nil {
+		return "", err
+	}
+	if code != http.StatusNoContent {
+		return "", serverError(code, b)
+	}
+	return h, nil
+}
+
+// fetchPayload downloads and opens the blob of entry id
+func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch int) (*payload, error) {
+	plain, err := c.fetchBlob(id, e.Hash, key, epoch)
 	if err != nil {
 		return nil, err
 	}
@@ -947,6 +969,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		entries[id] = e
 	}
 	changed := devices != nil || c.st.Counter == 0
+	fresh := map[string]bool{}
 	for id, plain := range local {
 		if _, ok := c.st.Skipped[id]; ok {
 			continue
@@ -956,18 +979,11 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		if !reseal && seen && !known.Deleted && known.Local == lh {
 			continue
 		}
-		blob, err := sealEntry(key, c.st.Account, id, epoch, plain)
+		h, err := c.putBlob(key, id, epoch, plain)
 		if err != nil {
 			return false, err
 		}
-		h := blobHash(blob)
-		code, b, _, err := c.call("PUT", "/blobs/"+h, blob, nil)
-		if err != nil {
-			return false, err
-		}
-		if code != http.StatusNoContent {
-			return false, serverError(code, b)
-		}
+		fresh[id] = true
 		e := syncproto.Entry{Hash: h, Lamport: known.Lamport + 1, Device: c.st.DeviceID}
 		entries[id] = e
 		next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: h, Local: lh}
@@ -986,6 +1002,42 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 			entries[id] = e
 			next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Deleted: true}
 			changed = true
+		}
+	}
+	skipped := map[string]syncproto.Entry{}
+	for id, e := range c.st.Skipped {
+		skipped[id] = e
+	}
+	if reseal {
+		// an entry carried on without a host here to seal (skipped, or a
+		// file that does not load) is opened with the old key and sealed
+		// with the new one, a device with the new key only reads it too
+		oldKey, err := c.vaultKey(c.st.Epoch)
+		if err != nil {
+			return false, err
+		}
+		for id, e := range entries {
+			if e.Deleted || fresh[id] {
+				continue
+			}
+			plain, err := c.fetchBlob(id, e.Hash, oldKey, c.st.Epoch)
+			if err != nil {
+				return false, err
+			}
+			h, err := c.putBlob(key, id, epoch, plain)
+			if err != nil {
+				return false, err
+			}
+			if st, ok := next[id]; ok && st.Blob == e.Hash {
+				st.Blob = h
+				next[id] = st
+			}
+			if sk, ok := skipped[id]; ok {
+				sk.Hash = h
+				skipped[id] = sk
+			}
+			e.Hash = h
+			entries[id] = e
 		}
 	}
 	if !changed {
@@ -1013,7 +1065,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		return false, serverError(code, rb)
 	}
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
-	c.st.Epoch = epoch
+	c.st.Epoch, c.st.Skipped = epoch, skipped
 	if plan.rotation != nil {
 		c.st.Rotation = plan.rotation
 	}
