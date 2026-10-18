@@ -1000,3 +1000,25 @@ func TestSyncRemovedHereChangedThere(t *testing.T) {
 		t.Fatalf("no word about the removal:\n%s", w.log.String())
 	}
 }
+
+func TestSyncKeyChangeMakesNoConflicts(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	c := w.client("c-")
+	w.join(c)
+	h, err := w.b.Store.Find(web.ID)
+	must(t, err)
+	h.Port = 2222
+	_, err = w.b.Store.Update(web.ID, *h)
+	must(t, err)
+	_, err = w.a.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if strings.Contains(w.log.String(), "conflict") {
+		t.Fatalf("a key change made a conflict:\n%s", w.log.String())
+	}
+	if h, _ := w.a.Store.Find(web.ID); h == nil || h.Port != 2222 {
+		t.Fatalf("the edit of b was lost: %+v", h)
+	}
+}

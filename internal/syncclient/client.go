@@ -1027,7 +1027,8 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		}
 		known, seen := c.st.Entries[id]
 		lh := c.localHash(plain)
-		if !reseal && seen && !known.Deleted && known.Local == lh {
+		unchanged := seen && !known.Deleted && known.Local == lh
+		if unchanged && !reseal {
 			continue
 		}
 		h, err := c.putBlob(key, id, epoch, plain)
@@ -1035,6 +1036,15 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 			return false, err
 		}
 		fresh[id] = true
+		if unchanged {
+			// only the key changed, the stamp stays, so a device with its
+			// own edit of this host sees no change from here
+			entries[id] = syncproto.Entry{Hash: h, Lamport: known.Lamport, Device: known.Device}
+			known.Blob = h
+			next[id] = known
+			changed = true
+			continue
+		}
 		e := syncproto.Entry{Hash: h, Lamport: known.Lamport + 1, Device: c.st.DeviceID}
 		entries[id] = e
 		next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: h, Local: lh}
