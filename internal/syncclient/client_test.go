@@ -940,3 +940,41 @@ func TestSyncConflictCopyAfterAFailedDownload(t *testing.T) {
 		t.Fatalf("%d conflict copies\n%s", copies, w.log.String())
 	}
 }
+
+func TestSyncPullCutShortMakesNoCopies(t *testing.T) {
+	w := newWorld(t)
+	web, db := w.pair()
+	for _, id := range []string{web.ID, db.ID} {
+		h, err := w.a.Store.Find(id)
+		must(t, err)
+		h.Port = 2200
+		_, err = w.a.Store.Update(id, *h)
+		must(t, err)
+	}
+	must(t, w.a.Push())
+	// the second download fails, the first host is already written
+	n := 0
+	w.b.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/blobs/") {
+			if n++; n == 2 {
+				return nil, errors.New("cut off")
+			}
+		}
+		return nil, nil
+	}}}
+	if err := w.b.Pull(); err == nil {
+		t.Fatal("pull with a failed download reported success")
+	}
+	b2 := &Client{Store: w.b.Store, Dir: w.b.Dir, KeyPrefix: w.b.KeyPrefix, Log: &w.log}
+	must(t, b2.Pull())
+	must(t, b2.Push())
+	hosts, _ := w.b.Store.List()
+	for _, h := range hosts {
+		if strings.Contains(h.Name, "(conflict ") || h.Port != 2200 {
+			t.Fatalf("host after the cut pull: %s port %d\n%s", h.Name, h.Port, w.log.String())
+		}
+	}
+	// the same client also catches up without a new run
+	w.b.HTTP = nil
+	must(t, w.b.Pull())
+}

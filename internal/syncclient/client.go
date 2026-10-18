@@ -704,16 +704,28 @@ func (c *Client) Pull() error {
 		return errors.New("no manifest adds this device yet, approve it on a device that is already in")
 	found:
 	}
+	// a pull cut short keeps the chain where it was, so the next run
+	// verifies and applies the same manifests again, the hosts applied so
+	// far keep their entry state and are not taken for local edits
+	before := *c.st
+	rollback := func() {
+		c.st.Counter, c.st.Head, c.st.Trusted, c.st.Epoch, c.st.Approver = before.Counter, before.Head, before.Trusted, before.Epoch, before.Approver
+	}
 	var last *syncproto.Manifest
 	for i := range history {
 		// a device offline through several key rotations can open only
 		// the newest epoch, so only the manifest it applies needs the key
 		if last, err = c.verify(&history[i], i == len(history)-1); err != nil {
+			rollback()
 			return err
 		}
 	}
 	if last != nil {
 		if err := c.apply(last); err != nil {
+			rollback()
+			if serr := c.save(); serr != nil {
+				return serr
+			}
 			return err
 		}
 	}
