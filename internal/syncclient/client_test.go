@@ -836,3 +836,35 @@ func TestRemoveDeviceRevokesBeforeTheCommit(t *testing.T) {
 		t.Fatal("the removed device still reaches the server")
 	}
 }
+
+func TestLeaveDeliversAPendingKey(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	committed := false
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if isManifestPut(r) {
+			committed = true
+		}
+		if committed && isEnvelopePut(r) {
+			return nil, errors.New("cut off")
+		}
+		return nil, nil
+	}}}
+	if _, err := w.a.RemoveDevice(c.st.DeviceID[:8]); err == nil {
+		t.Fatal("remove with no envelope delivered reported success")
+	}
+	if err := w.a.Leave(false); err == nil {
+		t.Fatal("leave dropped a key no other device has")
+	}
+	w.a.HTTP = nil
+	must(t, w.a.Leave(false))
+	must(t, w.b.Pull())
+	if w.b.st.Epoch != 2 {
+		t.Fatalf("b is on epoch %d", w.b.st.Epoch)
+	}
+	if _, ok, _ := app.SecretGet(w.a.prefix() + "key-pending"); ok {
+		t.Error("key-pending left after leave")
+	}
+}

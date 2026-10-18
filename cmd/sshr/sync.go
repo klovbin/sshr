@@ -24,7 +24,7 @@ const syncUsage = `Usage:
   sshr sync status                       server, devices, state fingerprint
   sshr sync remove-device <id|fingerprint>
                                          take a device out, the vault key changes
-  sshr sync leave                        stop syncing here, hosts stay`
+  sshr sync leave [--force]              stop syncing here, hosts stay`
 
 // cmdSync runs the sync subcommands
 func cmdSync(store *app.Store, args []string) {
@@ -140,7 +140,7 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Printf("Removed %s, the vault key was changed, what it already downloaded it keeps\n", d.Name)
 	case "leave":
-		if err := c.Leave(); err != nil {
+		if err := c.Leave(len(rest) == 1 && rest[0] == "--force"); err != nil {
 			fatal(err)
 		}
 		fmt.Println("Sync is off on this machine, the hosts stay")

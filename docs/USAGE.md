@@ -212,11 +212,13 @@ sshr sync approve <id>                                           # on a device a
 sshr sync                                                        # pull, then push
 sshr sync status                                                 # devices and a state fingerprint
 sshr sync remove-device <id>                                     # rotates the vault key
+sshr sync leave                                                  # stop syncing here, the hosts stay
 ```
 
 - end to end encrypted: per-device keys in the keychain (Ed25519, ML-KEM-768 + X25519), hosts encrypted with a shared vault key, signed and chained manifests, the server stores only ciphertext and cannot add a device or forge history
 - saved passwords sync inside the encryption, keys kept in sshr and password manager references do not, key file paths sync, the files do not
 - a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`
+- `leave` first delivers a vault key this device changed and has not handed to the others yet, `--force` leaves without it, then the others pair again
 - limits: sync runs when you call it, the server sees the host count, push times, addresses and device names and can hold back changes, a new device trusts the first state it sees (`--accept-reset` after a real server restore), compare the `sshr sync status` fingerprints to be sure two devices see the same history, a removed device keeps what it downloaded
 
 ## Sync server

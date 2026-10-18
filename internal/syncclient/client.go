@@ -1236,16 +1236,27 @@ func (c *Client) Status() (*Status, error) {
 
 // Leave forgets sync on this machine, the hosts stay, the account and the
 // other devices are not touched
-func (c *Client) Leave() error {
+func (c *Client) Leave(force bool) error {
 	b, err := os.ReadFile(c.statePath())
 	if err == nil {
 		var st state
 		if json.Unmarshal(b, &st) == nil {
+			// a key change this device committed but did not deliver yet
+			// lives only here, leaving would strand the other devices
+			if st.Rotation != nil && !force {
+				if err := c.load(); err != nil {
+					return err
+				}
+				if err := c.finishRotation(); err != nil {
+					return fmt.Errorf("the other devices still wait for the vault key this device changed and it cannot be delivered now, run sshr sync again, or leave with --force and pair them again: %v", err)
+				}
+			}
 			for e := 1; e <= st.Epoch; e++ {
 				app.SecretDelete(c.prefix() + "key-" + strconv.Itoa(e))
 			}
 		}
 	}
+	app.SecretDelete(c.prefix() + "key-pending")
 	app.SecretDelete(c.prefix() + "device")
 	if err := os.Remove(c.statePath()); err != nil && !os.IsNotExist(err) {
 		return err
