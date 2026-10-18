@@ -59,6 +59,11 @@ func TestAPIHosts(t *testing.T) {
 	if code, body = do(t, srv, "POST", "/v1/hosts/web/run", `{"command":"id"}`, nil); code != 403 {
 		t.Errorf("run while off = %d %s", code, body)
 	}
+	for _, bad := range []string{`{"forwards": "db"}`, `{"forwards": [`} {
+		if code, body = do(t, srv, "POST", "/v1/hosts/web/tunnels", bad, nil); code != 400 || !strings.Contains(body, "bad body") {
+			t.Errorf("tunnel with body %s = %d %s", bad, code, body)
+		}
+	}
 	if code, body = do(t, srv, "POST", "/v1/hosts/web/tunnels", `{}`, nil); code != 400 || !strings.Contains(body, "asks_password") {
 		t.Errorf("tunnel to an ask host = %d %s", code, body)
 	}

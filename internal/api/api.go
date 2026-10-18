@@ -335,7 +335,12 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Forwards []string `json:"forwards"`
 	}
-	json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in)
+	// an empty body means every forward, a body that does not decode is an
+	// error, not an empty list
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+		fail(w, http.StatusBadRequest, fmt.Errorf("bad body: %v", err))
+		return
+	}
 	if len(in.Forwards) == 0 {
 		in.Forwards = []string{"all"}
 	}
