@@ -132,6 +132,20 @@ func TestSyncServer(t *testing.T) {
 	if code, _, _ := c1.do("GET", a+"/envelopes/"+d2.ID, nil, nil); code != 403 {
 		t.Errorf("read another device's envelope = %d", code)
 	}
+	newer, _ := json.Marshal(syncproto.Envelope{Epoch: 3, Data: []byte("sealed 3")})
+	older, _ := json.Marshal(syncproto.Envelope{Epoch: 2, Data: []byte("sealed 2")})
+	if code, _, _ := c1.do("PUT", a+"/envelopes/"+d2.ID, newer, nil); code != 204 {
+		t.Errorf("put a newer envelope = %d", code)
+	}
+	if code, _, _ := c1.do("PUT", a+"/envelopes/"+d2.ID, older, nil); code != 409 {
+		t.Errorf("put an older envelope over a newer one = %d", code)
+	}
+	if code, _, _ := c1.do("PUT", a+"/envelopes/"+d2.ID, newer, nil); code != 204 {
+		t.Errorf("put the same epoch again = %d", code)
+	}
+	if code, b, _ := c2.do("GET", a+"/envelopes/"+d2.ID, nil, nil); code != 200 || !bytes.Contains(b, []byte(`"epoch":3`)) {
+		t.Errorf("envelope after an older write = %d %s", code, b)
+	}
 	if code, b, _ := c2.do("GET", a+"/manifests?after=0", nil, nil); code != 200 || !bytes.Contains(b, []byte(`"body"`)) {
 		t.Errorf("history = %d %s", code, b)
 	}

@@ -401,8 +401,17 @@ func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		fail(w, http.StatusBadRequest, "bad envelope")
 		return
 	}
+	// a key of an older epoch never replaces a newer one, a device still
+	// delivering an old key change would lock the device out of the vault
+	defer s.lock(a)()
+	path := filepath.Join(s.accountDir(a), "envelopes", id+".json")
+	var cur syncproto.Envelope
+	if old, err := os.ReadFile(path); err == nil && json.Unmarshal(old, &cur) == nil && cur.Epoch > env.Epoch {
+		fail(w, http.StatusConflict, "a newer key is stored for this device")
+		return
+	}
 	b, _ := json.Marshal(env)
-	if err := writeFile(filepath.Join(s.accountDir(a), "envelopes", id+".json"), b); err != nil {
+	if err := writeFile(path, b); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
