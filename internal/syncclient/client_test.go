@@ -634,7 +634,17 @@ func TestRemoveDeviceGivesUpCleanly(t *testing.T) {
 	}
 	w.a.HTTP = nil
 	must(t, w.a.Pull())
-	must(t, c.Pull())
+	// the token is revoked already, a rerun takes the device off the list
+	if err := c.Pull(); err == nil {
+		t.Error("the device to remove still reaches the server")
+	}
+	_, err := w.a.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	for _, d := range w.a.st.Trusted {
+		if d.ID == c.st.DeviceID {
+			t.Fatal("the rerun left the device listed")
+		}
+	}
 }
 
 func TestRemoveDeviceFinishesAfterACrash(t *testing.T) {
@@ -802,5 +812,27 @@ func TestSyncKeepsTheCachedKeyWhenTheEnvelopeFails(t *testing.T) {
 	}
 	if got, ok, _ := app.SecretGet(name); !ok || !bytes.Equal(got, good) {
 		t.Fatal("the good cached key was dropped")
+	}
+}
+
+func TestRemoveDeviceRevokesBeforeTheCommit(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	revoked := false
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == "DELETE":
+			revoked = true
+		case isManifestPut(r) && !revoked:
+			t.Error("the manifest without the device was written before its token was revoked")
+		}
+		return nil, nil
+	}}}
+	_, err := w.a.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	if err := c.Pull(); err == nil {
+		t.Fatal("the removed device still reaches the server")
 	}
 }

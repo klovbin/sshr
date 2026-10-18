@@ -1092,39 +1092,44 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 // every host is encrypted again with the new one and the device's token is
 // revoked, what it already downloaded it keeps
 //
-// Nothing changes before the new manifest wins: the new key waits in the
-// keychain as key-pending, the envelopes of the kept devices are written
-// only after the commit, a push that loses the race leaves nothing behind
-// and the next attempt plans again from the pulled state
+// The token is revoked first, then nothing else changes before the new
+// manifest wins: the new key waits in the keychain as key-pending, the
+// envelopes of the kept devices are written only after the commit, a push
+// that loses the race leaves nothing behind and the next attempt plans
+// again from the pulled state
 func (c *Client) RemoveDevice(prefix string) (*syncproto.Device, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
-	var removed *syncproto.Device
+	target, _, err := c.matchDevice(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("no other device matches %q", prefix)
+	}
+	removed := *target
+	// the token goes first, a removed device that can still push could
+	// block the others with manifests no one trusts, a rerun after a lost
+	// race finds the device still listed and gets 404 here
+	code, b, _, err := c.call("DELETE", "/devices/"+removed.ID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if code != http.StatusNoContent && code != http.StatusNotFound {
+		return nil, serverError(code, b)
+	}
 	gone := false
 	plan := func() (pushPlan, error) {
-		var target *syncproto.Device
-		var keep []syncproto.Device
-		for i, d := range c.st.Trusted {
-			if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
-				if target != nil {
-					return pushPlan{}, fmt.Errorf("%q matches several devices", prefix)
-				}
-				target = &c.st.Trusted[i]
-				continue
-			}
-			keep = append(keep, d)
+		target, keep, err := c.matchDevice(removed.ID)
+		if err != nil {
+			return pushPlan{}, err
 		}
 		if target == nil {
-			if removed != nil {
-				// another device removed it while this one retried
-				gone = true
-				return pushPlan{}, nil
-			}
-			return pushPlan{}, fmt.Errorf("no other device matches %q", prefix)
+			// another device removed it while this one retried
+			gone = true
+			return pushPlan{}, nil
 		}
-		d := *target
-		removed = &d
 		key := make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {
 			return pushPlan{}, err
@@ -1139,24 +1144,33 @@ func (c *Client) RemoveDevice(prefix string) (*syncproto.Device, error) {
 		if c.st.Rotation == nil {
 			app.SecretDelete(c.prefix() + "key-pending")
 		}
-		return nil, err
-	}
-	// the token goes first, a removed device that can still push could
-	// block the others with manifests of its own
-	code, b, _, err := c.call("DELETE", "/devices/"+removed.ID, nil, nil)
-	if err != nil {
-		return nil, fmt.Errorf("the device is out of the account but its token is not revoked yet, run sshr sync remove-device again: %v", err)
-	}
-	if code != http.StatusNoContent && code != http.StatusNotFound {
-		return nil, serverError(code, b)
+		return nil, fmt.Errorf("the token of the device is revoked, it is still listed, run sshr sync remove-device again: %v", err)
 	}
 	if gone {
-		return removed, nil
+		return &removed, nil
 	}
 	if err := c.finishRotation(); err != nil {
 		return nil, fmt.Errorf("the device is out of the account, the new key is not delivered to every device yet, run sshr sync again: %v", err)
 	}
-	return removed, nil
+	return &removed, nil
+}
+
+// matchDevice finds the one other trusted device whose ID or fingerprint
+// starts with prefix, and the devices that stay without it
+func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Device, error) {
+	var target *syncproto.Device
+	var keep []syncproto.Device
+	for i, d := range c.st.Trusted {
+		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
+			if target != nil {
+				return nil, nil, fmt.Errorf("%q matches several devices", prefix)
+			}
+			target = &c.st.Trusted[i]
+			continue
+		}
+		keep = append(keep, d)
+	}
+	return target, keep, nil
 }
 
 // finishRotation delivers a committed vault key to every kept device and
