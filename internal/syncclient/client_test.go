@@ -766,3 +766,41 @@ func TestSyncReplacesAWrongCachedKey(t *testing.T) {
 		t.Error("the wrong key is still cached")
 	}
 }
+
+func TestSyncKeepsTheCachedKeyWhenTheEnvelopeFails(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	name := w.b.prefix() + "key-1"
+	good, _, err := app.SecretGet(name)
+	must(t, err)
+	_, err = w.a.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, w.a.Push())
+	// the manifest is damaged on the way and the envelope read fails
+	w.b.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/envelopes/") {
+			return nil, errors.New("cut off")
+		}
+		if strings.Contains(r.URL.Path, "/manifests") {
+			resp, err := http.DefaultTransport.RoundTrip(r)
+			if err != nil {
+				return nil, err
+			}
+			var page []map[string]any
+			json.NewDecoder(resp.Body).Decode(&page)
+			resp.Body.Close()
+			for _, sm := range page {
+				sm["mac"] = "AAAA"
+			}
+			b, _ := json.Marshal(page)
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(b)), Header: http.Header{}}, nil
+		}
+		return nil, nil
+	}}}
+	if err := w.b.Pull(); err == nil {
+		t.Fatal("a manifest with a bad MAC was accepted")
+	}
+	if got, ok, _ := app.SecretGet(name); !ok || !bytes.Equal(got, good) {
+		t.Fatal("the good cached key was dropped")
+	}
+}

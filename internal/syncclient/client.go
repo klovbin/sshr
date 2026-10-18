@@ -256,6 +256,15 @@ func (c *Client) vaultKey(epoch int) ([]byte, error) {
 			return key, err
 		}
 	}
+	if key, err = c.envelopeKey(epoch); err != nil {
+		return nil, err
+	}
+	return key, app.SecretSet(name, key)
+}
+
+// envelopeKey reads the vault key of epoch from this device's envelope on
+// the server, without touching the keychain
+func (c *Client) envelopeKey(epoch int) ([]byte, error) {
 	code, b, _, err := c.call("GET", "/envelopes/"+c.st.DeviceID, nil, nil)
 	if err != nil {
 		return nil, err
@@ -276,10 +285,7 @@ func (c *Client) vaultKey(epoch int) ([]byte, error) {
 	if env.Epoch != epoch {
 		return nil, fmt.Errorf("no vault key of epoch %d for this device, it may have been removed, re-pair it", epoch)
 	}
-	if key, err = c.keys.openEnvelope(env, c.st.Account); err != nil {
-		return nil, err
-	}
-	return key, app.SecretSet(name, key)
+	return c.keys.openEnvelope(env, c.st.Account)
 }
 
 // newSeed makes the device key of this machine
@@ -633,16 +639,15 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		if err != nil {
 			return nil, err
 		}
-		if verifyMAC(sm, key) != nil {
-			// the key cached in the keychain may be a wrong one, read the
-			// envelope on the server once more before giving up
-			if err := app.SecretDelete(c.prefix() + "key-" + strconv.Itoa(m.Epoch)); err != nil {
+		if err := verifyMAC(sm, key); err != nil {
+			// the key cached in the keychain may be a wrong one, the key
+			// in the envelope replaces it only when it verifies, a failed
+			// read leaves the cache as it was
+			fresh, ferr := c.envelopeKey(m.Epoch)
+			if ferr != nil || verifyMAC(sm, fresh) != nil {
 				return nil, err
 			}
-			if key, err = c.vaultKey(m.Epoch); err != nil {
-				return nil, err
-			}
-			if err := verifyMAC(sm, key); err != nil {
+			if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(m.Epoch), fresh); err != nil {
 				return nil, err
 			}
 		}
