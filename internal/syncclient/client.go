@@ -751,6 +751,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		}
 		delete(c.st.Skipped, id)
 		var dup *app.Host
+		conflict := false
 		known, seen := c.st.Entries[id]
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
 		if seen && e.Lamport == known.Lamport && e.Device == known.Device {
@@ -796,6 +797,18 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
 				continue
 			}
+			conflict = true
+		}
+		next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
+		// the remote version is downloaded before the local one is copied,
+		// a failed download leaves no copy behind to be made again
+		var p *payload
+		if !e.Deleted {
+			if p, err = c.fetchPayload(id, e, key, m.Epoch); err != nil {
+				return err
+			}
+		}
+		if conflict {
 			var name string
 			if h, err := c.Store.Find(id); err == nil {
 				name = h.Name
@@ -806,7 +819,6 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			}
 			dup = cp
 		}
-		next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
 		if dup != nil && e.Deleted {
 			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], dup.Name)
 		}
@@ -819,10 +831,6 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			}
 			c.st.Entries[id] = next
 			continue
-		}
-		p, err := c.fetchPayload(id, e, key, m.Epoch)
-		if err != nil {
-			return err
 		}
 		p.Host.Password = p.Password
 		var cur *app.Host

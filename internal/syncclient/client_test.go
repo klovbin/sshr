@@ -897,3 +897,46 @@ func TestSyncRecoversAKeyChangeNotSaved(t *testing.T) {
 		t.Fatalf("epochs a %d b %d", a2.st.Epoch, w.b.st.Epoch)
 	}
 }
+
+func TestSyncConflictCopyAfterAFailedDownload(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	for i, c := range []*Client{w.a, w.b} {
+		h, err := c.Store.Find(db.ID)
+		must(t, err)
+		h.Port = 3000 + i
+		_, err = c.Store.Update(db.ID, *h)
+		must(t, err)
+	}
+	// the device with the larger ID pushes, the other one loses the
+	// conflict on pull and its first download of the winner fails
+	x, y := w.a, w.b
+	if x.st.DeviceID > y.st.DeviceID {
+		x, y = y, x
+	}
+	must(t, y.Push())
+	failed := false
+	x.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/blobs/") && !failed {
+			failed = true
+			return nil, errors.New("cut off")
+		}
+		return nil, nil
+	}}}
+	if err := x.Pull(); err == nil {
+		t.Fatal("pull with a failed download reported success")
+	}
+	// the next run of sshr starts from the state on disk
+	x2 := &Client{Store: x.Store, Dir: x.Dir, KeyPrefix: x.KeyPrefix, Log: &w.log}
+	must(t, x2.Pull())
+	hosts, _ := x.Store.List()
+	copies := 0
+	for _, h := range hosts {
+		if strings.Contains(h.Name, "(conflict ") {
+			copies++
+		}
+	}
+	if copies != 1 {
+		t.Fatalf("%d conflict copies\n%s", copies, w.log.String())
+	}
+}
