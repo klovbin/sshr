@@ -868,3 +868,32 @@ func TestLeaveDeliversAPendingKey(t *testing.T) {
 		t.Error("key-pending left after leave")
 	}
 }
+
+func TestSyncRecoversAKeyChangeNotSaved(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	before, err := os.ReadFile(w.a.statePath())
+	must(t, err)
+	committed := false
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if isManifestPut(r) {
+			committed = true
+		}
+		if committed && isEnvelopePut(r) {
+			return nil, errors.New("cut off")
+		}
+		return nil, nil
+	}}}
+	w.a.RemoveDevice(c.st.DeviceID[:8])
+	// the state on disk is the one from before the commit, as when the
+	// save failed, a new run of sshr reads it
+	must(t, os.WriteFile(w.a.statePath(), before, 0o600))
+	a2 := &Client{Store: w.a.Store, Dir: w.a.Dir, KeyPrefix: "a-", Log: &w.log}
+	must(t, a2.Pull())
+	must(t, w.b.Pull())
+	if w.b.st.Epoch != 2 || a2.st.Epoch != 2 {
+		t.Fatalf("epochs a %d b %d", a2.st.Epoch, w.b.st.Epoch)
+	}
+}

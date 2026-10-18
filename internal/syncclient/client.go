@@ -635,6 +635,14 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		return nil, errors.New("manifest of an old vault key epoch")
 	}
 	if withMAC {
+		// a key change this device committed while its state was not
+		// saved, its key still waits as key-pending and verifies the
+		// manifest, the delivery is taken up again
+		if c.st.Rotation == nil {
+			if pending, ok, _ := app.SecretGet(c.prefix() + "key-pending"); ok && verifyMAC(sm, pending) == nil {
+				c.st.Rotation = &rotation{Epoch: m.Epoch, Devices: m.Devices}
+			}
+		}
 		key, err := c.vaultKey(m.Epoch)
 		if err != nil {
 			return nil, err
@@ -708,6 +716,9 @@ func (c *Client) Pull() error {
 		if err := c.apply(last); err != nil {
 			return err
 		}
+	}
+	if err := c.finishRotation(); err != nil {
+		return err
 	}
 	c.st.LastSync = time.Now().UTC()
 	return c.save()
