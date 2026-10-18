@@ -776,6 +776,11 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		if seen && !newer(e, knownEntry) {
 			continue
 		}
+		if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
+			// removed here and changed there, the change wins so nothing
+			// written on the other device is lost, the user is told
+			c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", id[:8], e.Device[:8])
+		}
 		if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
 			// neither side is lost, the later change keeps the host and
 			// the other one becomes a copy that syncs like any host

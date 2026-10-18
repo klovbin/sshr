@@ -217,7 +217,7 @@ sshr sync leave                                                  # stop syncing 
 
 - end to end encrypted: per-device keys in the keychain (Ed25519, ML-KEM-768 + X25519), hosts encrypted with a shared vault key, signed and chained manifests, the server stores only ciphertext and cannot add a device or forge history
 - saved passwords sync inside the encryption, keys kept in sshr and password manager references do not, key file paths sync, the files do not
-- a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`
+- a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`, a host removed on one device and changed on another comes back with the change, the log says so
 - `leave` first delivers a vault key this device changed and has not handed to the others yet, `--force` leaves without it, then the others pair again
 - limits: sync runs when you call it, the server sees the host count, push times, addresses and device names and can hold back changes, a new device trusts the first state it sees (`--accept-reset` after a real server restore), compare the `sshr sync status` fingerprints to be sure two devices see the same history, a removed device keeps what it downloaded
 

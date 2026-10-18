@@ -978,3 +978,25 @@ func TestSyncPullCutShortMakesNoCopies(t *testing.T) {
 	w.b.HTTP = nil
 	must(t, w.b.Pull())
 }
+
+func TestSyncRemovedHereChangedThere(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	must(t, w.b.Store.Delete(web.ID))
+	h, err := w.a.Store.Find(web.ID)
+	must(t, err)
+	h.Port = 2222
+	_, err = w.a.Store.Update(web.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	for _, c := range []*Client{w.a, w.b} {
+		if h, _ := c.Store.Find(web.ID); h == nil || h.Port != 2222 {
+			t.Fatalf("the change was lost: %+v", h)
+		}
+	}
+	if !strings.Contains(w.log.String(), "was removed here and changed on device") {
+		t.Fatalf("no word about the removal:\n%s", w.log.String())
+	}
+}
