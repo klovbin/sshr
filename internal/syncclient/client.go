@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"sshr.dev/internal/app"
 	"sshr.dev/internal/syncproto"
@@ -500,6 +501,7 @@ func (c *Client) Pending() ([]syncproto.DeviceRecord, error) {
 	var out []syncproto.DeviceRecord
 	for _, d := range all {
 		if !d.Active && syncproto.DeviceID(d.SignPub) == d.ID {
+			d.Name = CleanName(d.Name)
 			out = append(out, d)
 		}
 	}
@@ -1261,6 +1263,18 @@ func (c *Client) RemoveDevice(prefix string) (*syncproto.Device, error) {
 	return &removed, nil
 }
 
+// CleanName drops control and format characters from a device name, the
+// name comes from whoever joined and must not move the cursor or recolor
+// the fingerprint printed next to it
+func CleanName(name string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, name)
+}
+
 // matchDevice finds the one other trusted device whose ID or fingerprint
 // starts with prefix, and the devices that stay without it
 func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Device, error) {
@@ -1271,7 +1285,9 @@ func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Devi
 			if target != nil {
 				return nil, nil, fmt.Errorf("%q matches several devices", prefix)
 			}
-			target = &c.st.Trusted[i]
+			t := c.st.Trusted[i]
+			t.Name = CleanName(t.Name)
+			target = &t
 			continue
 		}
 		keep = append(keep, d)
@@ -1332,7 +1348,11 @@ func (c *Client) Status() (*Status, error) {
 	st := &Status{
 		Server: c.st.Server, Account: c.st.Account, Device: c.st.DeviceID, Name: c.st.Name,
 		Fingerprint: Fingerprint(c.self().SignPub), Counter: c.st.Counter,
-		Devices: c.st.Trusted, Waiting: c.st.Approver != "", LastSync: c.st.LastSync,
+		Waiting: c.st.Approver != "", LastSync: c.st.LastSync,
+	}
+	for _, d := range c.st.Trusted {
+		d.Name = CleanName(d.Name)
+		st.Devices = append(st.Devices, d)
 	}
 	if len(c.st.Head) >= 8 {
 		st.State = c.st.Head[:8]

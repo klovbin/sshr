@@ -78,6 +78,10 @@ func TestSyncServer(t *testing.T) {
 	if code, _, _ := anon.do("POST", "/v1/accounts", body, nil); code != 400 {
 		t.Errorf("device id not matching its key = %d", code)
 	}
+	body, _ = json.Marshal(syncproto.NewAccountRequest{Device: device("x\x1b[2Jy")})
+	if code, _, _ := anon.do("POST", "/v1/accounts", body, nil); code != 400 {
+		t.Errorf("escape in a device name = %d", code)
+	}
 
 	d2 := device("desktop")
 	body, _ = json.Marshal(syncproto.NewAccountRequest{Device: d2})

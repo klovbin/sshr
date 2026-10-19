@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"sshr.dev/internal/syncproto"
 )
@@ -168,6 +169,11 @@ func checkDevice(d syncproto.Device) error {
 	}
 	if d.ID != syncproto.DeviceID(d.SignPub) {
 		return errors.New("device id does not match its key")
+	}
+	for _, r := range d.Name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return errors.New("control characters in the device name")
+		}
 	}
 	return nil
 }

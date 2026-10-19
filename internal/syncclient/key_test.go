@@ -18,3 +18,12 @@ func testKeyPEM(t *testing.T) []byte {
 	}
 	return pem.EncodeToMemory(block)
 }
+
+func TestCleanName(t *testing.T) {
+	if got := CleanName("lap\x1b[2Jtop‮\n"); got != "lap[2Jtop" {
+		t.Errorf("CleanName = %q", got)
+	}
+	if got := CleanName("ноутбук 2"); got != "ноутбук 2" {
+		t.Errorf("CleanName dropped letters: %q", got)
+	}
+}
