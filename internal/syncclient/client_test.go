@@ -1022,3 +1022,20 @@ func TestSyncKeyChangeMakesNoConflicts(t *testing.T) {
 		t.Fatalf("the edit of b was lost: %+v", h)
 	}
 }
+
+func TestSyncPushChecksTheCachedKey(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	name := w.b.prefix() + "key-1"
+	b2 := &Client{Store: w.b.Store, Dir: w.b.Dir, KeyPrefix: w.b.KeyPrefix, Log: &w.log}
+	must(t, app.SecretSet(name, bytes.Repeat([]byte{7}, 32)))
+	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, b2.Push())
+	if err := w.a.Pull(); err != nil {
+		t.Fatalf("a manifest pushed with a wrong cached key: %v", err)
+	}
+	if _, err := w.a.Store.Find("other"); err != nil {
+		t.Fatal("the host pushed by b did not arrive")
+	}
+}

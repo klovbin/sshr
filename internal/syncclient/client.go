@@ -98,6 +98,8 @@ type Client struct {
 
 	st   *state
 	keys *deviceKeys
+	// keyOK are the epochs whose key verified a manifest in this run
+	keyOK map[int]bool
 }
 
 // ErrKeyPending means the manifest uses a vault key whose envelope has not
@@ -260,6 +262,60 @@ func (c *Client) vaultKey(epoch int) ([]byte, error) {
 		return nil, err
 	}
 	return key, app.SecretSet(name, key)
+}
+
+func (c *Client) markKey(epoch int) {
+	if c.keyOK == nil {
+		c.keyOK = map[int]bool{}
+	}
+	c.keyOK[epoch] = true
+}
+
+// checkKey makes sure key opens the current manifest before a push seals
+// anything with it, a wrong key cached here would write a manifest no
+// other device can verify, a wrong one is replaced by the envelope's key
+func (c *Client) checkKey(epoch int, key []byte) ([]byte, error) {
+	if c.keyOK[epoch] || c.st.Counter == 0 {
+		return key, nil
+	}
+	code, b, _, err := c.call("GET", "/manifest", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if code == http.StatusNotFound {
+		return key, nil
+	}
+	if code != http.StatusOK {
+		return nil, serverError(code, b)
+	}
+	var sm syncproto.Signed
+	var m syncproto.Manifest
+	if err := json.Unmarshal(b, &sm); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(sm.Body, &m); err != nil {
+		return nil, err
+	}
+	if m.Epoch != epoch {
+		// another device changed the key meanwhile, the push loses the
+		// race on the counter and pulls first
+		return key, nil
+	}
+	if verifyMAC(&sm, key) != nil {
+		fresh, err := c.envelopeKey(epoch)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyMAC(&sm, fresh); err != nil {
+			return nil, fmt.Errorf("the vault key on this device does not open the account, pair it again: %v", err)
+		}
+		if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(epoch), fresh); err != nil {
+			return nil, err
+		}
+		key = fresh
+	}
+	c.markKey(epoch)
+	return key, nil
 }
 
 // envelopeKey reads the vault key of epoch from this device's envelope on
@@ -659,6 +715,7 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 				return nil, err
 			}
 		}
+		c.markKey(m.Epoch)
 	}
 	inside := false
 	for _, d := range m.Devices {
@@ -1001,6 +1058,9 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	} else {
 		var err error
 		if key, err = c.vaultKey(epoch); err != nil {
+			return false, err
+		}
+		if key, err = c.checkKey(epoch, key); err != nil {
 			return false, err
 		}
 	}
