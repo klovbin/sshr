@@ -41,6 +41,11 @@ const (
 
 // Server is the HTTP handler of the sync server
 type Server struct {
+	// TrustProxy takes the client address from the last X-Forwarded-For
+	// entry when the request comes from this machine, set it behind a TLS
+	// reverse proxy, where every request comes from 127.0.0.1
+	TrustProxy bool
+
 	dir   string
 	mux   *http.ServeMux
 	mu    sync.Mutex
@@ -99,11 +104,24 @@ func (s *Server) lock(a string) func() {
 }
 
 // allowCreate rate-limits new accounts and joins, 10 an hour per address
-func (s *Server) allowCreate(r *http.Request) bool {
+// clientAddr is the address the join limit counts, the proxy's view of
+// the client when TrustProxy is on and the request came over loopback
+func (s *Server) clientAddr(r *http.Request) string {
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		ip = r.RemoteAddr
 	}
+	if p := net.ParseIP(ip); s.TrustProxy && p != nil && p.IsLoopback() {
+		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		if last := strings.TrimSpace(hops[len(hops)-1]); net.ParseIP(last) != nil {
+			return last
+		}
+	}
+	return ip
+}
+
+func (s *Server) allowCreate(r *http.Request) bool {
+	ip := s.clientAddr(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()

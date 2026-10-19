@@ -181,3 +181,38 @@ func TestJoinLimitForgetsOldAddresses(t *testing.T) {
 		t.Fatalf("%d addresses kept, want only the new one", len(s.creates))
 	}
 }
+
+func TestJoinLimitBehindAProxy(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := func(xff string) *http.Request {
+		r := httptest.NewRequest("POST", "/v1/accounts", nil)
+		r.RemoteAddr = "127.0.0.1:40000"
+		r.Header.Set("X-Forwarded-For", xff)
+		return r
+	}
+	// without the option the proxy's own address counts for everyone
+	if got := s.clientAddr(req("198.51.100.7")); got != "127.0.0.1" {
+		t.Errorf("address without TrustProxy = %s", got)
+	}
+	s.TrustProxy = true
+	for i := 0; i < 10; i++ {
+		if !s.allowCreate(req("spoofed, 198.51.100.7")) {
+			t.Fatal("refused before the limit")
+		}
+	}
+	if s.allowCreate(req("198.51.100.7")) {
+		t.Error("the same client got past the limit")
+	}
+	if !s.allowCreate(req("203.0.113.9")) {
+		t.Error("another client behind the proxy was refused")
+	}
+	// a request that does not come over loopback keeps its own address
+	r := req("203.0.113.9")
+	r.RemoteAddr = "192.0.2.5:1234"
+	if got := s.clientAddr(r); got != "192.0.2.5" {
+		t.Errorf("address of a direct request = %s", got)
+	}
+}

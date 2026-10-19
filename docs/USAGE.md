@@ -231,9 +231,10 @@ go build -o sshr-sync ./cmd/sshr-sync
 sshr-sync --autocert sync.example.com --listen :443 --data /var/lib/sshr-sync   # Let's Encrypt
 sshr-sync --tls-cert cert.pem --tls-key key.pem --listen :8443 --data ./data
 sshr-sync --plain-http --listen 127.0.0.1:8080 --data ./data                     # behind a TLS proxy
+sshr-sync --plain-http --trust-proxy --listen 127.0.0.1:8080 --data ./data       # the proxy sets X-Forwarded-For
 ```
 
-TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-256 is stored), 10 new accounts or joins an hour per address, pushes are compare-and-swap so two devices cannot overwrite each other, unused blobs go after a day, one server per data folder
+TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-256 is stored), 10 new accounts or joins an hour per address, behind a proxy every client has the proxy's address unless `--trust-proxy` takes the last `X-Forwarded-For` entry of requests from this machine (off by default, the proxy must set that header), pushes are compare-and-swap so two devices cannot overwrite each other, unused blobs go after a day, one server per data folder
 
 ## AI assistants (MCP)
 
