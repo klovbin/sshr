@@ -25,7 +25,7 @@ Linux and macOS, into `~/.local/bin` without root, [install options](docs/USAGE.
 
 ```sh
 sshr add 10.0.0.7 -u deploy -n web    # asks how to log in
-sshr import-ssh-config                 # or bring hosts from ~/.ssh/config
+sshr import                            # or bring hosts from ~/.ssh/config
 sshr list
 sshr connect web
 sshr                                   # the desktop app

@@ -89,7 +89,7 @@ func runCLI(args []string) {
 		cmdServe(store, args[1:])
 	case "sync":
 		cmdSync(store, args[1:])
-	case "import-ssh-config":
+	case "import", "import-ssh-config":
 		cmdImportSSHConfig(store, args[1:])
 	case "desktop-entry":
 		cmdDesktopEntry(args[1:])
@@ -101,7 +101,7 @@ func runCLI(args []string) {
 		for _, a := range acc {
 			fmt.Printf("%s\t%s\t%s\n", a.Email, a.URL, a.Ref())
 		}
-	case "export-ssh-config":
+	case "export", "export-ssh-config":
 		cmdExportSSHConfig(store, args[1:])
 	case app.ProxyCommandName:
 		cmdProxy(store, args[1:])
@@ -843,7 +843,7 @@ func cmdImportSSHConfig(store *app.Store, args []string) {
 	dry := false
 	for _, a := range args {
 		if a != "--dry-run" {
-			fmt.Fprintln(os.Stderr, "Usage: sshr import-ssh-config [--dry-run]")
+			fmt.Fprintln(os.Stderr, "Usage: sshr import [--dry-run]")
 			os.Exit(1)
 		}
 		dry = true
@@ -889,7 +889,7 @@ func cmdImportSSHConfig(store *app.Store, args []string) {
 // cmdExportSSHConfig prints the hosts as ssh config or installs the export
 func cmdExportSSHConfig(store *app.Store, args []string) {
 	usage := func() {
-		fmt.Fprintln(os.Stderr, "Usage: sshr export-ssh-config [--install|--uninstall]")
+		fmt.Fprintln(os.Stderr, "Usage: sshr export [--install|--uninstall]")
 		os.Exit(1)
 	}
 	if len(args) > 1 {

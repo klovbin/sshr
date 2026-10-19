@@ -16,6 +16,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the overview fits one screen, the options of one command are one call away, nothing that was in the long help is lost
 - **Why this way:** one table in the code feeds both views and the completion, so a new command cannot be listed in one place and forgotten in another
 
+### Short command names
+- **What:** `sshr import` and `sshr export` for `import-ssh-config` and `export-ssh-config`, the long names keep working
+- **What for:** the longest commands to type were the ones for `~/.ssh/config`
+- **Why it helps:** six to eleven fewer characters, the name says what it does, scripts that use the old names do not break
+- **Why this way:** aliases in the same command table, not new commands, so both names share one code path and one help entry
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"

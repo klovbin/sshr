@@ -182,11 +182,11 @@ sshr paste -f shot.png web  # a file instead of the clipboard
 ## Importing ~/.ssh/config
 
 ```sh
-sshr import-ssh-config --dry-run
-sshr import-ssh-config
+sshr import --dry-run
+sshr import
 ```
 
-- in the app: **Settings → Import**
+- in the app: **Settings → Import**, `import-ssh-config` and `export-ssh-config` are older names of `import` and `export` and keep working
 - every `Host` of `~/.ssh/config` and its `Include`s, resolved with `ssh -G`, so `Match`, `Host *` and defaults apply as in ssh, nothing goes over the network, `Match exec` runs what you wrote
 - carries `HostName`, `User`, `Port`, `IdentityFile`, `IdentityAgent` (the 1Password socket becomes `1password`), `ProxyJump` and forwards as `l1`, `r1`, `d1`
 - patterns are skipped, a `ProxyCommand` host keeps its alias as the address, hosts sshr already has are skipped, so a second run adds only new ones
@@ -194,9 +194,9 @@ sshr import-ssh-config
 ## Exporting to ~/.ssh/config
 
 ```sh
-sshr export-ssh-config               # print
-sshr export-ssh-config --install     # write ~/.sshr/ssh_config, include it, keep it current
-sshr export-ssh-config --uninstall
+sshr export               # print
+sshr export --install     # write ~/.sshr/ssh_config, include it, keep it current
+sshr export --uninstall
 ```
 
 - in the app: **Settings → Import → Export**, off by default, it edits your file

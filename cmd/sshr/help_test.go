@@ -21,9 +21,10 @@ func TestUsageIsShort(t *testing.T) {
 }
 
 func TestCommandHelp(t *testing.T) {
-	c := findCommand("ls")
-	if c == nil || c.name != "list" {
-		t.Fatalf("ls = %+v", c)
+	for alias, name := range map[string]string{"ls": "list", "import-ssh-config": "import", "export-ssh-config": "export"} {
+		if c := findCommand(alias); c == nil || c.name != name {
+			t.Fatalf("%s = %+v", alias, c)
+		}
 	}
 	var b bytes.Buffer
 	writeCommandHelp(&b, findCommand("add"))

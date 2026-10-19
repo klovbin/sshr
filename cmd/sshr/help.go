@@ -76,9 +76,9 @@ minutes`},
 ~/.sshr/api-token, no secrets are returned, commands are off by default`},
 	{name: "sync", usage: "sshr sync [init|invite|join|pending|approve|pull|push|status|remove-device|leave]", short: "sync hosts between devices",
 		details: `through an sshr-sync server, end to end encrypted, see sshr sync help`},
-	{name: "import-ssh-config", usage: "sshr import-ssh-config [--dry-run]", short: "add the hosts of ~/.ssh/config",
+	{name: "import", aliases: []string{"import-ssh-config"}, usage: "sshr import [--dry-run]", short: "add the hosts of ~/.ssh/config",
 		details: `with keys, agent, jump hosts and forwards, saved hosts are skipped`},
-	{name: "export-ssh-config", usage: "sshr export-ssh-config [--install|--uninstall]", short: "write the hosts as ssh config",
+	{name: "export", aliases: []string{"export-ssh-config"}, usage: "sshr export [--install|--uninstall]", short: "write the hosts as ssh config",
 		details: `prints the hosts as ssh config, --install writes ~/.sshr/ssh_config,
 includes it from ~/.ssh/config and keeps it up to date, so ssh, scp and
 editors reach the hosts by name, passwords and keys kept in sshr are
@@ -111,7 +111,7 @@ func printUsage() { writeUsage(os.Stderr) }
 func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "sshr - SSH host manager\n\nUsage: sshr <command> [options], sshr alone opens the app\n\nCommands:")
 	for _, c := range commands {
-		fmt.Fprintf(w, "  %-18s %s\n", c.name, c.short)
+		fmt.Fprintf(w, "  %-15s %s\n", c.name, c.short)
 	}
 	fmt.Fprintln(w, `
 sshr help <command> shows its options, --reuse or --no-reuse with any
