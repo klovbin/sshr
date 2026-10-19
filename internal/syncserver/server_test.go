@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"sshr.dev/internal/syncproto"
 )
@@ -158,5 +160,24 @@ func TestSyncServer(t *testing.T) {
 	}
 	if code, _, _ := c2.do("GET", a+"/manifest", nil, nil); code != 401 {
 		t.Errorf("removed device still in = %d", code)
+	}
+}
+
+func TestJoinLimitForgetsOldAddresses(t *testing.T) {
+	s, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	for i := 0; i < 100; i++ {
+		s.creates[fmt.Sprintf("10.0.0.%d", i)] = []time.Time{old}
+	}
+	r := httptest.NewRequest("POST", "/v1/accounts", nil)
+	r.RemoteAddr = "192.0.2.1:5000"
+	if !s.allowCreate(r) {
+		t.Fatal("a new address was refused")
+	}
+	if len(s.creates) != 1 {
+		t.Fatalf("%d addresses kept, want only the new one", len(s.creates))
 	}
 }

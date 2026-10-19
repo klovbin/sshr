@@ -47,6 +47,7 @@ type Server struct {
 	locks map[string]*sync.Mutex
 	// creates limits account creation and joins per client address
 	creates map[string][]time.Time
+	swept   time.Time
 }
 
 // New serves accounts stored under dir
@@ -106,6 +107,16 @@ func (s *Server) allowCreate(r *http.Request) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
+	// addresses seen once would stay for ever, a sweep now and then drops
+	// the ones whose last try is over an hour old
+	if now.Sub(s.swept) > 10*time.Minute {
+		for addr, times := range s.creates {
+			if len(times) == 0 || now.Sub(times[len(times)-1]) >= time.Hour {
+				delete(s.creates, addr)
+			}
+		}
+		s.swept = now
+	}
 	var kept []time.Time
 	for _, t := range s.creates[ip] {
 		if now.Sub(t) < time.Hour {
