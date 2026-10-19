@@ -310,7 +310,8 @@ type ctxDevice struct {
 }
 
 // auth checks the bearer token of a device of account {a}, only an active
-// device gets through, except to read its own envelope while waiting
+// device gets through, a waiting one gets 403 everywhere, its envelope is
+// written only after it is approved
 func (s *Server) auth(next func(http.ResponseWriter, *http.Request, ctxDevice)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a := r.PathValue("a")
