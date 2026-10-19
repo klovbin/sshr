@@ -22,6 +22,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** six to eleven fewer characters, the name says what it does, scripts that use the old names do not break
 - **Why this way:** aliases in the same command table, not new commands, so both names share one code path and one help entry
 
+### Hints on a typo
+- **What:** an unknown command answers with the closest ones (`sshr tunel` gives `did you mean: sshr tunnel`), a host that is not found with the closest saved names
+- **What for:** a typo used to end with the whole help or a bare "not found"
+- **Why it helps:** the right name is on the screen, no trip to `sshr help` or `sshr list`
+- **Why this way:** edit distance of at most two (one for short words) plus prefixes, at most three names, nothing is run on a guess, so a typo never connects to the wrong server
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"

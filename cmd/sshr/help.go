@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"sshr.dev/internal/app"
 )
 
 // command is one entry of sshr help, the short line goes to the overview,
@@ -139,8 +141,98 @@ func cmdHelp(args []string) {
 	}
 	c := findCommand(args[0])
 	if c == nil {
-		fmt.Fprintf(os.Stderr, "sshr: unknown command %q, sshr help lists the commands\n", args[0])
-		os.Exit(1)
+		unknownCommand(args[0])
 	}
 	writeCommandHelp(os.Stdout, c)
+}
+
+// unknownCommand stops with the closest command names as a hint
+func unknownCommand(name string) {
+	fmt.Fprintf(os.Stderr, "sshr: unknown command %q\n", name)
+	var names []string
+	for _, c := range commands {
+		names = append(names, c.name)
+		names = append(names, c.aliases...)
+	}
+	if near := closest(name, names); len(near) > 0 {
+		fmt.Fprintf(os.Stderr, "did you mean: sshr %s\n", strings.Join(near, ", sshr "))
+	} else {
+		fmt.Fprintln(os.Stderr, "sshr help lists the commands")
+	}
+	os.Exit(1)
+}
+
+// closest returns the candidates within a small edit distance of word,
+// nearest first, a prefix of a candidate counts as near too
+func closest(word string, candidates []string) []string {
+	word = strings.ToLower(word)
+	best := map[int][]string{}
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		if seen[c] {
+			continue
+		}
+		seen[c] = true
+		d := editDistance(word, strings.ToLower(c))
+		if len(word) >= 2 && strings.HasPrefix(strings.ToLower(c), word) {
+			d = 1
+		}
+		limit := 2
+		if len(word) <= 3 {
+			limit = 1
+		}
+		if d <= limit {
+			best[d] = append(best[d], c)
+		}
+	}
+	var out []string
+	for d := 0; d <= 2 && len(out) < 3; d++ {
+		for _, c := range best[d] {
+			if len(out) < 3 {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(rb)]
+}
+
+// hintStore is the store of this run, a host that is not found gets the
+// closest saved names as a hint
+var hintStore *app.Store
+
+// hostHint returns the saved names closest to query
+func hostHint(query string) []string {
+	if hintStore == nil {
+		return nil
+	}
+	hosts, err := hintStore.List()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, h := range hosts {
+		names = append(names, h.Name)
+	}
+	return closest(query, names)
 }

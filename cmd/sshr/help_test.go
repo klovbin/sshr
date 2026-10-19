@@ -34,3 +34,15 @@ func TestCommandHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestClosest(t *testing.T) {
+	names := []string{"tunnel", "tag", "connect", "export", "list", "ls"}
+	for in, want := range map[string]string{"tunel": "tunnel", "conect": "connect", "exprt": "export", "lsit": "list", "exp": "export"} {
+		if got := closest(in, names); len(got) == 0 || got[0] != want {
+			t.Errorf("closest(%q) = %v, want %s first", in, got, want)
+		}
+	}
+	if got := closest("zzzzzz", names); len(got) != 0 {
+		t.Errorf("closest of nothing like = %v", got)
+	}
+}

@@ -47,6 +47,7 @@ func runCLI(args []string) {
 		printUsage()
 		os.Exit(1)
 	}
+	hintStore = store
 
 	switch args[0] {
 	case "list", "ls":
@@ -108,9 +109,7 @@ func runCLI(args []string) {
 	case "help", "--help", "-h":
 		cmdHelp(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "sshr: unknown command %q\n", args[0])
-		printUsage()
-		os.Exit(1)
+		unknownCommand(args[0])
 	}
 }
 
@@ -827,6 +826,11 @@ func findFailed(cmd, query string, err error) {
 		}
 	case errors.Is(err, app.ErrNotFound):
 		fmt.Fprintf(os.Stderr, "sshr %s: %s not found\n", cmd, query)
+		if near := hostHint(query); len(near) > 0 {
+			fmt.Fprintf(os.Stderr, "did you mean: %s\n", strings.Join(near, ", "))
+		} else {
+			fmt.Fprintln(os.Stderr, "sshr list shows the saved hosts")
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "sshr %s: %v\n", cmd, err)
 	}
