@@ -50,7 +50,7 @@ type response struct {
 
 // Serve answers requests from r on w until r ends
 func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
-	s := &server{store: store, opts: opts, w: w}
+	s := &server{store: store, opts: opts, w: w, slots: make(chan struct{}, maxRunning)}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 8<<20)
 	var wg sync.WaitGroup
@@ -79,11 +79,16 @@ func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
 	return sc.Err()
 }
 
+// maxRunning is how many uploads and commands run at once, as in sshr run,
+// the others wait for a free slot
+const maxRunning = 8
+
 type server struct {
 	store *app.Store
 	opts  Options
 	mu    sync.Mutex
 	w     io.Writer
+	slots chan struct{}
 }
 
 func (s *server) send(resp response) {
@@ -209,6 +214,8 @@ func (s *server) call(name string, raw json.RawMessage) (toolResult, error) {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return toolResult{}, err
 		}
+		s.slots <- struct{}{}
+		defer func() { <-s.slots }()
 		return s.uploadFile(a.Host, a.Path)
 	case "run_command":
 		if !s.opts.AllowCommands {
@@ -222,6 +229,8 @@ func (s *server) call(name string, raw json.RawMessage) (toolResult, error) {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return toolResult{}, err
 		}
+		s.slots <- struct{}{}
+		defer func() { <-s.slots }()
 		return s.runCommand(a.Host, a.Command, a.TimeoutSeconds)
 	}
 	return toolResult{}, fmt.Errorf("%w %q", errUnknownTool, name)

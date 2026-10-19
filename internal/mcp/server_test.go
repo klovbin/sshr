@@ -3,6 +3,10 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -92,5 +96,35 @@ func TestRunCommandOffered(t *testing.T) {
 	r := got["2"]["result"].(map[string]any)
 	if r["isError"] != true {
 		t.Errorf("run on an ask host = %v", r)
+	}
+}
+
+func TestRunCommandLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	dir := t.TempDir()
+	runs := filepath.Join(dir, "runs")
+	os.Mkdir(runs, 0o700)
+	// the fake ssh notes how many copies of it run at once
+	script := "#!/bin/sh\nmkdir " + runs + "/$$\nls " + runs + " | wc -l >> " + dir + "/seen\nsleep 0.3\nrmdir " + runs + "/$$\n"
+	os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0o700)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	var lines []string
+	for i := 0; i < 3*maxRunning; i++ {
+		lines = append(lines, `{"jsonrpc":"2.0","id":`+strconv.Itoa(i)+`,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"id"}}}`)
+	}
+	exchange(t, s, Options{AllowCommands: true}, lines...)
+	b, _ := os.ReadFile(filepath.Join(dir, "seen"))
+	most := 0
+	for _, f := range strings.Fields(string(b)) {
+		if n, _ := strconv.Atoi(f); n > most {
+			most = n
+		}
+	}
+	if most == 0 || most > maxRunning {
+		t.Fatalf("at most %d commands ran at once, the limit is %d", most, maxRunning)
 	}
 }
