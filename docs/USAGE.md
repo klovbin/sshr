@@ -25,7 +25,8 @@ sshr add 10.0.0.7 -u app -k ~/.ssh/id_ed25519 -p 2222 -t prod
 sshr list                                # NAME HOST USER PORT AUTH TAGS ID
 sshr connect web                         # by name or ID
 sshr rm web
-sshr help                                # every command and flag
+sshr help                                # one line per command
+sshr help add                            # the options of one command
 ```
 
 ## Passwords

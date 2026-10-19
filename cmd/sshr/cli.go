@@ -106,7 +106,7 @@ func runCLI(args []string) {
 	case app.ProxyCommandName:
 		cmdProxy(store, args[1:])
 	case "help", "--help", "-h":
-		printUsage()
+		cmdHelp(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "sshr: unknown command %q\n", args[0])
 		printUsage()
@@ -591,124 +591,6 @@ func run(h *app.Host, bin string, args ...string) int {
 		fatal(err)
 	}
 	return 0
-}
-
-func printUsage() {
-	fmt.Fprintln(os.Stderr, `sshr — SSH host manager
-
-Usage:
-  sshr                              open GUI
-  sshr list [--ping|--no-ping] [search...]
-                                    list saved hosts, words filter by
-                                    name, address, user and tags, tag:x
-                                    or #x needs the exact tag, --ping
-                                    adds whether each answers (on by
-                                    default with health_check)
-  sshr send <name or id> <path>... [--to <remote folder>]
-  sshr get <name or id> <remote path>... [--to <local folder>]
-                                    copy files and folders with scp and
-                                    the host's own key, password and
-                                    jump hosts, send goes to the home
-                                    folder, get to the current one,
-                                    --legacy uses the old scp protocol
-                                    for servers without SFTP
-  sshr run [-t <tag>]... [-j N] [--timeout S] [name...] -- <command>
-                                    run a command on several hosts at
-                                    once, by name and by tag (all tags),
-                                    8 at a time, each host's output as a
-                                    block, exits 1 when one fails
-  sshr tag <name or id> [+tag|-tag|tag...]
-                                    show, add (+ or bare) or remove (-)
-                                    tags of a host
-  sshr ping [name or id...]         check whether hosts answer: TCP connect
-                                    time and the SSH banner, no login,
-                                    exits 1 when one is down
-  sshr add <host> -u <user> [-n <name>] [-p <port>]
-           [-k <key> | --key-stdin | --agent [name] | --no-key | --ask-password]
-           [-J <jump>]
-           [--session tmux|zellij] [-t <tags>]
-                                    add a host (asks for the auth method
-                                    unless -k, --no-key or --ask-password
-                                    is given), --no-key saves a password
-                                    encrypted with a key from the system
-                                    keychain, --ask-password saves none,
-                                    ssh asks on every connect,
-                                    --key-stdin stores the private key
-                                    read from stdin inside sshr,
-                                    encrypted the same way,
-                                    --op-password op://v/item/password and
-                                    --op-key "op://v/item/private key"
-                                    read them from 1Password on every
-                                    connect, --no-key --store 1password
-                                    creates a 1Password item from the
-                                    password (--op-vault <name>),
-                                    --bw-password <item id> and
-                                    --bw-key <item id> read them from
-                                    Bitwarden (bw, with BW_SESSION set),
-                                    --agent [system|1password|<socket>]
-                                    uses a key from an ssh agent,
-                                    --agent-key <fingerprint|comment>
-                                    picks one of its keys,
-                                    -J a,b goes through jump hosts: saved
-                                    host names or [user@]host[:port],
-                                    --session attaches to tmux/zellij
-                                    on connect (off by default)
-  sshr rm <name or id>              remove a host
-  sshr connect [--mosh|--ssh] [--plain] [-F <forward>|all] <name or id>
-                                    ssh into a host (mosh if enabled
-                                    in settings or with --mosh),
-                                    --plain skips the host's session,
-                                    -F also opens saved forwards
-  sshr forward <host>               list saved port forwards
-  sshr forward add <host> <name> -L|-R|-D <spec>
-                                    save a forward, e.g.
-                                    db -L 5432:localhost:5432
-  sshr forward rm <host> <name>     remove a forward
-  sshr tunnel <host> [names...]     open forwards without a shell
-                                    (all when no names), Ctrl+C closes
-  sshr close <name or id>           close the shared connection to a host
-  sshr paste [-c] [-f <file>] <name or id>
-                                    upload the clipboard image (or a file)
-                                    to the host and print its path there;
-                                    -c also copies that path; removed from
-                                    the server after 15 minutes
-  sshr mcp [--allow-commands|--no-commands]
-                                    MCP server on stdin/stdout for AI
-                                    assistants: list hosts, upload files,
-                                    run commands only with
-                                    --allow-commands or the mcp_commands
-                                    setting (off by default)
-  sshr serve [--listen unix:<path>|127.0.0.1:<port>] [--allow-commands]
-                                    local REST API for other programs,
-                                    a unix socket by default, a loopback
-                                    port needs the token from
-                                    ~/.sshr/api-token, no secrets are
-                                    returned, commands are off by default
-  sshr sync [init|invite|join|pending|approve|pull|push|status|
-            remove-device|leave]   sync hosts through an sshr-sync server,
-                                    end to end encrypted, see sshr sync help
-  sshr import-ssh-config [--dry-run]
-                                    add the hosts of ~/.ssh/config with
-                                    keys, agent, jump hosts and forwards,
-                                    saved hosts are skipped
-  sshr export-ssh-config [--install|--uninstall]
-                                    print the hosts as ssh config,
-                                    --install writes ~/.sshr/ssh_config,
-                                    includes it from ~/.ssh/config and
-                                    keeps it up to date, so ssh, scp and
-                                    editors reach the hosts by name,
-                                    passwords and keys kept in sshr are
-                                    not exported
-  sshr desktop-entry [--remove]     add sshr with its icon to the
-                                    application menu: a .desktop entry
-                                    and icons on Linux, ~/Applications/
-                                    sshr.app on macOS (run again after
-                                    an update, the bundle holds a copy)
-  sshr help                         show this help
-
-  --reuse / --no-reuse              with any command that connects: share
-                                    one connection per host (ControlMaster)
-                                    or not, overriding the setting`)
 }
 
 func promptAuthMethod() (key, password, mode string, keyData []byte) {
