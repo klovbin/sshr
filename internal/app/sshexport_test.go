@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -177,5 +178,36 @@ func TestExportKeepsLongConfigLines(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(cfg); string(b) != orig {
 		t.Fatalf("uninstall did not restore the file, got %d bytes, want %d", len(b), len(orig))
+	}
+}
+
+func TestWriteFileAtomicConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "host.json")
+	var wg sync.WaitGroup
+	errs := make(chan error, 400)
+	for g := 0; g < 8; g++ {
+		data := bytes.Repeat([]byte{byte('a' + g)}, 64<<10)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				if err := WriteFileAtomic(path, data, 0o600); err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	if len(b) != 64<<10 || bytes.Count(b, b[:1]) != len(b) {
+		t.Fatal("the file is a mix of two writers")
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(left) > 0 {
+		t.Fatalf("temp files left: %v", left)
 	}
 }

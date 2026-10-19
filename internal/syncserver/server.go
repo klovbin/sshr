@@ -143,13 +143,28 @@ func (s *Server) saveDevices(a string, ds []deviceFile) error {
 	return writeFile(filepath.Join(s.accountDir(a), "devices.json"), b)
 }
 
-// writeFile replaces path through a temp file and a rename
+// writeFile replaces path through a temp file of its own and a rename, two
+// requests writing the same file never share a temp file
 func writeFile(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, 0o600)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 func newToken() (token, hash string, err error) {

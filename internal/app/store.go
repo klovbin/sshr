@@ -719,11 +719,7 @@ func (s *Store) save(h *Host) error {
 		return err
 	}
 	path := filepath.Join(s.Dir, h.ID+".json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	if err := s.writePub(h); err != nil {

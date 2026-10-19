@@ -179,11 +179,7 @@ func (c *Client) save() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	tmp := c.statePath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.statePath())
+	return app.WriteFileAtomic(c.statePath(), b, 0o600)
 }
 
 // checkServer refuses plain HTTP except to this machine

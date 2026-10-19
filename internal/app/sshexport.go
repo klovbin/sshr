@@ -271,7 +271,7 @@ func (s *Store) refreshSSHConfig(force bool) ([]ExportItem, error) {
 	if err != nil {
 		return items, err
 	}
-	return items, writeFileAtomic(s.SSHConfigOut, buf.Bytes(), 0o600)
+	return items, WriteFileAtomic(s.SSHConfigOut, buf.Bytes(), 0o600)
 }
 
 // editUserConfig adds or removes the Include line of the export
@@ -322,19 +322,29 @@ func (s *Store) editUserConfig(add bool) error {
 	if out != "" {
 		out += "\n"
 	}
-	return writeFileAtomic(path, []byte(out), mode)
+	return WriteFileAtomic(path, []byte(out), mode)
 }
 
-// writeFileAtomic writes through a temporary file, a reader never sees half
-// of it
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".sshr-tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
+// WriteFileAtomic writes through a temporary file of its own next to path,
+// a reader never sees half of it and two writers never share a temp file
+func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, mode)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
 		os.Remove(tmp)
-		return err
 	}
-	return nil
+	return err
 }
