@@ -128,3 +128,28 @@ func TestRunCommandLimit(t *testing.T) {
 		t.Fatalf("at most %d commands ran at once, the limit is %d", most, maxRunning)
 	}
 }
+
+func TestUploadRefusesHiddenFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	os.MkdirAll(filepath.Join(home, ".ssh"), 0o700)
+	key := filepath.Join(home, ".ssh", "id_ed25519")
+	os.WriteFile(key, []byte("secret"), 0o600)
+	os.WriteFile(filepath.Join(home, ".sshr-token"), []byte("t"), 0o600)
+	paths := []string{key, filepath.Join(home, ".sshr-token")}
+	// a link to a key is refused too, Windows may not allow making one
+	if link := filepath.Join(home, "notes.txt"); os.Symlink(key, link) == nil {
+		paths = append(paths, link)
+	}
+	for _, p := range paths {
+		if err := checkUploadPath(p); err == nil || !strings.Contains(err.Error(), "hidden") {
+			t.Errorf("checkUploadPath(%s) = %v", p, err)
+		}
+	}
+	ok := filepath.Join(home, "shot.png")
+	os.WriteFile(ok, []byte("png"), 0o600)
+	if err := checkUploadPath(ok); err != nil {
+		t.Errorf("a plain file was refused: %v", err)
+	}
+}

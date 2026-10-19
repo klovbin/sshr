@@ -280,6 +280,9 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 	if !filepath.IsAbs(path) {
 		return toolResult{}, errors.New("path must be absolute")
 	}
+	if err := checkUploadPath(path); err != nil {
+		return toolResult{}, err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return toolResult{}, err
@@ -336,4 +339,31 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 		},
 		IsError: res.ExitCode != 0,
 	}, nil
+}
+
+// checkUploadPath refuses files in hidden folders of the home folder and
+// hidden files there, ~/.ssh keys, ~/.sshr tokens and sync state, cloud
+// credentials, the path is resolved first so a link cannot point there
+func checkUploadPath(path string) error {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if h, err := filepath.EvalSymlinks(home); err == nil {
+		home = h
+	}
+	rel, err := filepath.Rel(home, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if strings.HasPrefix(part, ".") {
+			return fmt.Errorf("%s is hidden in the home folder (keys, tokens, settings), upload_file does not send such files, copy it elsewhere first if it is meant to go", path)
+		}
+	}
+	return nil
 }

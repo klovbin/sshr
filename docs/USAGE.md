@@ -244,7 +244,7 @@ claude mcp add --transport stdio sshr -- sshr mcp --allow-commands   # and let i
 
 Other clients: `{"mcpServers": {"sshr": {"command": "sshr", "args": ["mcp"]}}}`
 
-- `list_hosts` (read only), `upload_file` (to `~/.cache/sshr/pasted/`, removed after 15 minutes), `run_command` (stdout and stderr up to 64 KiB each, exit code, `timeout_seconds` 60 by default, 600 at most)
+- `list_hosts` (read only), `upload_file` (to `~/.cache/sshr/pasted/`, removed after 15 minutes, hidden files and folders of your home such as `~/.ssh` and `~/.sshr` are refused), `run_command` (stdout and stderr up to 64 KiB each, exit code, `timeout_seconds` 60 by default, 600 at most)
 - `run_command` is off by default (`--allow-commands` or `"mcp_commands": true`), it is marked destructive so clients ask before each call
 - secrets never leave sshr, hosts that ask for a password cannot be used, nothing listens (stdin and stdout of a child process), every command is logged to stderr
 
