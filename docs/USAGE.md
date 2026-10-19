@@ -11,7 +11,8 @@ curl -fsSL https://raw.githubusercontent.com/klovbin/sshr/main/install.sh | sh  
 - Linux and macOS, into `~/.local/bin` (`--prefix <dir>` or `SSHR_PREFIX`), no root
 - takes the release binary `sshr_<os>_<arch>` only when it matches `sha256sums.txt`, otherwise builds from source: Go 1.21+ (go fetches the toolchain from `go.mod`), the GUI also needs a C compiler and on Linux Wayland/X11 and Vulkan headers, without them the CLI is built and the script says so, `--cli-only` skips the GUI
 - adds one line marked `# added by the sshr installer` to your shell startup file when the folder is not in `PATH` (`--no-modify-path` skips it), runs `sshr desktop-entry` when the GUI is installed
-- `--uninstall` removes the binary, the menu entry and that line, hosts in `~/.sshr` stay
+- writes Tab completion for bash and fish when they are installed (`--no-completion` skips it), for zsh it prints the line to add to `~/.zshrc`
+- `--uninstall` removes the binary, the menu entry, the completion files and that line, hosts in `~/.sshr` stay
 - Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are planned ([#17](https://github.com/klovbin/sshr/issues/17))
 
 **Icon and menu:** `sshr desktop-entry` (`--remove` undoes it) writes `sshr.desktop` and icons to `~/.local/share` on Linux and `~/Applications/sshr.app` on macOS (signed ad hoc, it holds a copy of sshr because the Dock shows a bundle icon only for a program inside it, run it again after an update, `install.sh` does), on Windows the icon is a resource of `sshr.exe`, icons are built into the binary, logo files are in `assets/icons`, `go generate ./cmd/sshr` rebuilds the Windows resources
@@ -27,6 +28,7 @@ sshr connect web                         # by name or ID
 sshr rm web
 sshr help                                # one line per command
 sshr help add                            # the options of one command
+sshr completion fish | source            # Tab completion, also bash and zsh
 ```
 
 ## Passwords

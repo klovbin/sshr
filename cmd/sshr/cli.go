@@ -106,6 +106,10 @@ func runCLI(args []string) {
 		cmdExportSSHConfig(store, args[1:])
 	case app.ProxyCommandName:
 		cmdProxy(store, args[1:])
+	case "completion":
+		cmdCompletion(args[1:])
+	case completeCommand:
+		cmdComplete(store, args[1:])
 	case "help", "--help", "-h":
 		cmdHelp(args[1:])
 	default:

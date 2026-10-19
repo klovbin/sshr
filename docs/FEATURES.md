@@ -28,6 +28,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the right name is on the screen, no trip to `sshr help` or `sshr list`
 - **Why this way:** edit distance of at most two (one for short words) plus prefixes, at most three names, nothing is run on a guess, so a typo never connects to the wrong server
 
+### Tab completion
+- **What:** `sshr completion bash|zsh|fish` prints a script, Tab then completes commands, flags, saved host names, tags and forward names, install.sh puts it in place for bash and fish
+- **What for:** host names, tags and forward names had to be typed out or looked up in `sshr list`
+- **Why it helps:** `sshr conn<Tab> w<Tab>` instead of the whole line, names come from your own hosts, so a typo cannot reach the wrong server
+- **Why this way:** the scripts are a few lines that call `sshr __complete`, the logic lives in Go with the command table, so it matches the installed version on every shell, files are completed where sshr has nothing to offer, as in send and get
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"

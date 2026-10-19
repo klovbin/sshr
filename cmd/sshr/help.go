@@ -88,6 +88,10 @@ not exported`},
 	{name: "desktop-entry", usage: "sshr desktop-entry [--remove]", short: "add sshr to the application menu",
 		details: `a .desktop entry and icons on Linux, ~/Applications/sshr.app on macOS
 (run again after an update, the bundle holds a copy)`},
+	{name: "completion", usage: "sshr completion bash|zsh|fish", short: "Tab completion for your shell",
+		details: `prints a script that completes commands, flags, host names, tags and
+forwards, install.sh puts it in place for bash and fish, for zsh add
+source <(sshr completion zsh) to ~/.zshrc`},
 	{name: "help", usage: "sshr help [command]", short: "show this help, or the options of one command"},
 }
 
