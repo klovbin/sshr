@@ -28,7 +28,7 @@ func TestCommandHelp(t *testing.T) {
 	}
 	var b bytes.Buffer
 	writeCommandHelp(&b, findCommand("add"))
-	for _, want := range []string{"--op-password", "--bw-key", "--agent-key", "-J a,b"} {
+	for _, want := range []string{"--op-password", "--bw-key", "--agent-key", "--jump <a,b>", "--op-vault"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("sshr help add lost %s", want)
 		}
