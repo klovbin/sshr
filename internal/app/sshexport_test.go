@@ -211,3 +211,43 @@ func TestWriteFileAtomicConcurrent(t *testing.T) {
 		t.Fatalf("temp files left: %v", left)
 	}
 }
+
+func TestSaveSettingsLeavesNoTornFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < 20; i++ {
+				st := Settings{OPAccount: strings.Repeat(string(rune('a'+g)), 4096)}
+				if err := SaveSettings(st); err != nil {
+					t.Error(err)
+				}
+			}
+		}(g)
+	}
+	// a reader meanwhile never sees a torn file
+	done := make(chan struct{})
+	torn := 0
+	go func() {
+		defer close(done)
+		for i := 0; i < 300; i++ {
+			if st, err := LoadSettings(); err != nil || st.OPAccount != "" && len(st.OPAccount) != 4096 {
+				torn++
+			}
+		}
+	}()
+	wg.Wait()
+	<-done
+	if torn > 0 {
+		t.Fatalf("%d reads saw a torn settings file", torn)
+	}
+	st, err := LoadSettings()
+	if err != nil || len(st.OPAccount) != 4096 {
+		t.Fatalf("settings after concurrent saves: %v len %d", err, len(st.OPAccount))
+	}
+}

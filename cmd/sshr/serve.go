@@ -129,7 +129,7 @@ func apiToken() (token, path string, err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", "", err
 	}
-	return token, path, os.WriteFile(path, []byte(token+"\n"), 0o600)
+	return token, path, app.WriteFileAtomic(path, []byte(token+"\n"), 0o600)
 }
 
 // removeStaleSocket removes a socket left at path, anything else that is

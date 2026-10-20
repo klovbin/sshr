@@ -99,5 +99,7 @@ func SaveSettings(s Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o600)
+	// through a temp file, the app and the CLI may save at once and a torn
+	// file would load as defaults
+	return WriteFileAtomic(path, append(b, '\n'), 0o600)
 }
