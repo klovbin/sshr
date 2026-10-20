@@ -52,8 +52,10 @@ func (s *Store) agentArgs(h *Host) []string {
 	if sock == "" {
 		args = append(args, "-o", "IdentityAgent=SSH_AUTH_SOCK")
 	} else {
-		// quoted for spaces, %-tokens are expanded by ssh
-		args = append(args, "-o", `IdentityAgent="`+strings.ReplaceAll(sock, "%", "%%")+`"`)
+		// quoted for spaces, %-tokens are expanded by ssh, ssh reads a
+		// doubled backslash as one, forward slashes keep a Windows pipe
+		// (//./pipe/...) and paths whole, Windows takes both kinds
+		args = append(args, "-o", `IdentityAgent="`+strings.ReplaceAll(filepath.ToSlash(sock), "%", "%%")+`"`)
 	}
 	if h.KeyPub != "" {
 		if _, err := os.Stat(s.pubPath(h)); err != nil {

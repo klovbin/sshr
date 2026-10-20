@@ -44,7 +44,9 @@ func exportPath(p string) (string, error) {
 	if strings.ContainsAny(p, "\"\r\n\t") || strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 }) {
 		return "", fmt.Errorf("path %q cannot be written to ssh config", p)
 	}
-	return `"` + strings.ReplaceAll(p, "%", "%%") + `"`, nil
+	// ssh reads a doubled backslash as one, forward slashes keep a UNC or
+	// Windows path whole
+	return `"` + strings.ReplaceAll(filepath.ToSlash(p), "%", "%%") + `"`, nil
 }
 
 // userAliases lists the Host names of the user's ssh config without the
