@@ -140,3 +140,17 @@ func TestImport(t *testing.T) {
 		t.Fatalf("another key: %v sealed=%q", err, got.KeySealed)
 	}
 }
+
+func TestAddChecksTheUser(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	for _, u := range []string{"u;id", "u u", "-oProxyCommand=x", "u\nx", "$(id)", "u`id`"} {
+		if _, err := s.Add(Host{Host: "10.0.0.1", User: u, PasswordMode: PasswordAsk}); err == nil {
+			t.Errorf("user %q was accepted", u)
+		}
+	}
+	for _, u := range []string{"deploy", "first.last", "me@corp.example", `CORP\me`, "user-1", "_svc"} {
+		if _, err := s.Add(Host{Host: "10.0.0.1", User: u, PasswordMode: PasswordAsk}); err != nil {
+			t.Errorf("user %q was refused: %v", u, err)
+		}
+	}
+}

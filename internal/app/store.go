@@ -160,6 +160,11 @@ func (s *Store) Add(in Host) (*Host, error) {
 	return &h, nil
 }
 
+// userRe is what a login name may hold, letters, digits, . _ @ and - for
+// user@domain and DOMAIN\user too, never a leading -, a space or a shell
+// character, ssh and config lines take it as it is
+var userRe = regexp.MustCompile(`^[A-Za-z0-9._@\\][A-Za-z0-9._@\\-]*$`)
+
 // cleanHost trims and checks the fields of a host before it is saved
 func cleanHost(h Host) (Host, error) {
 	h.Name = strings.TrimSpace(h.Name)
@@ -173,6 +178,9 @@ func cleanHost(h Host) (Host, error) {
 	}
 	if h.User == "" {
 		return h, ErrUserRequired
+	}
+	if !userRe.MatchString(h.User) {
+		return h, fmt.Errorf("user %q has characters a login name cannot have", h.User)
 	}
 	if h.Name == "" {
 		h.Name = h.Host
