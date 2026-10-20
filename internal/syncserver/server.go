@@ -181,6 +181,11 @@ func writeFile(path string, data []byte) error {
 	}
 	tmp := f.Name()
 	_, err = f.Write(data)
+	// the data reaches the disk before the rename does, a power loss
+	// leaves the old file or the new one, never an empty one
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

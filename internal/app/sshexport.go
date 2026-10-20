@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -336,6 +337,11 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	tmp := f.Name()
 	_, err = f.Write(data)
+	// the data reaches the disk before the rename does, a power loss
+	// leaves the old file or the new one, never an empty one
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -347,6 +353,20 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	if err != nil {
 		os.Remove(tmp)
+		return err
 	}
-	return err
+	syncDir(filepath.Dir(path))
+	return nil
+}
+
+// syncDir makes a rename in dir durable, Windows has no directory sync and
+// commits the rename itself
+func syncDir(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if d, err := os.Open(dir); err == nil {
+		d.Sync()
+		d.Close()
+	}
 }
