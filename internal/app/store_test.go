@@ -100,3 +100,43 @@ func TestListAllNamesUnreadableFiles(t *testing.T) {
 		t.Fatalf("ListAll = %v %v %v", hosts, broken, err)
 	}
 }
+
+func TestAddRefusesShellInHost(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	for _, h := range []Host{
+		{Host: "a;b", User: "u"}, {Host: "a b", User: "u"}, {Host: "a\nb", User: "u"}, {Host: "$(id)", User: "u"},
+	} {
+		h.PasswordMode = PasswordAsk
+		if _, err := s.Add(h); err == nil {
+			t.Errorf("Add(%q, %q) was accepted", h.Host, h.User)
+		}
+	}
+}
+
+func TestImport(t *testing.T) {
+	useMockKeychain(t)
+	s := &Store{Dir: t.TempDir()}
+	id := strings.Repeat("a", 32)
+	if _, err := s.Import(Host{ID: "../x", Host: "10.0.0.1", User: "u"}); err == nil {
+		t.Error("a bad id was imported")
+	}
+	if _, err := s.Import(Host{ID: id, Host: "10.0.0.1", User: "u", PasswordMode: PasswordSaved}); err == nil {
+		t.Error("a saved-password host without its password was imported")
+	}
+	// a key kept in sshr stays only while it is the same key
+	keyData, _ := testKey(t, "")
+	h, err := s.Add(Host{Name: "v", Host: "10.0.0.1", User: "u", KeyData: keyData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := *h
+	got, err := s.Import(same)
+	if err != nil || got.KeySealed == "" {
+		t.Fatalf("same key: %v sealed=%q", err, got.KeySealed)
+	}
+	other := *h
+	other.KeyPub = "ssh-ed25519 AAAAother"
+	if got, err = s.Import(other); err != nil || got.KeySealed != "" {
+		t.Fatalf("another key: %v sealed=%q", err, got.KeySealed)
+	}
+}
