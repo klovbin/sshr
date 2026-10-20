@@ -94,3 +94,19 @@ func TestAPIGuard(t *testing.T) {
 		t.Errorf("rebinding host = %d", rec.Code)
 	}
 }
+
+func TestAPIUploadAndTunnelChecks(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	srv := New(s, Options{})
+	if _, err := s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range []string{"sh%3Bid", "a%24b", "a/b", "a%20b", "abcdefghijk"} {
+		if code, body := do(t, srv, "POST", "/v1/hosts/web/upload?ext="+ext, "data", nil); code != 400 || !strings.Contains(body, "ext must be") {
+			t.Errorf("upload with ext %q = %d %s", ext, code, body)
+		}
+	}
+	if code, body := do(t, srv, "POST", "/v1/hosts/web/tunnels", "", nil); code != 400 || !strings.Contains(body, "no saved forwards") {
+		t.Errorf("tunnel of a host without forwards = %d %s", code, body)
+	}
+}
