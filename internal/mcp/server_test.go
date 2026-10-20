@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -151,5 +152,56 @@ func TestUploadRefusesHiddenFiles(t *testing.T) {
 	os.WriteFile(ok, []byte("png"), 0o600)
 	if err := checkUploadPath(ok); err != nil {
 		t.Errorf("a plain file was refused: %v", err)
+	}
+}
+
+func resultText(t *testing.T, m map[string]any) (string, bool) {
+	t.Helper()
+	r, ok := m["result"].(map[string]any)
+	if !ok {
+		return fmt.Sprint(m["error"]), true
+	}
+	text := ""
+	if c, ok := r["content"].([]any); ok && len(c) > 0 {
+		text, _ = c[0].(map[string]any)["text"].(string)
+	}
+	return text, r["isError"] == true
+}
+
+func TestUploadFileArguments(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "a", Host: "10.0.0.1", User: "u", PasswordMode: app.PasswordAsk})
+	s.Add(app.Host{Name: "b", Host: "10.0.0.1", User: "u", PasswordMode: app.PasswordAsk})
+	dir := t.TempDir()
+	call := func(id int, host, path string) string {
+		return `{"jsonrpc":"2.0","id":` + strconv.Itoa(id) + `,"method":"tools/call","params":{"name":"upload_file","arguments":{"host":"` + host + `","path":` + strconv.Quote(path) + `}}}`
+	}
+	got := exchange(t, s, Options{}, call(1, "a", "relative.txt"), call(2, "a", dir), call(3, "10.0.0.1", "/etc/hostname"))
+	for id, want := range map[string]string{"1": "absolute", "2": "regular file", "3": "several"} {
+		if text, isErr := resultText(t, got[id]); !isErr || !strings.Contains(text, want) {
+			t.Errorf("call %s = %q, want an error with %q", id, text, want)
+		}
+	}
+}
+
+func TestRunCommandTimeoutClamp(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	dir := t.TempDir()
+	// the fake ssh prints the remote command it got
+	os.WriteFile(filepath.Join(dir, "ssh"), []byte("#!/bin/sh\nfor a; do last=$a; done\necho \"$last\"\n"), 0o700)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	call := func(id, secs int) string {
+		return `{"jsonrpc":"2.0","id":` + strconv.Itoa(id) + `,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"id","timeout_seconds":` + strconv.Itoa(secs) + `}}}`
+	}
+	got := exchange(t, s, Options{AllowCommands: true}, call(1, 99999), call(2, 0), call(3, 30))
+	for id, want := range map[string]string{"1": "timeout -k 5 600 ", "2": "timeout -k 5 60 ", "3": "timeout -k 5 30 "} {
+		b, _ := json.Marshal(got[id])
+		if !strings.Contains(string(b), want) {
+			t.Errorf("call %s: no %q in %s", id, want, b)
+		}
 	}
 }
