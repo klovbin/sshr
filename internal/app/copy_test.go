@@ -61,3 +61,37 @@ func TestCopyArgsLocalColon(t *testing.T) {
 		t.Errorf("get destination = %q", got)
 	}
 }
+
+func TestCopyArgsMore(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	// get with several sources, each one remote
+	h := &Host{ID: "a", Name: "web", Host: "10.0.0.5", User: "u", Port: 22}
+	got, err := s.CopyArgs(h, false, false, []string{"/a", "/b"}, "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line := strings.Join(got, " "); !strings.HasSuffix(line, "-- u@10.0.0.5:/a u@10.0.0.5:/b out") {
+		t.Errorf("get two = %s", line)
+	}
+	// only a -p element becomes -P, a ProxyCommand that holds " -p " stays
+	bastion, err := s.Add(Host{Name: "bastion", Host: "10.0.0.9", User: "j", Port: 2200, PasswordMode: PasswordSaved, Password: "x"})
+	if err != nil {
+		t.Skip("no keychain for a saved password here:", err)
+	}
+	inner := &Host{ID: "c", Name: "inner", Host: "10.0.0.6", User: "u", Port: 2222, Jump: bastion.Name}
+	got, err = s.CopyArgs(inner, true, false, []string{"f"}, "/t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, a := range got {
+		if a == "-p" {
+			t.Errorf("a -p element is left at %d: %q", i, got)
+		}
+		if strings.HasPrefix(a, "ProxyCommand=") && strings.Contains(a, " -P ") {
+			t.Errorf("the ProxyCommand was rewritten: %s", a)
+		}
+	}
+	if line := strings.Join(got, " "); !strings.Contains(line, "-P 2222") {
+		t.Errorf("port of the target = %s", line)
+	}
+}
