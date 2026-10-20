@@ -73,6 +73,12 @@ func TestCopyArgsMore(t *testing.T) {
 	if line := strings.Join(got, " "); !strings.HasSuffix(line, "-- u@10.0.0.5:/a u@10.0.0.5:/b out") {
 		t.Errorf("get two = %s", line)
 	}
+	// an address saved with brackets is not bracketed twice
+	hb := &Host{ID: "b", Host: "[::1]", User: "u", Port: 22}
+	got, _ = s.CopyArgs(hb, true, false, []string{"f"}, "/t")
+	if line := strings.Join(got, " "); !strings.HasSuffix(line, "u@[::1]:/t") {
+		t.Errorf("bracketed address = %s", line)
+	}
 	// only a -p element becomes -P, a ProxyCommand that holds " -p " stays
 	bastion, err := s.Add(Host{Name: "bastion", Host: "10.0.0.9", User: "j", Port: 2200, PasswordMode: PasswordSaved, Password: "x"})
 	if err != nil {

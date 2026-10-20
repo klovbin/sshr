@@ -63,11 +63,11 @@ func localSpec(path string) string {
 }
 
 // remoteSpec is [user@]host:path for scp, an IPv6 address goes in brackets
-// so its colons are not read as the path separator, an empty path is the
-// home folder
+// so its colons are not read as the path separator, unless it was saved in
+// them already, an empty path is the home folder
 func remoteSpec(h *Host, path string) string {
 	host := h.Host
-	if strings.Contains(host, ":") {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
 		host = "[" + host + "]"
 	}
 	if h.User != "" {
