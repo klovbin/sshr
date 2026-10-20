@@ -259,7 +259,11 @@ func (s *server) findHost(query string) (*app.Host, error) {
 	case errors.As(err, &amb):
 		names := make([]string, len(amb.Hosts))
 		for i, h := range amb.Hosts {
-			names[i] = h.Name + " (" + h.ID[:8] + ")"
+			id := h.ID
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			names[i] = h.Name + " (" + id + ")"
 		}
 		return nil, fmt.Errorf("%q matches several hosts: %s, use the ID", query, strings.Join(names, ", "))
 	case errors.Is(err, app.ErrNotFound):

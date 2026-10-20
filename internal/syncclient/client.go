@@ -813,7 +813,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	for _, id := range ids {
 		e := m.Entries[id]
 		if broken[id] {
-			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", id[:8], id)
+			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
 			continue
 		}
 		delete(c.st.Skipped, id)
@@ -834,7 +834,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
 			// removed here and changed there, the change wins so nothing
 			// written on the other device is lost, the user is told
-			c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", id[:8], e.Device[:8])
+			c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", short(id, 8), short(e.Device, 8))
 		}
 		if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
 			// neither side is lost, the later change keeps the host and
@@ -857,7 +857,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 						c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
 						continue
 					}
-					c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", id[:8], e.Device[:8], cp.Name)
+					c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", short(id, 8), short(e.Device, 8), cp.Name)
 					for _, n := range notes {
 						c.logf("%s: %s", cp.Name, n)
 					}
@@ -892,14 +892,14 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			dup = cp
 		}
 		if dup != nil && e.Deleted {
-			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], dup.Name)
+			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
 		}
 		if e.Deleted {
 			if _, ok := local[id]; ok {
 				if err := c.Store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
 					return err
 				}
-				c.logf("removed %s", id[:8])
+				c.logf("removed %s", short(id, 8))
 			}
 			c.st.Entries[id] = next
 			continue
@@ -922,7 +922,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			continue
 		}
 		if dup != nil {
-			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], dup.Name)
+			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
 		}
 		for _, n := range notes {
 			c.logf("%s: %s", h.Name, n)
@@ -948,7 +948,7 @@ func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, erro
 		return nil, serverError(code, blob)
 	}
 	if blobHash(blob) != hash {
-		return nil, fmt.Errorf("blob of %s does not match its hash", id[:8])
+		return nil, fmt.Errorf("blob of %s does not match its hash", short(id, 8))
 	}
 	return openEntry(key, c.st.Account, id, epoch, blob)
 }
@@ -978,17 +978,26 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 	}
 	var p payload
 	if err := json.Unmarshal(plain, &p); err != nil {
-		return nil, fmt.Errorf("entry %s: %v", id[:8], err)
+		return nil, fmt.Errorf("entry %s: %v", short(id, 8), err)
 	}
 	if p.Host.ID != id {
-		return nil, fmt.Errorf("entry %s holds host %s", id[:8], p.Host.ID)
+		return nil, fmt.Errorf("entry %s holds host %s", short(id, 8), p.Host.ID)
 	}
 	return &p, nil
 }
 
+// short cuts s to n characters for logs and names, ids from a manifest are
+// signed but their length is not checked
+func short(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
 // conflictName names the copy that keeps the losing side of a conflict
 func conflictName(name, device string) string {
-	return fmt.Sprintf("%s (conflict %s %s)", name, device[:6], time.Now().Format("2006-01-02 15:04"))
+	return fmt.Sprintf("%s (conflict %s %s)", name, short(device, 6), time.Now().Format("2006-01-02 15:04"))
 }
 
 // localHosts returns the payload of every host here and the IDs of host
@@ -1113,7 +1122,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 			continue
 		}
 		if broken[id] {
-			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", id[:8], id)
+			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
 			continue
 		}
 		if _, ok := local[id]; !ok && !known.Deleted {
@@ -1350,9 +1359,7 @@ func (c *Client) Status() (*Status, error) {
 		d.Name = CleanName(d.Name)
 		st.Devices = append(st.Devices, d)
 	}
-	if len(c.st.Head) >= 8 {
-		st.State = c.st.Head[:8]
-	}
+	st.State = short(c.st.Head, 8)
 	return st, nil
 }
 
