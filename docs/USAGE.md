@@ -25,6 +25,7 @@ sshr add 10.0.0.7 -u app -n web          # asks how to log in
 sshr add 10.0.0.7 -u app -k ~/.ssh/id_ed25519 -p 2222 -t prod
 sshr list                                # NAME HOST USER PORT AUTH TAGS ID
 sshr list --recent                       # last connected first, LAST says how long ago
+sshr list --json                         # the same as JSON, also ping --json and run --json
 sshr connect web                         # by name or ID
 sshr show web                            # the host and the exact ssh command connect runs
 sshr rm web

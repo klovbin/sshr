@@ -46,6 +46,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the line can be copied, run with `-v` added and compared with plain ssh, without reading the code
 - **Why this way:** passwords never show because they reach ssh through the askpass socket and not the command line, each argument is quoted for a POSIX shell so the copied line runs as the same argv, a test runs it through sh, the lab connects with it through a jump host
 
+### JSON output
+- **What:** `--json` for `sshr list`, `sshr ping` and `sshr run`: hosts with the fields of the REST API, state, latency and reason per host, exit code, stdout and stderr per host
+- **What for:** scripts, monitoring and other programs had to parse tables made for people
+- **Why it helps:** `sshr list --json | jq` and `sshr run --json -t prod -- uptime` give data that does not break when a column is added
+- **Why this way:** fixed field lists, the host part is app.HostSummary that the API already returns, so secrets cannot slip in, run prints one list at the end instead of a stream so the output is one valid JSON document
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"

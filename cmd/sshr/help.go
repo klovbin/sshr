@@ -26,6 +26,7 @@ tag:prod or #prod matches that tag only
 
 Options:
   --recent     the hosts you connected to last first, with how long ago
+  --json       the hosts as JSON, the same fields as the REST API, no secrets
   --ping       also show whether each host answers
   --no-ping    do not, when health_check is on in the settings
 
@@ -78,9 +79,12 @@ Examples:
 Examples:
   sshr connect web
   sshr connect -F db web`},
-	{name: "ping", usage: "sshr ping [name or id...]", short: "check whether hosts answer",
+	{name: "ping", usage: "sshr ping [--json] [name or id...]", short: "check whether hosts answer",
 		details: `Opens a TCP connection and reads the SSH banner, does not log in,
-all hosts when none is named, exits 1 when one is down`},
+all hosts when none is named, exits 1 when one is down
+
+Options:
+  --json   state, latency in ms and reason per host as JSON`},
 	{name: "tag", usage: "sshr tag <name or id> [+tag|-tag|tag...]", short: "show, add or remove tags",
 		details: `Examples:
   sshr tag web               show the tags
@@ -94,6 +98,7 @@ Options:
   -t <tag>         hosts with this tag, repeat for more tags
   -j <N>           how many at once, 8 by default
   --timeout <s>    stop the command after s seconds
+  --json           one JSON list at the end: exit code, stdout, stderr per host
 
 Examples:
   sshr run -t prod -- uptime

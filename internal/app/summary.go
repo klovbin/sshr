@@ -3,6 +3,7 @@ package app
 import (
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // HostSummary is what other programs (MCP, the REST API) may know about a
@@ -18,6 +19,8 @@ type HostSummary struct {
 	Session  string   `json:"session,omitempty"`
 	Forwards []string `json:"forwards,omitempty"`
 	Tags     []string `json:"tags,omitempty"`
+	// LastConnected is when this machine last had a session to the host
+	LastConnected *time.Time `json:"last_connected,omitempty"`
 }
 
 // AuthLabel says in words how h logs in
@@ -68,7 +71,7 @@ func (h *Host) AuthShort() string {
 
 // Summary is h without its secrets
 func (h *Host) Summary() HostSummary {
-	sum := HostSummary{Name: h.Name, ID: h.ID, Address: h.Host, User: h.User, Port: h.Port, Auth: h.AuthLabel(), Jump: h.Jump, Session: h.Session, Tags: h.Tags}
+	sum := HostSummary{Name: h.Name, ID: h.ID, Address: h.Host, User: h.User, Port: h.Port, Auth: h.AuthLabel(), Jump: h.Jump, Session: h.Session, Tags: h.Tags, LastConnected: h.LastConnected}
 	for _, f := range h.Forwards {
 		sum.Forwards = append(sum.Forwards, f.String())
 	}

@@ -13,7 +13,7 @@ import (
 	"sshr.dev/internal/app"
 )
 
-const runUsage = "Usage: sshr run [-t <tag>]... [-j <parallel>] [--timeout <seconds>] [name or id...] -- <command>"
+const runUsage = "Usage: sshr run [-t <tag>]... [-j <parallel>] [--timeout <seconds>] [--json] [name or id...] -- <command>"
 
 // cmdRun runs one command on several hosts at once, picked by name and by
 // tag, each host's output is printed as a block when it finishes
@@ -21,6 +21,7 @@ func cmdRun(store *app.Store, args []string) {
 	var tags, names []string
 	parallel, timeout := 8, 60
 	command := ""
+	asJSON := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -36,6 +37,8 @@ func cmdRun(store *app.Store, args []string) {
 		case a == "--timeout" && i+1 < len(args):
 			i++
 			timeout = mustPositive(args[i], "--timeout")
+		case a == "--json":
+			asJSON = true
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintln(os.Stderr, runUsage)
 			os.Exit(1)
@@ -55,10 +58,11 @@ func cmdRun(store *app.Store, args []string) {
 
 	var mu sync.Mutex
 	var failed []string
+	results := make([]runJSON, len(hosts))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, parallel)
 	for i := range hosts {
-		h := &hosts[i]
+		h, idx := &hosts[i], i
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -67,6 +71,20 @@ func cmdRun(store *app.Store, args []string) {
 			res, err := store.RunRemote(h, command, nil, time.Duration(timeout)*time.Second)
 			mu.Lock()
 			defer mu.Unlock()
+			if asJSON {
+				r := runJSON{Name: h.Name, ID: h.ID}
+				if res != nil {
+					r.ExitCode, r.Stdout, r.Stderr, r.Truncated = res.ExitCode, string(res.Stdout), string(res.Stderr), res.Truncated
+				}
+				if err != nil {
+					r.Error = err.Error()
+				}
+				results[idx] = r
+				if err != nil || res.ExitCode != 0 {
+					failed = append(failed, h.Name)
+				}
+				return
+			}
 			switch {
 			case errors.Is(err, app.ErrAsksPassword):
 				fmt.Printf("== %s: skipped, it asks for its password every time\n", h.Name)
@@ -92,6 +110,9 @@ func cmdRun(store *app.Store, args []string) {
 		}()
 	}
 	wg.Wait()
+	if asJSON {
+		printJSON(results)
+	}
 	if len(failed) > 0 {
 		fmt.Fprintf(os.Stderr, "%d of %d failed: %s\n", len(failed), len(hosts), strings.Join(failed, ", "))
 		os.Exit(1)

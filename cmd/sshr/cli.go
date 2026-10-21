@@ -122,10 +122,12 @@ func runCLI(args []string) {
 func cmdList(store *app.Store, args []string) {
 	st, _ := app.LoadSettings()
 	ping := st.HealthCheck
-	recent := false
+	recent, asJSON := false, false
 	var query []string
 	for _, a := range args {
 		switch {
+		case a == "--json":
+			asJSON = true
 		case a == "--recent":
 			recent = true
 		case a == "--ping":
@@ -133,7 +135,7 @@ func cmdList(store *app.Store, args []string) {
 		case a == "--no-ping":
 			ping = false
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintln(os.Stderr, "Usage: sshr list [--recent] [--ping|--no-ping] [search words, tag:x or #x]")
+			fmt.Fprintln(os.Stderr, "Usage: sshr list [--recent] [--ping|--no-ping] [--json] [search words, tag:x or #x]")
 			os.Exit(1)
 		default:
 			query = append(query, a)
@@ -143,12 +145,12 @@ func cmdList(store *app.Store, args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	if len(all) == 0 {
+	if len(all) == 0 && !asJSON {
 		fmt.Println("No hosts. Use `sshr add` to add one.")
 		return
 	}
 	hosts := app.Filter(all, strings.Join(query, " "))
-	if len(hosts) == 0 {
+	if len(hosts) == 0 && !asJSON {
 		fmt.Printf("No hosts match %q\n", strings.Join(query, " "))
 		os.Exit(1)
 	}
@@ -158,6 +160,19 @@ func cmdList(store *app.Store, args []string) {
 	}
 	if recent {
 		app.SortRecent(hosts)
+	}
+	if asJSON {
+		out := make([]listJSON, 0, len(hosts))
+		for _, h := range hosts {
+			item := listJSON{HostSummary: h.Summary()}
+			if ping {
+				hj := toHealthJSON(health[h.ID])
+				item.Status = &hj
+			}
+			out = append(out, item)
+		}
+		printJSON(out)
+		return
 	}
 	now := time.Now()
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -972,6 +987,16 @@ func cmdExportSSHConfig(store *app.Store, args []string) {
 
 // cmdPing checks the given hosts, all when none is given
 func cmdPing(store *app.Store, args []string) {
+	asJSON := false
+	kept := args[:0:0]
+	for _, a := range args {
+		if a == "--json" {
+			asJSON = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	args = kept
 	var hosts []app.Host
 	if len(args) == 0 {
 		var err error
@@ -985,12 +1010,20 @@ func cmdPing(store *app.Store, args []string) {
 	res := app.CheckHealthAll(hosts)
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	code := 0
+	out := make([]pingJSON, 0, len(hosts))
 	for _, h := range hosts {
 		r := res[h.ID]
 		if r.State == app.HealthDown || r.State == app.HealthNotSSH {
 			code = 1
 		}
+		if asJSON {
+			out = append(out, pingJSON{Name: h.Name, ID: h.ID, healthJSON: toHealthJSON(r)})
+			continue
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), r.Reason)
+	}
+	if asJSON {
+		printJSON(out)
 	}
 	w.Flush()
 	os.Exit(code)
