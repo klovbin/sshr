@@ -160,6 +160,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 
 ## Moving hosts in and out
 
+### Server key check
+- **What:** `sshr ping --keys` reads the key each server shows and compares it with `~/.ssh/known_hosts`: known, unknown or changed, with its SHA256 fingerprint, a changed key makes ping exit 1
+- **What for:** a reinstalled server or someone in between shows up as "REMOTE HOST IDENTIFICATION HAS CHANGED" only when you connect, in the middle of work
+- **Why it helps:** one command checks every host before you log in, the fingerprint can be compared with the one the server's admin gives
+- **Why this way:** only the key exchange runs, sshr stops before any login, it reads the user's own known_hosts (hashed entries too) and never writes to it, so there is no second trust store, hosts behind a jump host are not checked because their key is only visible through it
+
 ### Import from ssh config
 - **What:** every `Host` of `~/.ssh/config` and its includes becomes a host, with keys, agent, jumps and forwards
 - **What for:** starting with the hosts you already have

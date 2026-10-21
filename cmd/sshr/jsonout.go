@@ -26,6 +26,9 @@ type pingJSON struct {
 	Name string `json:"name"`
 	ID   string `json:"id"`
 	healthJSON
+	KeyType        string `json:"key_type,omitempty"`
+	KeyFingerprint string `json:"key_fingerprint,omitempty"`
+	KeyState       string `json:"key_state,omitempty"`
 }
 
 type runJSON struct {

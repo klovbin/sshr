@@ -84,11 +84,14 @@ Examples:
   sshr connect web
   sshr connect -F db web
   sshr connect deploy@10.0.0.7:2222`},
-	{name: "ping", usage: "sshr ping [--json] [name or id...]", short: "check whether hosts answer",
+	{name: "ping", usage: "sshr ping [--keys] [--json] [name or id...]", short: "check whether hosts answer",
 		details: `Opens a TCP connection and reads the SSH banner, does not log in,
 all hosts when none is named, exits 1 when one is down
 
 Options:
+  --keys   also read the server key (key exchange only, no login) and
+           compare it with ~/.ssh/known_hosts: known, unknown or changed,
+           a changed key also makes ping exit 1
   --json   state, latency in ms, reason and cause per host as JSON, the
            cause is one word: dns, refused, timeout, unreachable,
            no_banner, jump, alias or other`},

@@ -1030,11 +1030,15 @@ func cmdExportSSHConfig(store *app.Store, args []string) {
 
 // cmdPing checks the given hosts, all when none is given
 func cmdPing(store *app.Store, args []string) {
-	asJSON := false
+	asJSON, keys := false, false
 	kept := args[:0:0]
 	for _, a := range args {
-		if a == "--json" {
+		switch a {
+		case "--json":
 			asJSON = true
+			continue
+		case "--keys":
+			keys = true
 			continue
 		}
 		kept = append(kept, a)
@@ -1051,6 +1055,10 @@ func cmdPing(store *app.Store, args []string) {
 		hosts = append(hosts, *findHost(store, "ping", a))
 	}
 	res := app.CheckHealthAll(hosts)
+	var hk map[string]app.HostKey
+	if keys {
+		hk = app.CheckHostKeyAll(hosts)
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	code := 0
 	out := make([]pingJSON, 0, len(hosts))
@@ -1059,8 +1067,27 @@ func cmdPing(store *app.Store, args []string) {
 		if r.State == app.HealthDown || r.State == app.HealthNotSSH {
 			code = 1
 		}
+		k := hk[h.ID]
+		if k.State == app.KeyChanged {
+			code = 1
+		}
 		if asJSON {
-			out = append(out, pingJSON{Name: h.Name, ID: h.ID, healthJSON: toHealthJSON(r)})
+			p := pingJSON{Name: h.Name, ID: h.ID, healthJSON: toHealthJSON(r)}
+			if keys {
+				p.KeyType, p.KeyFingerprint, p.KeyState = k.Type, k.Fingerprint, k.State
+			}
+			out = append(out, p)
+			continue
+		}
+		if keys {
+			key := k.Err
+			if k.Fingerprint != "" {
+				key = k.Type + " " + k.Fingerprint + " (" + k.State + ")"
+				if k.State == app.KeyChanged {
+					key += " THE SERVER KEY CHANGED, check before connecting"
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, r.Label(), r.Reason, key)
 			continue
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), r.Reason)

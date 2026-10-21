@@ -140,6 +140,7 @@ The spec is what ssh takes after `-L`, `-R`, `-D`, checked on save, `tunnel` use
 ```sh
 sshr ping              # every host, exits 1 when one is down
 sshr list --ping       # STATUS column, --no-ping skips it
+sshr ping --keys web   # also the server key: known, unknown or changed against ~/.ssh/known_hosts
 ```
 
 `"health_check": true` (**Settings → Connection**) shows a dot with the round trip next to each host, every 5 minutes (`"health_interval"`, 60 s at least) and after a change, off by default: each check is a TCP connect and the SSH banner without login, but sshd logs it and fail2ban in `ddos` or `aggressive` mode counts it, up means the banner came within 3 s, orange is an open port that is not ssh, hosts behind a jump host show `?`
