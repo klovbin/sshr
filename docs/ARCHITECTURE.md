@@ -135,12 +135,12 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 In this order, each one its own issue and commits:
 
-1. a lock between processes around `Store.save`, `Delete` and sync apply, and a second one over a whole sync run, so a host saved by the app during a pull is never overwritten and two syncs do not lose a key rotation
-2. move starting a session (`cmdConnect`, `runMosh`, `cmdProxy`, `forwardSignals`, the tunnel options in `api`) into `app`, so the app can connect (#90) and the API stops repeating it
-3. a versioned host record on disk and a sync payload that keeps fields it does not know, before any release, so an older device does not erase what a newer one wrote
-4. a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works
-5. move `LockFile`, `WriteFileAtomic` into a small leaf package, so `cmd/sshr-sync` and `syncserver` stop linking or copying the core, `.pub` files through it too
-6. rules as tests: no `os/exec` in `ui`, `mcp`, `syncserver`, Gio only in `ui`, a test that every `Host` field is classified as synced, stripped or reset, a redacting format for `Host`, CODEOWNERS for `internal/ui`
-7. an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, the API token on the unix socket too
-8. a release pipeline: versions set through `app.Version`, signed checksums, packages (#17)
-9. split `app` by its areas once 2 and 4 have settled the seams
+1. (#95) a lock between processes around `Store.save`, `Delete` and sync apply, and a second one over a whole sync run, so a host saved by the app during a pull is never overwritten and two syncs do not lose a key rotation
+2. (#96) move starting a session (`cmdConnect`, `runMosh`, `cmdProxy`, `forwardSignals`, the tunnel options in `api`) into `app`, so the app can connect (#90) and the API stops repeating it
+3. (#97) a versioned host record on disk and a sync payload that keeps fields it does not know, before any release, so an older device does not erase what a newer one wrote
+4. (#98) a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works
+5. (#99) move `LockFile`, `WriteFileAtomic` into a small leaf package, so `cmd/sshr-sync` and `syncserver` stop linking or copying the core, `.pub` files through it too
+6. (#100) rules as tests: no `os/exec` in `ui`, `mcp`, `syncserver`, Gio only in `ui`, a test that every `Host` field is classified as synced, stripped or reset, a redacting format for `Host`, CODEOWNERS for `internal/ui`
+7. (#101) an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, the API token on the unix socket too
+8. (#102) a release pipeline: versions set through `app.Version`, signed checksums, packages (#17)
+9. (#103) split `app` by its areas once 2 and 4 have settled the seams
