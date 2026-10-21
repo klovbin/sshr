@@ -4,7 +4,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 
 ## Saved passwords and keys
 
-- a saved password or a key kept in sshr is sealed in the host file with XChaCha20-Poly1305, the host ID and field name as associated data, so a value copied to another host or field does not open
+- a saved password or a key kept in sshr is sealed in the host file with XChaCha20-Poly1305, the host ID and field name as associated data, so a value copied to another host or field does not open, a password also carries its address, user, port and jump hosts, so an address changed in the file outside sshr does not open it, an edit in sshr seals it again, passwords saved by an older version are sealed again this way on the next start
 - the vault key is 32 random bytes in the system keychain (Secret Service, macOS Keychain, Windows Credential Manager), never on disk, created once under a file lock so two processes cannot make two keys
 - every keychain call has a 5 s limit, a locked keyring that nobody answers does not hang sshr, with no keychain a saved password cannot be added, ask mode and key files keep working
 - `sshr list` and the host form never decrypt, an empty password field keeps the saved one

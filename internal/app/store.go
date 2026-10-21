@@ -138,7 +138,32 @@ func DefaultStore() (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &Store{Dir: dir, SSHConfigOut: filepath.Join(home, ".sshr", "ssh_config")}, nil
+	s := &Store{Dir: dir, SSHConfigOut: filepath.Join(home, ".sshr", "ssh_config")}
+	s.upgradeSeals()
+	return s, nil
+}
+
+// upgradeSeals seals passwords saved by an older sshr again for their
+// destination (v1 to v2), until then a host file whose address is changed
+// outside sshr would still open its password, it touches the keychain only
+// when such a host exists and leaves a host as it is when that fails
+func (s *Store) upgradeSeals() {
+	hosts, err := s.List()
+	if err != nil {
+		return
+	}
+	for i := range hosts {
+		h := &hosts[i]
+		if h.PasswordMode != PasswordSaved || !strings.HasPrefix(h.PasswordSealed, sealPrefix) {
+			continue
+		}
+		plain, err := unseal(h.PasswordSealed, h.ID, "password")
+		if err != nil {
+			continue
+		}
+		h.Password, h.PasswordSealed = string(plain), ""
+		s.save(h)
+	}
 }
 
 // Add saves a new host, ID and CreatedAt are set here
@@ -411,9 +436,17 @@ func (s *Store) Update(id string, in Host) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	// no new password typed keeps the saved one
+	// no new password typed keeps the saved one, sealed again for the new
+	// destination when the address, user, port or jump hosts changed
 	if h.PasswordMode == PasswordSaved && h.Password == "" && h.PasswordSealed == "" && h.PlainPassword == "" {
 		h.PasswordSealed, h.PlainPassword = cur.PasswordSealed, cur.PlainPassword
+	}
+	if h.PasswordMode == PasswordSaved && h.Password == "" && h.PasswordSealed != "" && h.PasswordSealed == cur.PasswordSealed && destination(h) != destination(*cur) {
+		plain, err := unsealFor(cur.PasswordSealed, cur.ID, "password", destination(*cur))
+		if err != nil {
+			return nil, fmt.Errorf("the saved password of %s does not open, type it again: %v", cur.Name, err)
+		}
+		h.Password, h.PasswordSealed = string(plain), ""
 	}
 	// no new key pasted keeps the stored one
 	if h.KeyMode == KeyVault && len(h.KeyData) == 0 && h.KeySealed == "" {
@@ -531,6 +564,13 @@ func sameDestination(a, b Host) bool {
 		strings.TrimSpace(a.User) == strings.TrimSpace(b.User) &&
 		effectivePort(a.Port) == effectivePort(b.Port) &&
 		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "")
+}
+
+// destination is what a saved password is sealed for, the server it may
+// be sent to
+func destination(h Host) string {
+	return strings.ToLower(strings.TrimSpace(h.Host)) + "\x00" + strings.TrimSpace(h.User) + "\x00" +
+		strconv.Itoa(effectivePort(h.Port)) + "\x00" + strings.ReplaceAll(h.Jump, " ", "")
 }
 
 func effectivePort(p int) int {
@@ -658,7 +698,7 @@ func sealPassword(h *Host) error {
 	if plain == "" {
 		return nil
 	}
-	sealed, err := seal([]byte(plain), h.ID, "password")
+	sealed, err := sealFor([]byte(plain), h.ID, "password", destination(*h))
 	if err != nil {
 		if h.Password == "" || h.Password == h.PlainPassword {
 			return nil
@@ -696,9 +736,9 @@ func Unlock(h *Host) error {
 	}
 	switch {
 	case h.PasswordSealed != "":
-		plain, err := unseal(h.PasswordSealed, h.ID, "password")
+		plain, err := unsealFor(h.PasswordSealed, h.ID, "password", destination(*h))
 		if errors.Is(err, ErrSealBroken) {
-			return fmt.Errorf("the saved password of %s does not open with the vault key of this machine (keychain reset or the host copied from another machine), save the password again", h.Name)
+			return fmt.Errorf("the saved password of %s does not open here (keychain reset, the host copied from another machine, or its address changed outside sshr), save the password again", h.Name)
 		}
 		if err != nil {
 			return err
