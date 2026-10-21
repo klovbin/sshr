@@ -43,3 +43,7 @@ sshr                                   # the desktop app
 ## Contributing
 
 Bugs and ideas go to [issues](https://github.com/klovbin/sshr/issues), build with `go build ./cmd/sshr` (the GUI needs cgo, `-tags nocgo` builds the CLI only), test with `go test -tags nocgo` on every package but `internal/ui`, CI runs the tests and a real sshd on Linux, macOS and Windows
+
+## License
+
+[MIT](LICENSE)
