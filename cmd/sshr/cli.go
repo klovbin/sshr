@@ -56,6 +56,8 @@ func runCLI(args []string) {
 		cmdPing(store, args[1:])
 	case "show":
 		cmdShow(store, args[1:])
+	case "key":
+		cmdKey(store, args[1:])
 	case "tag":
 		cmdTag(store, args[1:])
 	case "run":

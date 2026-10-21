@@ -84,6 +84,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** a typo or a public key given by mistake fails when you save, not later at connect with a vague ssh error
 - **Why this way:** ssh reads the file itself, sshr only passes `-i`, nothing is copied
 
+### New keys and putting them on a host
+- **What:** `sshr key new` makes an ed25519 key in `~/.ssh` with ssh-keygen, `sshr key install <host> [key.pub] [--use]` appends the public key to `authorized_keys` on the host and with `--use` switches the host to that key
+- **What for:** moving a server from a password to a key took ssh-keygen, ssh-copy-id with the right port and jump hosts, then editing the host
+- **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
+- **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
+
 ### Saved passwords and ask mode
 - **What:** a password sealed with XChaCha20-Poly1305 under a key from the system keychain, or nothing stored and ssh asks each time
 - **What for:** routers, NAS boxes, cheap VPS panels and client machines where a key is not an option

@@ -68,6 +68,24 @@ a socket and not the command line
 
 Examples:
   sshr show web`},
+	{name: "key", usage: `sshr key new [name] [--no-passphrase]
+sshr key install <host> [public key file] [--use]`, short: "make a key, put it on a host",
+		details: `new makes an ed25519 key in ~/.ssh (sshr_ed25519 by default) with
+ssh-keygen, which asks for the passphrase, an existing key is never
+overwritten
+
+install appends a public key to ~/.ssh/authorized_keys on the host,
+logging in the way the host does (a password is asked or taken from
+sshr), a key already there is not added twice, the default is the first
+of ~/.ssh/sshr_ed25519.pub, id_ed25519.pub, id_ecdsa.pub, id_rsa.pub
+
+Options:
+  --no-passphrase   new: no passphrase on the key
+  --use             install: the host logs in with this key from then on
+
+Examples:
+  sshr key new
+  sshr key install web --use`},
 	{name: "rm", aliases: []string{"remove"}, usage: "sshr rm <name or id>", short: "remove a host"},
 	{name: "connect", aliases: []string{"ssh"}, usage: "sshr connect [options] <name or id>", short: "ssh into a host",
 		details: `Options:

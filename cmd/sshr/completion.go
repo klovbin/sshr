@@ -44,6 +44,10 @@ func complete(store *app.Store, words []string, cur string) []string {
 		return complete(store, nil, cur)
 	case c.name == "sync" && len(words) == 1:
 		return filter(syncCommands, cur)
+	case c.name == "key" && len(words) == 1:
+		return filter([]string{"new", "install"}, cur)
+	case c.name == "key" && len(words) == 2 && words[1] == "install":
+		return filter(savedNames(store), cur)
 	case c.name == "tag" && len(words) == 2:
 		var out []string
 		for _, t := range tagsOf(store, words[1]) {

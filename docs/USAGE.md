@@ -29,6 +29,8 @@ sshr list --json                         # the same as JSON, also ping --json an
 sshr connect web                         # by name or ID
 sshr connect deploy@10.0.0.7:2222        # not saved: connects once, then offers to save
 sshr show web                            # the host and the exact ssh command connect runs
+sshr key new                             # ed25519 key in ~/.ssh/sshr_ed25519, never overwrites
+sshr key install web --use               # put the public key on web and log in with it from then on
 sshr rm web
 sshr help                                # one line per command
 sshr help add                            # the options of one command
