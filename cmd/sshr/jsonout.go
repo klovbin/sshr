@@ -14,6 +14,7 @@ type healthJSON struct {
 	State     string `json:"state"`
 	LatencyMS int64  `json:"latency_ms,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	Cause     string `json:"cause,omitempty"`
 }
 
 type listJSON struct {
@@ -38,7 +39,7 @@ type runJSON struct {
 }
 
 func toHealthJSON(r app.Health) healthJSON {
-	return healthJSON{State: r.State, LatencyMS: r.Latency.Milliseconds(), Reason: r.Reason}
+	return healthJSON{State: r.State, LatencyMS: r.Latency.Milliseconds(), Reason: r.Reason, Cause: r.Cause}
 }
 
 // printJSON writes v indented with a newline, an empty list as []

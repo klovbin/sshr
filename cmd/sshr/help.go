@@ -89,7 +89,9 @@ Examples:
 all hosts when none is named, exits 1 when one is down
 
 Options:
-  --json   state, latency in ms and reason per host as JSON`},
+  --json   state, latency in ms, reason and cause per host as JSON, the
+           cause is one word: dns, refused, timeout, unreachable,
+           no_banner, jump, alias or other`},
 	{name: "tag", usage: "sshr tag <name or id> [+tag|-tag|tag...]", short: "show, add or remove tags",
 		details: `Examples:
   sshr tag web               show the tags

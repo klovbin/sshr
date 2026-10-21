@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -38,7 +39,10 @@ type Health struct {
 	Latency time.Duration
 	// Reason says why the host is down, not SSH or unknown
 	Reason string
-	At     time.Time
+	// Cause is the reason as a word for programs: dns, refused, timeout,
+	// unreachable, no_banner, jump, alias or other
+	Cause string
+	At    time.Time
 }
 
 // CheckHealth opens a TCP connection to the host and reads the SSH banner,
@@ -47,7 +51,7 @@ type Health struct {
 func CheckHealth(h *Host) Health {
 	now := time.Now()
 	if h.Jump != "" {
-		return Health{State: HealthUnknown, Reason: "reached through " + h.Jump, At: now}
+		return Health{State: HealthUnknown, Reason: "reached through " + h.Jump, Cause: "jump", At: now}
 	}
 	port := h.Port
 	if port == 0 {
@@ -59,9 +63,9 @@ func CheckHealth(h *Host) Health {
 		var dns *net.DNSError
 		if errors.As(err, &dns) && h.Host == h.Name {
 			// an alias of ssh config (ProxyCommand), only ssh knows where it goes
-			return Health{State: HealthUnknown, Reason: "an alias of ssh config", At: now}
+			return Health{State: HealthUnknown, Reason: "an alias of ssh config", Cause: "alias", At: now}
 		}
-		return Health{State: HealthDown, Reason: shortNetErr(err), At: now}
+		return Health{State: HealthDown, Reason: shortNetErr(err), Cause: netCause(err), At: now}
 	}
 	lat := time.Since(start)
 	defer c.Close()
@@ -77,7 +81,33 @@ func CheckHealth(h *Host) Health {
 			break
 		}
 	}
-	return Health{State: HealthNotSSH, Latency: lat, Reason: "the port answers without an SSH banner", At: now}
+	return Health{State: HealthNotSSH, Latency: lat, Reason: "the port answers without an SSH banner", Cause: "no_banner", At: now}
+}
+
+// netCause sorts a failed connect into a few causes a program can act on
+func netCause(err error) string {
+	var dns *net.DNSError
+	switch {
+	case errors.As(err, &dns):
+		return "dns"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "refused"
+	case errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH):
+		return "unreachable"
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return "timeout"
+	}
+	// Windows reports its own WSA codes, which the syscall constants above
+	// do not match, its messages say the same
+	switch msg := strings.ToLower(err.Error()); {
+	case strings.Contains(msg, "refused"):
+		return "refused"
+	case strings.Contains(msg, "unreachable"):
+		return "unreachable"
+	}
+	return "other"
 }
 
 // shortNetErr drops the "dial tcp 1.2.3.4:22: " prefix

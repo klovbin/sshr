@@ -156,7 +156,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What:** a TCP connect and the SSH banner with the round trip, in `sshr ping`, `list --ping` and a dot in the app, off by default
 - **What for:** know which servers are down before waiting on an ssh timeout
 - **Why it helps:** a glance at the list shows what answers
-- **Why this way:** no login is tried, but sshd still logs each check and strict fail2ban modes count it, so it is off until you choose it
+- **Why this way:** no login is tried, but sshd still logs each check and strict fail2ban modes count it, so it is off until you choose it, a host that is down says why (the name does not resolve, refused, no answer, unreachable, no SSH banner) and `--json` gives the same as one word for scripts
 
 ## Moving hosts in and out
 
