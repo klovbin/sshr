@@ -831,6 +831,25 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		if seen && !newer(e, knownEntry) {
 			continue
 		}
+		// the remote version is downloaded first, the local host is read
+		// again right after, so an edit saved meanwhile in the app or the
+		// CLI is seen and a failed download leaves nothing behind
+		var p *payload
+		if !e.Deleted {
+			if p, err = c.fetchPayload(id, e, key, m.Epoch); err != nil {
+				return err
+			}
+		}
+		// the host as it is now, not as it was when the pull started, an
+		// edit counts as a local change and goes through the conflict
+		// rules instead of being overwritten
+		if h, err := c.Store.Find(id); err == nil && h.ID == id {
+			if now, err := payloadOf(*h); err == nil {
+				local[id] = now
+			}
+		} else if errors.Is(err, app.ErrNotFound) {
+			delete(local, id)
+		}
 		if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
 			// removed here and changed there, the change wins so nothing
 			// written on the other device is lost, the user is told
@@ -842,10 +861,6 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
 			if newer(mine, e) {
 				if !e.Deleted {
-					p, err := c.fetchPayload(id, e, key, m.Epoch)
-					if err != nil {
-						return err
-					}
 					p.Host.Password = p.Password
 					p.Host.ID = ""
 					p.Host.Name = conflictName(p.Host.Name, e.Device)
@@ -872,14 +887,6 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			conflict = true
 		}
 		next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
-		// the remote version is downloaded before the local one is copied,
-		// a failed download leaves no copy behind to be made again
-		var p *payload
-		if !e.Deleted {
-			if p, err = c.fetchPayload(id, e, key, m.Epoch); err != nil {
-				return err
-			}
-		}
 		if conflict {
 			var name string
 			if h, err := c.Store.Find(id); err == nil {

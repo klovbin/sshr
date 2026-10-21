@@ -1039,3 +1039,38 @@ func TestSyncPushChecksTheCachedKey(t *testing.T) {
 		t.Fatal("the host pushed by b did not arrive")
 	}
 }
+
+func TestSyncEditDuringPullIsKept(t *testing.T) {
+	w := newWorld(t)
+	web, db := w.pair()
+	for _, id := range []string{web.ID, db.ID} {
+		h, err := w.a.Store.Find(id)
+		must(t, err)
+		h.Port = 2200
+		_, err = w.a.Store.Update(id, *h)
+		must(t, err)
+	}
+	must(t, w.a.Push())
+	// b edits db while its pull downloads the first blob
+	edited := false
+	w.b.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/blobs/") && !edited {
+			edited = true
+			h, err := w.b.Store.Find(db.ID)
+			must(t, err)
+			h.Port = 2299
+			_, err = w.b.Store.Update(db.ID, *h)
+			must(t, err)
+		}
+		return nil, nil
+	}}}
+	must(t, w.b.Pull())
+	hosts, _ := w.b.Store.List()
+	ports := map[int]int{}
+	for _, h := range hosts {
+		ports[h.Port]++
+	}
+	if ports[2299] != 1 {
+		t.Fatalf("the edit made during the pull is gone: %v\n%s", ports, w.log.String())
+	}
+}
