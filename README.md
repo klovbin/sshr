@@ -36,6 +36,7 @@ sshr                                   # the desktop app
 - [Usage](docs/USAGE.md): every command, option and what it costs
 - [Features](docs/FEATURES.md): what each feature is for
 - [Security](docs/SECURITY.md): how passwords, keys and sync data are protected
+- [Architecture](docs/ARCHITECTURE.md): packages, data on disk, flows, decisions
 - [Roadmap](docs/ROADMAP.md) and the [project board](https://github.com/users/klovbin/projects/3)
 - [Why it is built this way](docs/WHY.md) (Russian)
 
