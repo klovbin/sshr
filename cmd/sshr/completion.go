@@ -16,7 +16,7 @@ const completeCommand = "__complete"
 
 // hostCommands take a host name as their first argument
 var hostCommands = map[string]bool{
-	"connect": true, "rm": true, "ping": true, "tag": true, "send": true, "get": true,
+	"connect": true, "show": true, "rm": true, "ping": true, "tag": true, "send": true, "get": true,
 	"forward": true, "tunnel": true, "close": true, "paste": true, "run": true,
 }
 

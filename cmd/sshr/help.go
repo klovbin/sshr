@@ -60,6 +60,13 @@ Examples:
   sshr add 10.0.0.7 -u deploy -n web
   sshr add 10.0.0.7 -u deploy -k ~/.ssh/id_ed25519 -t prod
   sshr add db.internal -u app -J web --ask-password`},
+	{name: "show", usage: "sshr show <name or id>", short: "show a host and the ssh command it runs",
+		details: `Prints the fields of the host and the exact ssh command sshr connect runs,
+quoted so it can be copied, passwords never show, they reach ssh through
+a socket and not the command line
+
+Examples:
+  sshr show web`},
 	{name: "rm", aliases: []string{"remove"}, usage: "sshr rm <name or id>", short: "remove a host"},
 	{name: "connect", aliases: []string{"ssh"}, usage: "sshr connect [options] <name or id>", short: "ssh into a host",
 		details: `Options:

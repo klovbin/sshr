@@ -40,6 +40,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the host is on the first line instead of somewhere in a long list, the plain `sshr list` stays as it was
 - **Why this way:** the time is written only when ssh did not fail to connect (exit code other than 255), so failed attempts do not count, it stays on this machine and does not sync, otherwise every connect would be a change pushed to every device
 
+### sshr show
+- **What:** `sshr show <host>` prints the fields of a host and the exact ssh command `sshr connect` runs for it, quoted for a shell
+- **What for:** when a connection does not work you need to know what sshr actually passes to ssh
+- **Why it helps:** the line can be copied, run with `-v` added and compared with plain ssh, without reading the code
+- **Why this way:** passwords never show because they reach ssh through the askpass socket and not the command line, each argument is quoted for a POSIX shell so the copied line runs as the same argv, a test runs it through sh, the lab connects with it through a jump host
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"
