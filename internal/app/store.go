@@ -113,6 +113,9 @@ type Host struct {
 	// Tags group hosts (prod, db, client-x), lower case, sorted
 	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// LastConnected is the end of the last session ssh opened, set by
+	// MarkConnected, it stays on this machine and does not sync
+	LastConnected *time.Time `json:"last_connected,omitempty"`
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -540,7 +543,54 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 	} else {
 		in.KeyRef = ""
 	}
+	// when this machine last connected is its own business
+	in.LastConnected = nil
+	if local != nil {
+		in.LastConnected = local.LastConnected
+	}
 	return in, notes
+}
+
+// MarkConnected records that a session to host id ended after ssh had
+// opened it, recent hosts are listed first with sshr list --recent
+func (s *Store) MarkConnected(id string) error {
+	h, err := s.Find(id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	h.LastConnected = &now
+	return s.save(h)
+}
+
+// SortRecent orders hosts by their last connection, newest first, hosts
+// never connected keep their order at the end
+func SortRecent(hosts []Host) {
+	sort.SliceStable(hosts, func(i, j int) bool {
+		a, b := hosts[i].LastConnected, hosts[j].LastConnected
+		if a == nil || b == nil {
+			return a != nil && b == nil
+		}
+		return a.After(*b)
+	})
+}
+
+// Ago says how long ago t was in a few characters, "-" for never
+func Ago(t *time.Time, now time.Time) string {
+	if t == nil {
+		return "-"
+	}
+	d := now.Sub(*t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return strconv.Itoa(int(d/time.Minute)) + " min ago"
+	case d < 48*time.Hour:
+		return strconv.Itoa(int(d/time.Hour)) + " h ago"
+	default:
+		return strconv.Itoa(int(d/(24*time.Hour))) + " d ago"
+	}
 }
 
 // addressRe is a host name, an ssh config alias, an IPv4 or an IPv6

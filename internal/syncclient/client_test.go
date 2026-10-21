@@ -1074,3 +1074,26 @@ func TestSyncEditDuringPullIsKept(t *testing.T) {
 		t.Fatalf("the edit made during the pull is gone: %v\n%s", ports, w.log.String())
 	}
 }
+
+func TestSyncLastConnectedStaysLocal(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	counter := w.b.st.Counter
+	must(t, w.b.Store.MarkConnected(web.ID))
+	must(t, w.b.Push())
+	if w.b.st.Counter != counter {
+		t.Fatalf("a connect was pushed as a change (counter %d to %d)", counter, w.b.st.Counter)
+	}
+	// a change from a keeps the time this machine connected
+	h, err := w.a.Store.Find(web.ID)
+	must(t, err)
+	h.Port = 2222
+	_, err = w.a.Store.Update(web.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	got, _ := w.b.Store.Find(web.ID)
+	if got.Port != 2222 || got.LastConnected == nil {
+		t.Fatalf("after a pull: port %d last %v", got.Port, got.LastConnected)
+	}
+}

@@ -120,15 +120,18 @@ func runCLI(args []string) {
 func cmdList(store *app.Store, args []string) {
 	st, _ := app.LoadSettings()
 	ping := st.HealthCheck
+	recent := false
 	var query []string
 	for _, a := range args {
 		switch {
+		case a == "--recent":
+			recent = true
 		case a == "--ping":
 			ping = true
 		case a == "--no-ping":
 			ping = false
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintln(os.Stderr, "Usage: sshr list [--ping|--no-ping] [search words, tag:x or #x]")
+			fmt.Fprintln(os.Stderr, "Usage: sshr list [--recent] [--ping|--no-ping] [search words, tag:x or #x]")
 			os.Exit(1)
 		default:
 			query = append(query, a)
@@ -151,9 +154,16 @@ func cmdList(store *app.Store, args []string) {
 	if ping {
 		health = app.CheckHealthAll(hosts)
 	}
+	if recent {
+		app.SortRecent(hosts)
+	}
+	now := time.Now()
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	if ping {
 		fmt.Fprint(w, "STATUS\t")
+	}
+	if recent {
+		fmt.Fprint(w, "LAST\t")
 	}
 	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tAUTH\tTAGS\tID")
 	for _, h := range hosts {
@@ -164,6 +174,9 @@ func cmdList(store *app.Store, args []string) {
 		}
 		if ping {
 			fmt.Fprint(w, health[h.ID].Label()+"\t")
+		}
+		if recent {
+			fmt.Fprint(w, app.Ago(h.LastConnected, now)+"\t")
 		}
 		tagCol := strings.Join(h.Tags, ",")
 		if tagCol == "" {
@@ -469,6 +482,7 @@ func cmdConnect(store *app.Store, args []string) {
 	}
 	if useMosh {
 		if code, ok := runMosh(h, sshOpts, dest, session); ok {
+			markConnected(store, h, code)
 			os.Exit(code)
 		}
 	}
@@ -492,7 +506,17 @@ func cmdConnect(store *app.Store, args []string) {
 	} else {
 		sshOpts = append(sshOpts, "--", dest)
 	}
-	os.Exit(run(h, sshBin, sshOpts...))
+	code := run(h, sshBin, sshOpts...)
+	markConnected(store, h, code)
+	os.Exit(code)
+}
+
+// markConnected notes the session for sshr list --recent, 255 is ssh
+// failing to connect at all, any other code is a session that was open
+func markConnected(store *app.Store, h *app.Host, code int) {
+	if code != 255 {
+		store.MarkConnected(h.ID)
+	}
 }
 
 // cmdProxy is run by ssh as ProxyCommand ("sshr __proxy <chain> %h %p"), it

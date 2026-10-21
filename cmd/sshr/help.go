@@ -25,11 +25,13 @@ var commands = []command{
 tag:prod or #prod matches that tag only
 
 Options:
+  --recent     the hosts you connected to last first, with how long ago
   --ping       also show whether each host answers
   --no-ping    do not, when health_check is on in the settings
 
 Examples:
   sshr list
+  sshr list --recent
   sshr list #prod web`},
 	{name: "add", usage: "sshr add <host> -u <user> [options]", short: "add a host",
 		details: `How to log in, pick one, sshr asks when none is given:

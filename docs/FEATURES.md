@@ -34,6 +34,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** `sshr conn<Tab> w<Tab>` instead of the whole line, names come from your own hosts, so a typo cannot reach the wrong server
 - **Why this way:** the scripts are a few lines that call `sshr __complete`, the logic lives in Go with the command table, so it matches the installed version on every shell, files are completed where sshr has nothing to offer, as in send and get
 
+### Recent hosts first
+- **What:** `sshr connect` notes when a session ended after ssh had opened it, `sshr list --recent` puts the last connected hosts first with a LAST column ("3 h ago")
+- **What for:** with many hosts the one you need is usually one of the last few
+- **Why it helps:** the host is on the first line instead of somewhere in a long list, the plain `sshr list` stays as it was
+- **Why this way:** the time is written only when ssh did not fail to connect (exit code other than 255), so failed attempts do not count, it stays on this machine and does not sync, otherwise every connect would be a change pushed to every device
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"

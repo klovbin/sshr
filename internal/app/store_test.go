@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAddCleansFields(t *testing.T) {
@@ -152,5 +153,45 @@ func TestAddChecksTheUser(t *testing.T) {
 		if _, err := s.Add(Host{Host: "10.0.0.1", User: u, PasswordMode: PasswordAsk}); err != nil {
 			t.Errorf("user %q was refused: %v", u, err)
 		}
+	}
+}
+
+func TestRecentHosts(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	var ids []string
+	for _, n := range []string{"a", "b", "c"} {
+		h, err := s.Add(Host{Name: n, Host: "10.0.0.1", User: "u", PasswordMode: PasswordAsk})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, h.ID)
+	}
+	if err := s.MarkConnected(ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	s.MarkConnected(ids[2])
+	hosts, _ := s.List()
+	SortRecent(hosts)
+	if hosts[0].Name != "c" || hosts[1].Name != "a" || hosts[2].Name != "b" {
+		t.Fatalf("order = %s %s %s", hosts[0].Name, hosts[1].Name, hosts[2].Name)
+	}
+	now := time.Now()
+	for d, want := range map[time.Duration]string{10 * time.Second: "just now", 5 * time.Minute: "5 min ago", 3 * time.Hour: "3 h ago", 72 * time.Hour: "3 d ago"} {
+		at := now.Add(-d)
+		if got := Ago(&at, now); got != want {
+			t.Errorf("Ago(%v) = %q, want %q", d, got, want)
+		}
+	}
+	if Ago(nil, now) != "-" {
+		t.Error("never connected")
+	}
+	// another device does not decide when this machine connected
+	local, _ := s.Find(ids[0])
+	in := *local
+	in.LastConnected = nil
+	out, _ := FromOtherDevice(in, local)
+	if out.LastConnected == nil || !out.LastConnected.Equal(*local.LastConnected) {
+		t.Error("the local last connect was not kept")
 	}
 }
