@@ -848,3 +848,58 @@ func newID() (string, error) {
 func (h *Host) PasswordFromSshr() bool {
 	return h.Key == "" && (h.PasswordMode == PasswordSaved || h.PasswordMode == PasswordOnePassword || h.PasswordMode == PasswordBitwarden)
 }
+
+// ParseDestination reads user@host[:port] or ssh://user@host[:port] into a
+// host that is not saved, for connecting once, an IPv6 address goes in
+// brackets when a port follows, a password in the string is refused so it
+// cannot end up in the shell history
+func ParseDestination(s string) (Host, error) {
+	rest, isURL := strings.CutPrefix(s, "ssh://")
+	rest = strings.TrimSuffix(rest, "/")
+	user, addr, ok := strings.Cut(rest, "@")
+	if !ok || user == "" {
+		return Host{}, fmt.Errorf("%q is not user@host[:port]", s)
+	}
+	if strings.Contains(user, ":") {
+		return Host{}, errors.New("a password in the address is refused, it would stay in the shell history, sshr asks for it or saves it")
+	}
+	if isURL && strings.ContainsAny(addr, "/?#") {
+		return Host{}, fmt.Errorf("%q has a path, only ssh://user@host[:port] is taken", s)
+	}
+	host, port := addr, 22
+	switch {
+	case strings.HasPrefix(addr, "["):
+		end := strings.Index(addr, "]")
+		if end < 0 {
+			return Host{}, fmt.Errorf("%q has an unclosed [", s)
+		}
+		host = addr[1:end]
+		if tail := addr[end+1:]; tail != "" {
+			p, err := parsePort(strings.TrimPrefix(tail, ":"))
+			if err != nil || !strings.HasPrefix(tail, ":") {
+				return Host{}, fmt.Errorf("%q has a bad port", s)
+			}
+			port = p
+		}
+	case strings.Count(addr, ":") == 1:
+		h, p, _ := strings.Cut(addr, ":")
+		n, err := parsePort(p)
+		if err != nil {
+			return Host{}, fmt.Errorf("%q has a bad port", s)
+		}
+		host, port = h, n
+	}
+	h, err := cleanHost(Host{Host: host, User: user, Port: port})
+	if err != nil {
+		return Host{}, err
+	}
+	return h, nil
+}
+
+func parsePort(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, errors.New("bad port")
+	}
+	return n, nil
+}

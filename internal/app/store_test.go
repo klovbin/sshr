@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -193,5 +194,33 @@ func TestRecentHosts(t *testing.T) {
 	out, _ := FromOtherDevice(in, local)
 	if out.LastConnected == nil || !out.LastConnected.Equal(*local.LastConnected) {
 		t.Error("the local last connect was not kept")
+	}
+}
+
+func TestParseDestination(t *testing.T) {
+	for in, want := range map[string]string{
+		"deploy@10.0.0.7":            "deploy@10.0.0.7:22",
+		"deploy@10.0.0.7:2222":       "deploy@10.0.0.7:2222",
+		"ssh://deploy@db.example":    "deploy@db.example:22",
+		"ssh://deploy@db.example:7/": "deploy@db.example:7",
+		"u@[::1]:2200":               "u@::1:2200",
+		"u@::1":                      "u@::1:22",
+	} {
+		h, err := ParseDestination(in)
+		if err != nil {
+			t.Errorf("%s: %v", in, err)
+			continue
+		}
+		if got := fmt.Sprintf("%s@%s:%d", h.User, h.Host, h.Port); got != want {
+			t.Errorf("%s = %s, want %s", in, got, want)
+		}
+		if h.ID != "" || h.PasswordMode != "" {
+			t.Errorf("%s: %+v", in, h)
+		}
+	}
+	for _, bad := range []string{"web", "10.0.0.7", "u:pw@host", "ssh://u:pw@host", "u@host:0", "u@host:99999", "u@a;b", "ssh://u@host/path", "-oProxyCommand=x@host"} {
+		if _, err := ParseDestination(bad); err == nil {
+			t.Errorf("%q was taken", bad)
+		}
 	}
 }

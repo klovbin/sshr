@@ -52,6 +52,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** `sshr list --json | jq` and `sshr run --json -t prod -- uptime` give data that does not break when a column is added
 - **Why this way:** fixed field lists, the host part is app.HostSummary that the API already returns, so secrets cannot slip in, run prints one list at the end instead of a stream so the output is one valid JSON document
 
+### Quick connect without saving
+- **What:** `sshr connect user@host[:port]` or `ssh://user@host[:port]` connects to a destination that is not saved, then asks on a terminal for a name to save it under
+- **What for:** a server you need once should not need `sshr add` first, and one you will need again should not need retyping
+- **Why it helps:** the same command for both cases, saved hosts behave exactly as before
+- **Why this way:** it only applies when no saved host matches and the text has a user, so a typo in a host name still gets the "did you mean" hint, a password in the address is refused because it would stay in the shell history, the address and user pass the same checks as a saved host, nothing is asked without a terminal
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"

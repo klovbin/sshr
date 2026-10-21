@@ -464,8 +464,20 @@ func cmdConnect(store *app.Store, args []string) {
 	}
 	query := strings.Join(rest, " ")
 	h, err := store.Find(query)
+	unsaved := false
+	if errors.Is(err, app.ErrNotFound) && strings.Contains(query, "@") {
+		// user@host[:port] or ssh://... that is not saved, connect once
+		tmp, perr := app.ParseDestination(query)
+		if perr != nil {
+			fatal(perr)
+		}
+		h, err, unsaved = &tmp, nil, true
+	}
 	if err != nil {
 		findFailed("connect", query, err)
+	}
+	if unsaved {
+		fmt.Fprintf(os.Stderr, "sshr: %s is not saved, connecting once\n", query)
 	}
 	sshOpts, err := store.ConnectArgs(h)
 	if err != nil {
@@ -531,9 +543,40 @@ func cmdConnect(store *app.Store, args []string) {
 // markConnected notes the session for sshr list --recent, 255 is ssh
 // failing to connect at all, any other code is a session that was open
 func markConnected(store *app.Store, h *app.Host, code int) {
+	if h.ID == "" {
+		// a destination that is not saved, offer to keep it
+		if code != 255 {
+			offerSave(store, h)
+		}
+		return
+	}
 	if code != 255 {
 		store.MarkConnected(h.ID)
 	}
+}
+
+// offerSave asks on a terminal whether to keep a destination connected to
+// once, nothing is asked without one, it logs in as ssh did, with the
+// default keys, the agent or a password prompt
+func offerSave(store *app.Store, h *app.Host) {
+	if h.ID != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+	fmt.Printf("Save %s@%s as a host? Type a name, or Enter to skip: ", h.User, h.Host)
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	name := strings.TrimSpace(line)
+	if name == "" {
+		return
+	}
+	h.Name = name
+	saved, err := store.Add(*h)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: not saved: %v\n", err)
+		return
+	}
+	h.ID = saved.ID
+	store.MarkConnected(saved.ID)
+	fmt.Printf("Saved as %s, sshr connect %s next time\n", saved.Name, saved.Name)
 }
 
 // cmdProxy is run by ssh as ProxyCommand ("sshr __proxy <chain> %h %p"), it

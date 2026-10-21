@@ -27,6 +27,7 @@ sshr list                                # NAME HOST USER PORT AUTH TAGS ID
 sshr list --recent                       # last connected first, LAST says how long ago
 sshr list --json                         # the same as JSON, also ping --json and run --json
 sshr connect web                         # by name or ID
+sshr connect deploy@10.0.0.7:2222        # not saved: connects once, then offers to save
 sshr show web                            # the host and the exact ssh command connect runs
 sshr rm web
 sshr help                                # one line per command
