@@ -12,7 +12,7 @@ import (
 // starts it, for example `claude mcp add sshr -- sshr mcp`
 func cmdMCP(store *app.Store, args []string) {
 	st, _ := app.LoadSettings()
-	opts := mcp.Options{AllowCommands: st.MCPCommands, Version: "0.01"}
+	opts := mcp.Options{AllowCommands: st.MCPCommands, Version: app.BuildVersion()}
 	for _, a := range args {
 		switch a {
 		case "--allow-commands":
