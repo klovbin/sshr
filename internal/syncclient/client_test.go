@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zalando/go-keyring"
 
@@ -1072,6 +1073,51 @@ func TestSyncEditDuringPullIsKept(t *testing.T) {
 	}
 	if ports[2299] != 1 {
 		t.Fatalf("the edit made during the pull is gone: %v\n%s", ports, w.log.String())
+	}
+}
+
+func TestSyncApplyHoldsTheHostLock(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	h, err := w.a.Store.Find(db.ID)
+	must(t, err)
+	h.Port = 2200
+	_, err = w.a.Store.Update(db.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	// another sshr process (its own Store, its own lock file handle) saves
+	// db while b applies the remote version of it
+	other := &app.Store{Dir: w.b.Store.Dir}
+	saved := make(chan error, 1)
+	blocked := false
+	applyLocked = func(id string) {
+		if id != db.ID || blocked {
+			return
+		}
+		go func() {
+			h, err := other.Find(db.ID)
+			if err == nil {
+				h.Port = 2299
+				_, err = other.Update(db.ID, *h)
+			}
+			saved <- err
+		}()
+		select {
+		case err := <-saved:
+			t.Errorf("a save went through while apply held the lock: %v", err)
+		case <-time.After(300 * time.Millisecond):
+			blocked = true
+		}
+	}
+	t.Cleanup(func() { applyLocked = nil })
+	must(t, w.b.Pull())
+	if blocked {
+		must(t, <-saved)
+	}
+	got, err := w.b.Store.Find(db.ID)
+	must(t, err)
+	if !blocked || got.Port != 2299 {
+		t.Fatalf("blocked %v, port %d, want the save after the remote version (2299)\n%s", blocked, got.Port, w.log.String())
 	}
 }
 

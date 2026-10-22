@@ -238,7 +238,15 @@ func (s *Store) SSHConfigExported() bool {
 // of ~/.ssh/config, at the top because a Host line before it would make
 // ssh read the Include as part of that block, the hosts are rewritten on
 // every change from then on
-func (s *Store) InstallSSHConfig() ([]ExportItem, error) {
+func (s *Store) InstallSSHConfig() (items []ExportItem, err error) {
+	err = s.locked(func(tx *Store) error {
+		items, err = tx.installSSHConfig()
+		return err
+	})
+	return items, err
+}
+
+func (s *Store) installSSHConfig() ([]ExportItem, error) {
 	if s.SSHConfigOut == "" {
 		return nil, errors.New("this store has no ssh config export path")
 	}
@@ -251,6 +259,10 @@ func (s *Store) InstallSSHConfig() ([]ExportItem, error) {
 
 // UninstallSSHConfig removes the Include line and the export file
 func (s *Store) UninstallSSHConfig() error {
+	return s.locked(func(tx *Store) error { return tx.uninstallSSHConfig() })
+}
+
+func (s *Store) uninstallSSHConfig() error {
 	if err := s.editUserConfig(false); err != nil && !errors.Is(err, ErrSSHConfigLink) {
 		return err
 	}

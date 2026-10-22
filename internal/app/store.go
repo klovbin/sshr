@@ -129,7 +129,37 @@ type Store struct {
 	// SSHConfigOut is where the hosts are exported for plain ssh, empty
 	// turns the export off, it is rewritten on every change once installed
 	SSHConfigOut string
+
+	// held is set on the copy of the Store that locked hands out, its
+	// methods do not take the lock again
+	held bool
 }
+
+// hostLockWait is how long a save waits for another sshr process, a save
+// can wait on the keychain or 1Password, so it is longer than a write
+const hostLockWait = 30 * time.Second
+
+// locked runs fn under the lock of the host folder, a read, a change and
+// a write of hosts by one process never interleave with another process,
+// fn gets a Store whose methods do not lock again, the lock file sits in
+// the host folder, List reads only .json files
+func (s *Store) locked(fn func(tx *Store) error) error {
+	if s.held {
+		return fn(s)
+	}
+	unlock, err := waitLock(filepath.Join(s.Dir, ".lock"), "saving hosts", hostLockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	tx := *s
+	tx.held = true
+	return fn(&tx)
+}
+
+// Locked runs fn under the lock of the host folder, see locked, the sync
+// reads a host, decides and writes it in one go with it
+func (s *Store) Locked(fn func(tx *Store) error) error { return s.locked(fn) }
 
 // DefaultStore creates ~/.sshr/vault/hosts if needed.
 func DefaultStore() (*Store, error) {
@@ -151,6 +181,13 @@ func DefaultStore() (*Store, error) {
 // outside sshr would still open its password, it touches the keychain only
 // when such a host exists and leaves a host as it is when that fails
 func (s *Store) upgradeSeals() {
+	s.locked(func(tx *Store) error {
+		tx.upgradeSealsLocked()
+		return nil
+	})
+}
+
+func (s *Store) upgradeSealsLocked() {
 	hosts, err := s.List()
 	if err != nil {
 		return
@@ -170,7 +207,15 @@ func (s *Store) upgradeSeals() {
 }
 
 // Add saves a new host, ID and CreatedAt are set here
-func (s *Store) Add(in Host) (*Host, error) {
+func (s *Store) Add(in Host) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.add(in)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) add(in Host) (*Host, error) {
 	h, err := cleanHost(in)
 	if err != nil {
 		return nil, err
@@ -408,6 +453,10 @@ func (s *Store) Find(query string) (*Host, error) {
 }
 
 func (s *Store) Delete(id string) error {
+	return s.locked(func(tx *Store) error { return tx.delete(id) })
+}
+
+func (s *Store) delete(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ErrNotFound
@@ -426,7 +475,15 @@ func (s *Store) Delete(id string) error {
 
 // Update rewrites an existing host with the fields of in, ID and
 // CreatedAt are kept
-func (s *Store) Update(id string, in Host) (*Host, error) {
+func (s *Store) Update(id string, in Host) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.update(id, in)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) update(id string, in Host) (*Host, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, ErrNotFound
@@ -474,7 +531,15 @@ func (s *Store) Update(id string, in Host) (*Host, error) {
 // creation time, a password in it is sealed with this machine's vault key,
 // with no keychain the host is not written rather than written in the
 // clear, a private key stored in sshr never travels, the local one is kept
-func (s *Store) Import(in Host) (*Host, error) {
+func (s *Store) Import(in Host) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.importHost(in)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) importHost(in Host) (*Host, error) {
 	id := strings.TrimSpace(in.ID)
 	if !validID(id) {
 		return nil, fmt.Errorf("bad host id %q", id)
@@ -554,6 +619,10 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 // MarkConnected records that a session to host id ended after ssh had
 // opened it, recent hosts are listed first with sshr list --recent
 func (s *Store) MarkConnected(id string) error {
+	return s.locked(func(tx *Store) error { return tx.markConnected(id) })
+}
+
+func (s *Store) markConnected(id string) error {
 	h, err := s.Find(id)
 	if err != nil {
 		return err
@@ -645,7 +714,15 @@ func managerName(mode string) string {
 // Duplicate saves a copy of host id under a new ID and name, its saved
 // password and stored key are sealed again for the new ID, the sync keeps
 // the losing side of a conflict this way
-func (s *Store) Duplicate(id, name string) (*Host, error) {
+func (s *Store) Duplicate(id, name string) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.duplicate(id, name)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) duplicate(id, name string) (*Host, error) {
 	cur, err := s.Find(id)
 	if err != nil {
 		return nil, err

@@ -62,7 +62,8 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - each process reads what it needs from disk, the disk is the only truth, nothing is shared in memory between processes
 - the app, `serve` and `mcp` can run for hours next to CLI commands and a sync, they must read hosts again instead of trusting a list they loaded earlier, the vault key is cached for the life of a process
 - a keychain call runs with a 5 s timeout, MCP runs at most 8 commands or uploads at once, the REST API has no such limit
-- there is no lock between processes yet: two writers of the same file never leave a torn file, but a read, change and write of a host, of settings or of the sync state can still lose the other writer's change (planned change 1)
+- every change of hosts (add, update, import, remove, duplicate, last connect, the ssh config export) runs under the lock file `~/.sshr/vault/hosts/.lock`, the sync takes it for each host from reading the local version to writing the remote one, a process that waits more than 30 s gives up with the pid of the holder, the lock belongs to the open file, so two goroutines of the app exclude each other too
+- not covered yet: two sync runs at once and settings saved from a copy loaded earlier
 
 ## Data on disk
 
@@ -71,6 +72,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/vault/hosts/<id>.json` | one host per file, 0600, passwords sealed as v2 (bound to the destination), keys sealed, a password from an old version stays in clear in `password` while the keychain cannot be used | `Store.save` through `WriteFileAtomic` |
 | `~/.sshr/vault/hosts/<id>.pub` | public half of a key kept in sshr, for `-i` with an agent | `writePub`, plain `os.WriteFile` |
 | `~/.sshr/vault/.lock` | lock for creating the vault key | `VaultKey` |
+| `~/.sshr/vault/hosts/.lock` | lock for changing hosts, holds the pid of the holder | `Store.locked` |
 | keychain, service `sshr`, entry `vault-key` | the vault key that seals the secrets | `VaultKey` |
 | 1Password items | a password saved with `--store 1password` | `opStorePassword` |
 | `~/.sshr/settings.json` | settings, fields it does not know are lost on save | `SaveSettings` through `WriteFileAtomic` |

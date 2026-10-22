@@ -107,6 +107,10 @@ type Client struct {
 // reached this device yet, the device that changed it delivers it shortly
 var ErrKeyPending = errors.New("the device that changed the vault key has not delivered it here yet, sync again in a moment")
 
+// applyLocked is called by apply with the host lock held, before the host
+// is read again, tests use it to save a host from another Store meanwhile
+var applyLocked func(id string)
+
 // errLost means another device pushed first
 var errLost = errors.New("other devices kept pushing at the same time, try again")
 
@@ -843,107 +847,119 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				return err
 			}
 		}
-		// the host as it is now, not as it was when the pull started, an
-		// edit counts as a local change and goes through the conflict
-		// rules instead of being overwritten
-		if h, err := c.Store.Find(id); err == nil && h.ID == id {
-			if now, err := payloadOf(*h); err == nil {
-				local[id] = now
+		// from reading the host here to writing the remote version no other
+		// sshr process saves hosts, an edit saved before is seen as a local
+		// change, one saved after waits and comes after the remote version
+		err = c.Store.Locked(func(store *app.Store) error {
+			if applyLocked != nil {
+				applyLocked(id)
 			}
-		} else if errors.Is(err, app.ErrNotFound) {
-			delete(local, id)
-		}
-		if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
-			// removed here and changed there, the change wins so nothing
-			// written on the other device is lost, the user is told
-			c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", short(id, 8), short(e.Device, 8))
-		}
-		if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
-			// neither side is lost, the later change keeps the host and
-			// the other one becomes a copy that syncs like any host
-			mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
-			if newer(mine, e) {
-				if !e.Deleted {
-					p.Host.Password = p.Password
-					p.Host.ID = ""
-					p.Host.Name = conflictName(p.Host.Name, e.Device)
-					var notes []string
-					p.Host, notes = app.FromOtherDevice(p.Host, nil)
-					cp, err := c.Store.Add(p.Host)
-					if err != nil {
-						c.st.Skipped[id] = e
-						c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
-						continue
-					}
-					c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", short(id, 8), short(e.Device, 8), cp.Name)
-					for _, n := range notes {
-						c.logf("%s: %s", cp.Name, n)
-					}
+			// the host as it is now, not as it was when the pull started, an
+			// edit counts as a local change and goes through the conflict
+			// rules instead of being overwritten
+			if h, err := store.Find(id); err == nil && h.ID == id {
+				if now, err := payloadOf(*h); err == nil {
+					local[id] = now
 				}
-				// the remote version is handled, the entry moves to it
-				// and keeps the old local hash, the change made here
-				// still counts as not pushed and the next push outranks
-				// the remote one, a later pull makes no second copy
-				c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
-				continue
+			} else if errors.Is(err, app.ErrNotFound) {
+				delete(local, id)
 			}
-			conflict = true
-		}
-		next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
-		if conflict {
-			var name string
-			if h, err := c.Store.Find(id); err == nil {
-				name = h.Name
+			if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
+				// removed here and changed there, the change wins so nothing
+				// written on the other device is lost, the user is told
+				c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", short(id, 8), short(e.Device, 8))
 			}
-			cp, err := c.Store.Duplicate(id, conflictName(name, c.st.DeviceID))
+			if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
+				// neither side is lost, the later change keeps the host and
+				// the other one becomes a copy that syncs like any host
+				mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
+				if newer(mine, e) {
+					if !e.Deleted {
+						p.Host.Password = p.Password
+						p.Host.ID = ""
+						p.Host.Name = conflictName(p.Host.Name, e.Device)
+						var notes []string
+						p.Host, notes = app.FromOtherDevice(p.Host, nil)
+						cp, err := store.Add(p.Host)
+						if err != nil {
+							c.st.Skipped[id] = e
+							c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+							return nil
+						}
+						c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", short(id, 8), short(e.Device, 8), cp.Name)
+						for _, n := range notes {
+							c.logf("%s: %s", cp.Name, n)
+						}
+					}
+					// the remote version is handled, the entry moves to it
+					// and keeps the old local hash, the change made here
+					// still counts as not pushed and the next push outranks
+					// the remote one, a later pull makes no second copy
+					c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
+					return nil
+				}
+				conflict = true
+			}
+			next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
+			if conflict {
+				var name string
+				if h, err := store.Find(id); err == nil {
+					name = h.Name
+				}
+				cp, err := store.Duplicate(id, conflictName(name, c.st.DeviceID))
+				if err != nil {
+					return fmt.Errorf("keeping the local version of %s: %v", name, err)
+				}
+				dup = cp
+			}
+			if dup != nil && e.Deleted {
+				c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
+			}
+			if e.Deleted {
+				if _, ok := local[id]; ok {
+					if err := store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
+						return err
+					}
+					c.logf("removed %s", short(id, 8))
+				}
+				c.st.Entries[id] = next
+				return nil
+			}
+			p.Host.Password = p.Password
+			var cur *app.Host
+			if h, err := store.Find(id); err == nil && h.ID == id {
+				cur = h
+			}
+			_, notes := app.FromOtherDevice(p.Host, cur)
+			h, err := store.Import(p.Host)
 			if err != nil {
-				return fmt.Errorf("keeping the local version of %s: %v", name, err)
-			}
-			dup = cp
-		}
-		if dup != nil && e.Deleted {
-			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
-		}
-		if e.Deleted {
-			if _, ok := local[id]; ok {
-				if err := c.Store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
-					return err
+				// one host this version cannot take must not stop the others,
+				// the copy made for it goes too, the next pull makes it again
+				if dup != nil {
+					store.Delete(dup.ID)
 				}
-				c.logf("removed %s", short(id, 8))
+				c.st.Skipped[id] = e
+				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+				return nil
 			}
-			c.st.Entries[id] = next
-			continue
-		}
-		p.Host.Password = p.Password
-		var cur *app.Host
-		if h, err := c.Store.Find(id); err == nil && h.ID == id {
-			cur = h
-		}
-		_, notes := app.FromOtherDevice(p.Host, cur)
-		h, err := c.Store.Import(p.Host)
-		if err != nil {
-			// one host this version cannot take must not stop the others,
-			// the copy made for it goes too, the next pull makes it again
 			if dup != nil {
-				c.Store.Delete(dup.ID)
+				c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
 			}
-			c.st.Skipped[id] = e
-			c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
-			continue
-		}
-		if dup != nil {
-			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
-		}
-		for _, n := range notes {
-			c.logf("%s: %s", h.Name, n)
-		}
-		written, err := payloadOf(*h)
+			for _, n := range notes {
+				c.logf("%s: %s", h.Name, n)
+			}
+			written, err := payloadOf(*h)
+			if err != nil {
+				return err
+			}
+			next.Local = c.localHash(written)
+			c.st.Entries[id] = next
+			c.logf("updated %s", h.Name)
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		next.Local = c.localHash(written)
-		c.st.Entries[id] = next
-		c.logf("updated %s", h.Name)
 	}
 	return nil
 }
