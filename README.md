@@ -9,7 +9,7 @@ sshr keeps your SSH servers in one list and connects to them with one command, f
 - [tags and search](docs/USAGE.md#tags-and-search), [health check](docs/USAGE.md#health-check), [import](docs/USAGE.md#importing-sshconfig) and [export](docs/USAGE.md#exporting-to-sshconfig) of `~/.ssh/config`
 - [copy files](docs/USAGE.md#copying-files), [run a command on many hosts](docs/USAGE.md#running-a-command-on-many-hosts), [send clipboard images](docs/USAGE.md#sending-images-to-a-server)
 - [end to end encrypted sync](docs/USAGE.md#sync-between-devices) through [your own server](docs/USAGE.md#sync-server)
-- [MCP server](docs/USAGE.md#ai-assistants-mcp) for AI assistants and a local [REST API](docs/USAGE.md#rest-api)
+- [MCP server](docs/MCP.md) for AI assistants and a local [REST API](docs/USAGE.md#rest-api)
 
 Anything that costs something (an extra connection, editing your files, commands from AI) is off until you turn it on
 

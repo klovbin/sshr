@@ -231,7 +231,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 ## For other programs
 
 ### MCP server for AI assistants
-- **What:** `sshr mcp` gives Claude Code, Codex or Cursor the tools list_hosts, upload_file and run_command
+- **What:** `sshr mcp` gives Claude Code, Codex or Cursor the tools list_hosts, upload_file and run_command, setup and limits in [MCP.md](MCP.md)
 - **What for:** assistants asked to read logs or check a server
 - **Why it helps:** no addresses or keys pasted into a chat, the assistant uses your saved logins without seeing them
 - **Why this way:** run_command is off by default and marked destructive, nothing listens on the network, output and time are capped, every command is logged

@@ -256,6 +256,8 @@ Other clients: `{"mcpServers": {"sshr": {"command": "sshr", "args": ["mcp"]}}}`
 - `run_command` is off by default (`--allow-commands` or `"mcp_commands": true`), it is marked destructive so clients ask before each call
 - secrets never leave sshr, hosts that ask for a password cannot be used, nothing listens (stdin and stdout of a child process), every command is logged to stderr
 
+Setup for each client, every tool with its limits, the log and troubleshooting: [MCP.md](MCP.md)
+
 ## REST API
 
 ```sh
