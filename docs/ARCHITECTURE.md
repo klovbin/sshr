@@ -65,7 +65,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - every change of hosts (add, update, import, remove, duplicate, last connect, the ssh config export) runs under the lock file `~/.sshr/vault/hosts/.lock`, the sync takes it for each host from reading the local version to writing the remote one, a process that waits more than 30 s gives up with the pid of the holder, the lock belongs to the open file, so two goroutines of the app exclude each other too
 - a sync run (init, join, approve, pull, push, remove-device, leave) holds `~/.sshr/sync/run.lock` and reads the state again under it, a second run stops at once with "another sshr process is running a sync", the run lock is taken before the host lock and never after it
 - a lock does not help when the copy is read long before the save, so every host file carries `rev`, a save counter of this machine, `Store.Update` refuses a copy whose `rev` is not the saved one with `ErrChanged` (#107), the CLI passes the host it read and says "run the command again", a connect does not raise `rev`, so it never refuses an open form, the sync payload leaves `rev` out
-- not covered yet: settings saved from a copy loaded earlier (#106)
+- settings loaded long before a save (the app loads them once at start) remember what was read, `SaveSettings` reads the file again under `~/.sshr/settings.json.lock` and writes only the fields its holder changed since (#106), so two writers of different settings both keep their change, a `Settings` value built from scratch is written whole
 
 ## Data on disk
 
@@ -78,6 +78,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | keychain, service `sshr`, entry `vault-key` | the vault key that seals the secrets | `VaultKey` |
 | 1Password items | a password saved with `--store 1password` | `opStorePassword` |
 | `~/.sshr/settings.json` | settings, fields it does not know are lost on save | `SaveSettings` through `WriteFileAtomic` |
+| `~/.sshr/settings.json.lock` | lock for saving settings, holds the pid of the holder | `SaveSettings` |
 | `~/.sshr/ssh_config` | the export | `refreshSSHConfig` through `WriteFileAtomic` |
 | `~/.ssh/config` | the user's own file, sshr adds or removes one Include line, a link is left alone | `editUserConfig` through `WriteFileAtomic`, its mode kept |
 | `~/.sshr/sync/run.lock` | lock of a sync run, holds the pid of the holder | `syncclient.run` |
@@ -140,7 +141,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 In this order, each one its own issue and commits:
 
-1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is #106 and #107
+1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is fixed by #106 and #107
 2. (#96) move starting a session (`cmdConnect`, `runMosh`, `cmdProxy`, `forwardSignals`, the tunnel options in `api`) into `app`, so the app can connect (#90) and the API stops repeating it
 3. (#97) a versioned host record on disk and a sync payload that keeps fields it does not know, before any release, so an older device does not erase what a newer one wrote
 4. (#98) a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works

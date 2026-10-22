@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync"
 	"time"
 )
 
@@ -43,6 +45,10 @@ type Settings struct {
 	// HealthInterval is the seconds between checks, 0 means 300, less
 	// than 60 is raised to 60
 	HealthInterval int `json:"health_interval,omitempty"`
+
+	// base is the file as LoadSettings read it, SaveSettings writes only
+	// the fields that differ from it, copies of the value share it
+	base *Settings
 }
 
 // HealthEvery is the interval between checks of the hosts
@@ -68,7 +74,17 @@ func settingsPath() (string, error) {
 	return filepath.Join(dir, "settings.json"), nil
 }
 
+// LoadSettings reads settings.json, the result remembers what was read,
+// so SaveSettings can tell the fields changed by its holder from the ones
+// another process saved meanwhile
 func LoadSettings() (Settings, error) {
+	s, err := readSettings()
+	read := s
+	s.base = &read
+	return s, err
+}
+
+func readSettings() (Settings, error) {
 	s := Settings{Lang: "ru"}
 	path, err := settingsPath()
 	if err != nil {
@@ -90,16 +106,64 @@ func LoadSettings() (Settings, error) {
 	return s, nil
 }
 
+// settingsLockWait is how long a save waits for another sshr process to
+// finish its own, a settings save takes milliseconds
+const settingsLockWait = 10 * time.Second
+
+// settingsMu keeps two goroutines from updating the shared base at once
+var settingsMu sync.Mutex
+
+// SaveSettings writes s, a value from LoadSettings writes only the fields
+// its holder changed since, on top of the file as it is now, so the app
+// that loaded settings at start does not undo a setting the CLI saved
+// meanwhile, a value built from scratch is written whole
 func SaveSettings(s Settings) error {
 	path, err := settingsPath()
 	if err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(s, "", "  ")
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	unlock, err := waitLock(path+".lock", "saving settings", settingsLockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	out := s
+	if s.base != nil {
+		// a damaged file is replaced by what the holder has
+		if cur, err := readSettings(); err == nil {
+			out = cur
+			mergeChanged(&out, s, *s.base)
+		}
+	}
+	out.base = nil
+	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return err
 	}
 	// through a temp file, the app and the CLI may save at once and a torn
 	// file would load as defaults
-	return WriteFileAtomic(path, append(b, '\n'), 0o600)
+	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	if s.base != nil {
+		// the saved fields are now what the holder agrees with the file on,
+		// the next save does not write them again over a newer change
+		mergeChanged(s.base, s, *s.base)
+	}
+	return nil
+}
+
+// mergeChanged copies into dst every field where s differs from base
+func mergeChanged(dst *Settings, s, base Settings) {
+	d, sv, bv := reflect.ValueOf(dst).Elem(), reflect.ValueOf(s), reflect.ValueOf(base)
+	for i := 0; i < sv.NumField(); i++ {
+		if !sv.Type().Field(i).IsExported() {
+			continue
+		}
+		if !reflect.DeepEqual(sv.Field(i).Interface(), bv.Field(i).Interface()) {
+			d.Field(i).Set(sv.Field(i))
+		}
+	}
 }
