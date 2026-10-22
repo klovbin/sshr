@@ -481,8 +481,8 @@ func (s *Store) delete(id string) error {
 	return nil
 }
 
-// Update rewrites an existing host with the fields of in, ID and
-// CreatedAt are kept, a Rev in in that is not the saved one returns
+// Update rewrites an existing host with the fields of in, ID, CreatedAt
+// and LastConnected are kept, a Rev in in that is not the saved one returns
 // ErrChanged and saves nothing, a copy read before a sync or another save
 // would undo it, in.Rev 0 overwrites without the check
 func (s *Store) Update(id string, in Host) (out *Host, err error) {
@@ -534,6 +534,8 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 		return nil, err
 	}
 	h.ID, h.CreatedAt, h.Rev = cur.ID, cur.CreatedAt, cur.Rev+1
+	// only MarkConnected sets it, a host built from form fields has none
+	h.LastConnected = cur.LastConnected
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}

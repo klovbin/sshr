@@ -264,3 +264,22 @@ func TestUpdateRefusesAnOlderCopy(t *testing.T) {
 		t.Fatalf("Import = %+v, %v, want rev 4", u, err)
 	}
 }
+
+func TestUpdateKeepsLastConnected(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Host: "10.0.0.1", User: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkConnected(h.ID); err != nil {
+		t.Fatal(err)
+	}
+	// the app builds the host from its form fields, LastConnected is nil
+	u, err := s.Update(h.ID, Host{Host: "10.0.0.2", User: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.LastConnected == nil {
+		t.Fatal("an edit dropped the last connect time")
+	}
+}
