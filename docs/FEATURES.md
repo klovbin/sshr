@@ -190,6 +190,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** add a host once and it appears everywhere, a host changed on two devices keeps both versions
 - **Why this way:** the server stores only ciphertext and cannot read hosts, add a device or rewrite history, devices are approved by comparing fingerprints, keys stored in sshr stay on their device
 
+### Safe saves from several sshr processes
+- **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
+- **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time
+- **Why it helps:** an edit saved in the app during a sync is never overwritten, a key rotation is never undone by a second sync started at the same moment
+- **Why this way:** one lock for all hosts because the export and conflict copies touch several at once and a write takes milliseconds, a waiting save gives up after 30 s and names the pid that holds the lock, a second sync stops at once since it would have nothing new to do
+
 ### Sync server
 - **What:** `sshr-sync` with TLS 1.3, Let's Encrypt or your own certificate, or plain HTTP behind a proxy on loopback
 - **What for:** run the sync backend yourself
