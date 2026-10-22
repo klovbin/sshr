@@ -148,5 +148,5 @@ In this order, each one its own issue and commits:
 5. (#99) move `LockFile`, `WriteFileAtomic` into a small leaf package, so `cmd/sshr-sync` and `syncserver` stop linking or copying the core, `.pub` files through it too
 6. (#100) rules as tests: no `os/exec` in `ui`, `mcp`, `syncserver`, Gio only in `ui`, a test that every `Host` field is classified as synced, stripped or reset, a redacting format for `Host`, CODEOWNERS for `internal/ui`
 7. (#101) an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, the API token on the unix socket too
-8. (#102) a release pipeline: versions set through `app.Version`, signed checksums, packages (#17)
+8. (#102) done: `scripts/release.sh` and `.github/workflows/release.yml` build the six CLI files on a tag, checksums and a build attestation, the GUI is not in them, packages (#17) are next
 9. (#103) split `app` by its areas once 2 and 4 have settled the seams

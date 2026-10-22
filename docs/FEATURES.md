@@ -250,6 +250,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** one command, and `--uninstall` removes everything it added
 - **Why this way:** an unchecked binary is never installed, the GUI falls back to the CLI when build tools are missing, packages are planned in #17
 
+### Release files
+- **What:** a tag like `v1.2.3` builds the CLI for linux, darwin and windows on amd64 and arm64 in GitHub Actions, publishes `sshr_<os>_<arch>` (`.exe` on Windows) with `sha256sums.txt` and signs them with a build attestation, `scripts/release.sh v1.2.3` makes the same files on any machine
+- **What for:** install.sh and the packages of #17 (AUR, Homebrew, Scoop, nixpkgs) need a file with a known name and a checksum to take
+- **Why it helps:** installing needs no Go and no build tools, a tampered file is found by the checksum, and `gh attestation verify sshr_linux_amd64 --repo klovbin/sshr` shows which commit and workflow built it
+- **Why this way:** the tests run first, a failing tag publishes nothing, the CLI is built without cgo so one machine builds all six files, the version is set at build time and the binary reports it, the attestation needs no key to store and lose, the GUI is not in these files, it needs cgo and a build per system
+
 ### Application menu and icons
 - **What:** `sshr desktop-entry` adds sshr to the Linux menu and makes `~/Applications/sshr.app` on macOS, the Windows exe carries the icon
 - **What for:** start the app like any other program with its own icon
