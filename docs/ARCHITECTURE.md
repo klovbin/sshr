@@ -28,10 +28,11 @@ How sshr is built, which package may use which, where data lives and how the mai
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto` |
 | `internal/api` | local REST API over the core | `app` |
 | `internal/mcp` | MCP server over the core | `app` |
+| `internal/ext` | extensions: manifest, the installed ones, running one with a clean environment | `app` |
 | `internal/ui` | the Gio desktop app | `app`, `clip`, `i18n`, `assets` |
 | `internal/desktop` | menu entry, icons, app bundle | `assets` |
 | `internal/clip`, `internal/i18n`, `assets` | clipboard, translations, embedded icons | nothing |
-| `cmd/sshr` | CLI commands, wires the front ends together | `app`, `api`, `mcp`, `syncclient`, `ui`, `desktop`, `clip`, `assets` |
+| `cmd/sshr` | CLI commands, wires the front ends together | `app`, `api`, `mcp`, `ext`, `syncclient`, `ui`, `desktop`, `clip`, `assets` |
 | `cmd/sshr-sync` | starts the sync server | `app` (only for its file lock, planned to move), `syncserver` |
 
 Rules that follow:

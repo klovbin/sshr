@@ -29,10 +29,11 @@ var allowed = map[string][]string{
 	"internal/syncserver": {"internal/syncproto"},
 	"internal/api":        {"internal/app"},
 	"internal/mcp":        {"internal/app"},
+	"internal/ext":        {"internal/app"},
 	"internal/desktop":    {"assets"},
 	"internal/ui":         {"internal/app", "internal/clip", "internal/i18n", "assets"},
 	"cmd/sshr-sync":       {"internal/app", "internal/syncserver"},
-	"cmd/sshr": {"internal/app", "internal/api", "internal/mcp", "internal/syncclient", "internal/ui",
+	"cmd/sshr": {"internal/app", "internal/api", "internal/mcp", "internal/ext", "internal/syncclient", "internal/ui",
 		"internal/desktop", "internal/clip", "assets"},
 }
 
