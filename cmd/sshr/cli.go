@@ -114,9 +114,14 @@ func runCLI(args []string) {
 		cmdCompletion(args[1:])
 	case completeCommand:
 		cmdComplete(store, args[1:])
+	case "ext":
+		cmdExt(args[1:])
 	case "help", "--help", "-h":
 		cmdHelp(args[1:])
 	default:
+		// an installed extension answers to its name, only when no built-in
+		// command has it
+		runExtension(args[0], args[1:])
 		unknownCommand(args[0])
 	}
 }

@@ -18,7 +18,7 @@ func TestComplete(t *testing.T) {
 		want  []string
 	}{
 		{nil, "tu", []string{"tunnel"}},
-		{nil, "ex", []string{"export"}},
+		{nil, "ex", []string{"export", "ext"}},
 		{[]string{"connect"}, "w", []string{"web", "worker"}},
 		{[]string{"connect", "web"}, "", nil},
 		{[]string{"tunnel", "web"}, "", []string{"db"}},

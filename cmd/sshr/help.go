@@ -204,6 +204,18 @@ macOS, run it again after an update
 
 Options:
   --remove   take it out of the menu`},
+	{name: "ext", usage: `sshr ext list
+sshr ext remove <name>`, short: "list and remove extensions",
+		details: `An extension is a program you installed into ~/.sshr/extensions/<name>/
+that sshr runs as sshr <name> when no command of sshr has that name, a
+built-in command always wins
+
+list shows the installed ones, remove deletes one, sshr runs an extension
+only while its files are the ones that were installed
+
+Examples:
+  sshr ext list
+  sshr ext remove hello`},
 	{name: "completion", usage: "sshr completion bash|zsh|fish", short: "Tab completion for your shell",
 		details: `Prints a script that completes commands, options, host names, tags and
 forwards, install.sh puts it in place for bash and fish
