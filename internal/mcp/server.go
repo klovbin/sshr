@@ -141,7 +141,7 @@ func (s *server) handle(req request) {
 		}
 		if err != nil {
 			// tool errors go back as results, so the assistant can read them
-			result = toolResult{Content: []content{{Type: "text", Text: err.Error()}}, IsError: true}
+			result = toolResult{Content: []content{{Type: "text", Text: toolError(err)}}, IsError: true}
 		}
 		resp.Result = result
 	default:
@@ -162,6 +162,15 @@ type toolResult struct {
 }
 
 var errUnknownTool = errors.New("unknown tool")
+
+// toolError words the error codes of app for the assistant, it passes the
+// text on to the user
+func toolError(err error) string {
+	if errors.Is(err, app.ErrAsksPassword) {
+		return "this host asks for its password on every connect and there is no terminal to type it in, save its password in sshr or log in with a key"
+	}
+	return err.Error()
+}
 
 func (s *server) tools() []map[string]any {
 	hostArg := map[string]any{"type": "string", "description": "host name, address or ID as shown by list_hosts"}

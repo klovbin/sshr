@@ -205,3 +205,17 @@ func TestRunCommandTimeoutClamp(t *testing.T) {
 		}
 	}
 }
+
+func TestToolErrorWordsAsksPassword(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	if _, err := s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u", PasswordMode: app.PasswordAsk}); err != nil {
+		t.Fatal(err)
+	}
+	got := exchange(t, s, Options{AllowCommands: true},
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"id"}}}`)
+	res := got["1"]["result"].(map[string]any)
+	text := res["content"].([]any)[0].(map[string]any)["text"].(string)
+	if res["isError"] != true || !strings.Contains(text, "asks for its password") {
+		t.Fatalf("result = %v, want a sentence about the password", res)
+	}
+}
