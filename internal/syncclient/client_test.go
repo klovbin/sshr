@@ -1121,6 +1121,34 @@ func TestSyncApplyHoldsTheHostLock(t *testing.T) {
 	}
 }
 
+func TestSyncSecondRunStopsAtOnce(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	// another sshr sync of this machine holds the run lock
+	unlock, err := app.WaitLock(filepath.Join(w.a.Dir, "run.lock"), "running a sync", 0)
+	must(t, err)
+	start := time.Now()
+	for name, call := range map[string]func() error{
+		"pull":   w.a.Pull,
+		"push":   w.a.Push,
+		"leave":  func() error { return w.a.Leave(false) },
+		"remove": func() error { _, err := w.a.RemoveDevice(w.b.st.DeviceID[:8]); return err },
+	} {
+		var busy *app.BusyError
+		if err := call(); !errors.As(err, &busy) || !strings.Contains(err.Error(), "running a sync") {
+			t.Errorf("%s while another run holds the lock: %v", name, err)
+		}
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("the second run waited %v, it should stop at once", d)
+	}
+	if _, err := os.Stat(w.a.statePath()); err != nil {
+		t.Fatalf("leave went through while another run held the lock: %v", err)
+	}
+	unlock()
+	must(t, w.a.Pull())
+}
+
 func TestSyncLastConnectedStaysLocal(t *testing.T) {
 	w := newWorld(t)
 	web, _ := w.pair()

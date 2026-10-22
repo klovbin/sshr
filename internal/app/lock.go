@@ -29,6 +29,12 @@ func (e *BusyError) Error() string {
 // lockPoll is how often a waiting process tries the lock again
 const lockPoll = 50 * time.Millisecond
 
+// WaitLock takes the exclusive lock on path like waitLock, the sync keeps
+// one run at a time with it
+func WaitLock(path, what string, wait time.Duration) (func(), error) {
+	return waitLock(path, what, wait)
+}
+
 // waitLock takes the exclusive lock on path, trying again until wait has
 // passed, a wait of 0 tries once, the holder writes its pid into the file so
 // a process that gives up can name it, what says what the holder is doing

@@ -101,6 +101,30 @@ type Client struct {
 	keys *deviceKeys
 	// keyOK are the epochs whose key verified a manifest in this run
 	keyOK map[int]bool
+	// running is set while this Client holds the run lock, calls inside
+	// the run do not take it again
+	running bool
+}
+
+// run holds the lock of the sync folder for fn, two sync runs at once
+// would load the same state, the last save would drop a key change of the
+// other and both could store their own new vault key, the second run stops
+// at once instead of waiting, the state is read again under the lock
+func (c *Client) run(fn func() error) error {
+	if c.running {
+		return fn()
+	}
+	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := app.WaitLock(filepath.Join(c.Dir, "run.lock"), "running a sync", 0)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	c.running, c.st = true, nil
+	defer func() { c.running = false }()
+	return fn()
 }
 
 // ErrKeyPending means the manifest uses a vault key whose envelope has not
@@ -373,6 +397,10 @@ func hostname() string {
 // Init creates an account on server with this machine as its first device
 // and pushes the hosts
 func (c *Client) Init(server, name string) error {
+	return c.run(func() error { return c.initAccount(server, name) })
+}
+
+func (c *Client) initAccount(server, name string) error {
 	if _, err := os.Stat(c.statePath()); err == nil {
 		return errors.New("sync is already set up here, see sshr sync status")
 	}
@@ -446,7 +474,15 @@ func (c *Client) Invite() (string, error) {
 // Join asks to add this machine to the account of code, an existing device
 // approves it with sshr sync approve after comparing the fingerprint Join
 // returns
-func (c *Client) Join(server, code, name string) (string, error) {
+func (c *Client) Join(server, code, name string) (out string, err error) {
+	err = c.run(func() error {
+		out, err = c.join(server, code, name)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) join(server, code, name string) (string, error) {
 	if _, err := os.Stat(c.statePath()); err == nil {
 		return "", errors.New("sync is already set up here, see sshr sync status")
 	}
@@ -510,7 +546,15 @@ func (c *Client) Pending() ([]syncproto.DeviceRecord, error) {
 
 // Approve adds a waiting device whose ID starts with prefix, call it only
 // after the fingerprint matched the one on the new device's screen
-func (c *Client) Approve(prefix string) (*syncproto.DeviceRecord, error) {
+func (c *Client) Approve(prefix string) (out *syncproto.DeviceRecord, err error) {
+	err = c.run(func() error {
+		out, err = c.approve(prefix)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	pending, err := c.Pending()
 	if err != nil {
 		return nil, err
@@ -739,6 +783,10 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 
 // Pull applies the changes other devices pushed
 func (c *Client) Pull() error {
+	return c.run(func() error { return c.pull() })
+}
+
+func (c *Client) pull() error {
 	if err := c.load(); err != nil {
 		return err
 	}
@@ -1050,6 +1098,10 @@ func (c *Client) localHosts() (map[string][]byte, map[string]bool, error) {
 
 // Push sends the hosts changed here, it pulls first
 func (c *Client) Push() error {
+	return c.run(func() error { return c.pushAll() })
+}
+
+func (c *Client) pushAll() error {
 	if err := c.load(); err != nil {
 		return err
 	}
@@ -1236,7 +1288,15 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 // envelopes of the kept devices are written only after the commit, a push
 // that loses the race leaves nothing behind and the next attempt plans
 // again from the pulled state
-func (c *Client) RemoveDevice(prefix string) (*syncproto.Device, error) {
+func (c *Client) RemoveDevice(prefix string) (out *syncproto.Device, err error) {
+	err = c.run(func() error {
+		out, err = c.removeDevice(prefix)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
@@ -1392,6 +1452,10 @@ func (c *Client) Status() (*Status, error) {
 // Leave forgets sync on this machine, the hosts stay, the account and the
 // other devices are not touched
 func (c *Client) Leave(force bool) error {
+	return c.run(func() error { return c.leave(force) })
+}
+
+func (c *Client) leave(force bool) error {
 	b, err := os.ReadFile(c.statePath())
 	if err == nil {
 		var st state

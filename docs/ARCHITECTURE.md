@@ -63,7 +63,8 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - the app, `serve` and `mcp` can run for hours next to CLI commands and a sync, they must read hosts again instead of trusting a list they loaded earlier, the vault key is cached for the life of a process
 - a keychain call runs with a 5 s timeout, MCP runs at most 8 commands or uploads at once, the REST API has no such limit
 - every change of hosts (add, update, import, remove, duplicate, last connect, the ssh config export) runs under the lock file `~/.sshr/vault/hosts/.lock`, the sync takes it for each host from reading the local version to writing the remote one, a process that waits more than 30 s gives up with the pid of the holder, the lock belongs to the open file, so two goroutines of the app exclude each other too
-- not covered yet: two sync runs at once and settings saved from a copy loaded earlier
+- a sync run (init, join, approve, pull, push, remove-device, leave) holds `~/.sshr/sync/run.lock` and reads the state again under it, a second run stops at once with "another sshr process is running a sync", the run lock is taken before the host lock and never after it
+- not covered yet: settings saved from a copy loaded earlier (#106) and a host saved from a copy loaded earlier (#107), no lock helps there, the copy is read long before the save
 
 ## Data on disk
 
@@ -78,6 +79,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/settings.json` | settings, fields it does not know are lost on save | `SaveSettings` through `WriteFileAtomic` |
 | `~/.sshr/ssh_config` | the export | `refreshSSHConfig` through `WriteFileAtomic` |
 | `~/.ssh/config` | the user's own file, sshr adds or removes one Include line, a link is left alone | `editUserConfig` through `WriteFileAtomic`, its mode kept |
+| `~/.sshr/sync/run.lock` | lock of a sync run, holds the pid of the holder | `syncclient.run` |
 | `~/.sshr/sync/state.json` | the sync state: chain head, trusted devices, entry states, skipped entries, a pending key rotation | `syncclient.save` through `WriteFileAtomic` |
 | keychain, service `sshr`, entries `sync-device`, `sync-key-<epoch>`, `sync-key-pending` | device seed, vault keys per epoch, a key not delivered yet | `syncclient` |
 | `~/.sshr/api-token` | token of the REST API on a TCP port | `apiToken` through `WriteFileAtomic` |
@@ -137,7 +139,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 In this order, each one its own issue and commits:
 
-1. (#95) a lock between processes around `Store.save`, `Delete` and sync apply, and a second one over a whole sync run, so a host saved by the app during a pull is never overwritten and two syncs do not lose a key rotation
+1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is #106 and #107
 2. (#96) move starting a session (`cmdConnect`, `runMosh`, `cmdProxy`, `forwardSignals`, the tunnel options in `api`) into `app`, so the app can connect (#90) and the API stops repeating it
 3. (#97) a versioned host record on disk and a sync payload that keeps fields it does not know, before any release, so an older device does not erase what a newer one wrote
 4. (#98) a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works
