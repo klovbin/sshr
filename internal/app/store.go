@@ -25,6 +25,9 @@ var (
 	ErrPasswordRequired = errors.New("password_required")
 	// ErrKeyRequired means KeyVault was chosen with no key pasted
 	ErrKeyRequired = errors.New("key_required")
+	// ErrChanged means Update got a copy of the host older than the saved
+	// one, a sync or another window saved it meanwhile
+	ErrChanged = errors.New("host_changed")
 )
 
 // Password modes of a host, an empty mode means no password at all, the
@@ -116,6 +119,10 @@ type Host struct {
 	// LastConnected is the end of the last session ssh opened, set by
 	// MarkConnected, it stays on this machine and does not sync
 	LastConnected *time.Time `json:"last_connected,omitempty"`
+	// Rev counts the saves of the host on this machine, Add, Update and
+	// Import raise it, Update refuses a copy with another Rev, 0 skips the
+	// check, it stays on this machine and does not sync
+	Rev int `json:"rev,omitempty"`
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -227,6 +234,7 @@ func (s *Store) add(in Host) (*Host, error) {
 		return nil, err
 	}
 	h.CreatedAt = time.Now().UTC()
+	h.Rev = 1
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -474,7 +482,9 @@ func (s *Store) delete(id string) error {
 }
 
 // Update rewrites an existing host with the fields of in, ID and
-// CreatedAt are kept
+// CreatedAt are kept, a Rev in in that is not the saved one returns
+// ErrChanged and saves nothing, a copy read before a sync or another save
+// would undo it, in.Rev 0 overwrites without the check
 func (s *Store) Update(id string, in Host) (out *Host, err error) {
 	err = s.locked(func(tx *Store) error {
 		out, err = tx.update(id, in)
@@ -491,6 +501,9 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 	cur, err := s.Find(id)
 	if err != nil {
 		return nil, err
+	}
+	if in.Rev != 0 && in.Rev != cur.Rev {
+		return nil, ErrChanged
 	}
 	h, err := cleanHost(in)
 	if err != nil {
@@ -520,7 +533,7 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 	if err := needSecret(&h); err != nil {
 		return nil, err
 	}
-	h.ID, h.CreatedAt = cur.ID, cur.CreatedAt
+	h.ID, h.CreatedAt, h.Rev = cur.ID, cur.CreatedAt, cur.Rev+1
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -565,7 +578,10 @@ func (s *Store) importHost(in Host) (*Host, error) {
 	if h.PasswordMode == PasswordSaved && h.Password == "" {
 		return nil, fmt.Errorf("host %s came without its password", h.Name)
 	}
-	h.ID, h.CreatedAt = id, created
+	h.ID, h.CreatedAt, h.Rev = id, created, 1
+	if cur != nil {
+		h.Rev = cur.Rev + 1
+	}
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}

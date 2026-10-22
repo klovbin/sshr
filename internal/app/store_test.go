@@ -224,3 +224,43 @@ func TestParseDestination(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateRefusesAnOlderCopy(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Host: "10.0.0.1", User: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Rev != 1 {
+		t.Fatalf("Rev after Add = %d, want 1", h.Rev)
+	}
+	form := *h
+	synced := *h
+	synced.Port = 2299
+	if _, err := s.Update(h.ID, synced); err != nil {
+		t.Fatal(err)
+	}
+	form.Port = 2200
+	if _, err := s.Update(h.ID, form); !errors.Is(err, ErrChanged) {
+		t.Fatalf("Update from the older copy: err = %v, want ErrChanged", err)
+	}
+	cur, _ := s.Find(h.ID)
+	if cur.Port != 2299 || cur.Rev != 2 {
+		t.Fatalf("after the refused save port %d rev %d, want 2299 and 2", cur.Port, cur.Rev)
+	}
+	if err := s.MarkConnected(h.ID); err != nil {
+		t.Fatal(err)
+	}
+	if cur, _ = s.Find(h.ID); cur.Rev != 2 {
+		t.Errorf("MarkConnected changed Rev to %d, a connect must not refuse an open form", cur.Rev)
+	}
+	form.Rev = 0
+	if u, err := s.Update(h.ID, form); err != nil || u.Port != 2200 || u.Rev != 3 {
+		t.Fatalf("Update with Rev 0 = %+v, %v, want port 2200 rev 3", u, err)
+	}
+	in := *cur
+	in.Rev = 0
+	if u, err := s.Import(in); err != nil || u.Rev != 4 {
+		t.Fatalf("Import = %+v, %v, want rev 4", u, err)
+	}
+}

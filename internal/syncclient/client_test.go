@@ -222,7 +222,7 @@ func TestSyncDetectsServerTampering(t *testing.T) {
 	// a manifest changed on the server fails the signature check
 	h, _ := w.a.Store.Find(db.ID)
 	h.Port = 4000
-	w.a.Store.Update(db.ID, *h)
+	h, _ = w.a.Store.Update(db.ID, *h)
 	must(t, w.a.Push())
 	n := len(mustRead(t, dir))
 	last := filepath.Join(dir, fmt.Sprintf("%d.json", n))
@@ -245,10 +245,10 @@ func TestSyncDetectsServerTampering(t *testing.T) {
 
 	// a missing change in the history is a gap
 	h.Port = 4001
-	w.a.Store.Update(db.ID, *h)
+	h, _ = w.a.Store.Update(db.ID, *h)
 	must(t, w.a.Push())
 	h.Port = 4002
-	w.a.Store.Update(db.ID, *h)
+	h, _ = w.a.Store.Update(db.ID, *h)
 	must(t, w.a.Push())
 	n = len(mustRead(t, dir))
 	gap := filepath.Join(dir, fmt.Sprintf("%d.json", n-1))
@@ -1097,7 +1097,9 @@ func TestSyncApplyHoldsTheHostLock(t *testing.T) {
 		go func() {
 			h, err := other.Find(db.ID)
 			if err == nil {
-				h.Port = 2299
+				// read before apply wrote, the revision check would refuse
+				// it, this save only has to wait for the lock
+				h.Port, h.Rev = 2299, 0
 				_, err = other.Update(db.ID, *h)
 			}
 			saved <- err
@@ -1169,5 +1171,16 @@ func TestSyncLastConnectedStaysLocal(t *testing.T) {
 	got, _ := w.b.Store.Find(web.ID)
 	if got.Port != 2222 || got.LastConnected == nil {
 		t.Fatalf("after a pull: port %d last %v", got.Port, got.LastConnected)
+	}
+}
+
+func TestPayloadLeavesTheSaveCounterHere(t *testing.T) {
+	a, err := payloadOf(app.Host{ID: "x", Host: "h", User: "u", Rev: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := payloadOf(app.Host{ID: "x", Host: "h", User: "u", Rev: 7})
+	if string(a) != string(b) || strings.Contains(string(a), `"rev"`) {
+		t.Errorf("Rev reaches the payload, every save would look like an edit to push: %s", a)
 	}
 }

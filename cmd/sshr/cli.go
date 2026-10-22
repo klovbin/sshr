@@ -928,6 +928,9 @@ func findFailed(cmd, query string, err error) {
 }
 
 func fatal(err error) {
+	if errors.Is(err, app.ErrChanged) {
+		err = errors.New("the host was saved meanwhile (a sync or the app), nothing is changed, run the command again")
+	}
 	fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
 	os.Exit(1)
 }

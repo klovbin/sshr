@@ -64,13 +64,14 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - a keychain call runs with a 5 s timeout, MCP runs at most 8 commands or uploads at once, the REST API has no such limit
 - every change of hosts (add, update, import, remove, duplicate, last connect, the ssh config export) runs under the lock file `~/.sshr/vault/hosts/.lock`, the sync takes it for each host from reading the local version to writing the remote one, a process that waits more than 30 s gives up with the pid of the holder, the lock belongs to the open file, so two goroutines of the app exclude each other too
 - a sync run (init, join, approve, pull, push, remove-device, leave) holds `~/.sshr/sync/run.lock` and reads the state again under it, a second run stops at once with "another sshr process is running a sync", the run lock is taken before the host lock and never after it
-- not covered yet: settings saved from a copy loaded earlier (#106) and a host saved from a copy loaded earlier (#107), no lock helps there, the copy is read long before the save
+- a lock does not help when the copy is read long before the save, so every host file carries `rev`, a save counter of this machine, `Store.Update` refuses a copy whose `rev` is not the saved one with `ErrChanged` (#107), the CLI passes the host it read and says "run the command again", a connect does not raise `rev`, so it never refuses an open form, the sync payload leaves `rev` out
+- not covered yet: settings saved from a copy loaded earlier (#106)
 
 ## Data on disk
 
 | Path | Holds | Written by |
 |----|----|----|
-| `~/.sshr/vault/hosts/<id>.json` | one host per file, 0600, passwords sealed as v2 (bound to the destination), keys sealed, a password from an old version stays in clear in `password` while the keychain cannot be used | `Store.save` through `WriteFileAtomic` |
+| `~/.sshr/vault/hosts/<id>.json` | one host per file, 0600, `rev` counts its saves on this machine, passwords sealed as v2 (bound to the destination), keys sealed, a password from an old version stays in clear in `password` while the keychain cannot be used | `Store.save` through `WriteFileAtomic` |
 | `~/.sshr/vault/hosts/<id>.pub` | public half of a key kept in sshr, for `-i` with an agent | `writePub`, plain `os.WriteFile` |
 | `~/.sshr/vault/.lock` | lock for creating the vault key | `VaultKey` |
 | `~/.sshr/vault/hosts/.lock` | lock for changing hosts, holds the pid of the holder | `Store.locked` |

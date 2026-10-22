@@ -626,6 +626,8 @@ func payloadOf(h app.Host) ([]byte, error) {
 	// when this machine last connected stays here, it would make every
 	// connect a change to push
 	p.Host.LastConnected = nil
+	// the save counter is per machine, Import sets its own
+	p.Host.Rev = 0
 	// references to secrets of this machine stay here, the other devices
 	// do not take them anyway (app.FromOtherDevice)
 	p.Host.PasswordRef, p.Host.KeyRef = "", ""
