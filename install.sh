@@ -153,7 +153,8 @@ download_release() {
 		return 1
 	fi
 	chmod 755 "$WORK/sshr"
-	GUI=1
+	# release files are the CLI, built without cgo, there is no GUI to add to
+	# the menu
 	say "downloaded release $VERSION for $OS/$ARCH"
 }
 
