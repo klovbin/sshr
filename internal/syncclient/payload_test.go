@@ -154,3 +154,17 @@ func TestSyncSkipsANewerHostFormat(t *testing.T) {
 		t.Fatalf("b wrote the newer host: %v", after)
 	}
 }
+
+// a manifest of today's or an older format is read, a newer one asks to
+// update sshr (#97)
+func TestManifestFormats(t *testing.T) {
+	for v, ok := range map[int]bool{0: false, 1: true, 2: false} {
+		err := checkFormat(v)
+		if (err == nil) != ok {
+			t.Errorf("format %d: %v", v, err)
+		}
+	}
+	if err := checkFormat(2); err == nil || !strings.Contains(err.Error(), "update sshr") {
+		t.Errorf("a newer format does not ask to update: %v", err)
+	}
+}

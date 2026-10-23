@@ -732,8 +732,11 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 	if err := json.Unmarshal(sm.Body, &m); err != nil {
 		return nil, err
 	}
-	if m.Version != syncproto.FormatVersion || m.Account != c.st.Account {
-		return nil, errors.New("manifest of another account or format")
+	if m.Account != c.st.Account {
+		return nil, errors.New("manifest of another account")
+	}
+	if err := checkFormat(m.Version); err != nil {
+		return nil, err
 	}
 	if c.st.Counter > 0 || c.st.Approver == "" {
 		if m.Counter != c.st.Counter+1 {
@@ -803,6 +806,20 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 	c.st.Trusted, c.st.Head, c.st.Counter, c.st.Epoch = m.Devices, syncproto.BodyHash(sm.Body), m.Counter, m.Epoch
 	c.st.Approver = ""
 	return &m, nil
+}
+
+// checkFormat takes a manifest of this format or an older one, a field
+// added to the manifest keeps the format, only a change older devices
+// cannot read raises it, and then they are told to update instead of
+// failing on a mismatch they cannot explain
+func checkFormat(v int) error {
+	switch {
+	case v < 1:
+		return fmt.Errorf("manifest of format %d, no sshr writes that", v)
+	case v > syncproto.FormatVersion:
+		return fmt.Errorf("the account was written by a newer sshr (format %d, this one reads up to %d), update sshr on this device", v, syncproto.FormatVersion)
+	}
+	return nil
 }
 
 // Pull applies the changes other devices pushed
