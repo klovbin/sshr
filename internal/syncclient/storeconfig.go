@@ -149,7 +149,11 @@ func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) 
 		// a key scoped to fewer folders would pass the manifests and fail
 		// the next sync, the vault key of this device is read as well
 		if c.st.Approver == "" && c.st.Epoch > 0 {
-			if _, err := b.GetEnvelope(c.st.DeviceID, c.st.Epoch); err != nil {
+			_, err := b.GetEnvelope(c.st.DeviceID, c.st.Epoch)
+			if errors.Is(err, ErrNotFound) {
+				return errors.New("the vault key of this device is not delivered yet, run sshr sync once it is, then sshr sync store-key again")
+			}
+			if err != nil {
 				return fmt.Errorf("the new key does not read the vault key of this device: %v", err)
 			}
 		}

@@ -216,6 +216,16 @@ func TestReplaceStoreKey(t *testing.T) {
 	if err := mk().ReplaceStoreKey(*got, newRef, "x", ObjectBackend{Store: noEnvelopes{store}}); err == nil || !strings.Contains(err.Error(), "vault key of this device") {
 		t.Errorf("a key without the envelopes: %v", err)
 	}
+	// an envelope that is not there yet is not the fault of the key (#245)
+	bare := newMemStore()
+	for k, v := range store.m {
+		if !strings.HasPrefix(k, "envelopes/") {
+			bare.m[k] = v
+		}
+	}
+	if err := mk().ReplaceStoreKey(*got, newRef, "x", ObjectBackend{Store: bare}); err == nil || !strings.Contains(err.Error(), "not delivered yet") {
+		t.Errorf("a store without the envelope: %v", err)
+	}
 	// settings that are no longer the ones of the state (#242)
 	stale := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"other"}`)}
 	if err := mk().ReplaceStoreKey(stale, newRef, "x", ObjectBackend{Store: store}); err == nil || !strings.Contains(err.Error(), "changed meanwhile") {
