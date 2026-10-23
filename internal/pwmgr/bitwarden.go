@@ -1,4 +1,4 @@
-package app
+package pwmgr
 
 import (
 	"bytes"
@@ -15,12 +15,12 @@ var ErrNoBW = errors.New("no_bw")
 // bwTimeout bounds one bw call, bw starts Node and syncs on the first call
 const bwTimeout = time.Minute
 
-// bwBin is the bw executable, tests point it at a fake
-var bwBin = "bw"
+// BWBin is the bw executable, tests point it at a fake
+var BWBin = "bw"
 
 // bwCLI is the Bitwarden CLI, it reads the unlocked session from
 // BW_SESSION in the environment
-var bwCLI = managerCLI{name: "Bitwarden", bin: &bwBin, missing: ErrNoBW,
+var bwCLI = managerCLI{name: "Bitwarden", bin: &BWBin, missing: ErrNoBW,
 	url: "https://bitwarden.com/help/cli/", timeout: bwTimeout,
 	stuck: "Bitwarden did not answer in time",
 	hint: func(msg string) string {
@@ -33,8 +33,8 @@ var bwCLI = managerCLI{name: "Bitwarden", bin: &bwBin, missing: ErrNoBW,
 // bwRun runs bw without prompts
 func bwRun(args ...string) ([]byte, error) { return bwCLI.run(nil, append(args, "--nointeraction")...) }
 
-// bwPassword reads the password of a Login item
-func bwPassword(ref string) ([]byte, error) {
+// BWPassword reads the password of a Login item
+func BWPassword(ref string) ([]byte, error) {
 	out, err := bwRun("get", "password", ref)
 	if err != nil {
 		return nil, err
@@ -42,9 +42,9 @@ func bwPassword(ref string) ([]byte, error) {
 	return bytes.TrimRight(out, "\r\n"), nil
 }
 
-// bwKey reads the private and public key of an SSH Key item, bw has no
+// BWKey reads the private and public key of an SSH Key item, bw has no
 // "get" for them, the item JSON carries them in sshKey
-func bwKey(ref string) (private []byte, public string, err error) {
+func BWKey(ref string) (private []byte, public string, err error) {
 	out, err := bwRun("get", "item", ref)
 	if err != nil {
 		return nil, "", err
@@ -65,10 +65,10 @@ func bwKey(ref string) (private []byte, public string, err error) {
 	return []byte(item.SSHKey.PrivateKey), strings.TrimSpace(item.SSHKey.PublicKey), nil
 }
 
-// bwKeyPub reads the key of an SSH Key item once and returns its public
+// BWKeyPub reads the key of an SSH Key item once and returns its public
 // half, from the private key, so it always matches what ssh will be given
-func bwKeyPub(ref string) (string, error) {
-	plain, _, err := bwKey(ref)
+func BWKeyPub(ref string) (string, error) {
+	plain, _, err := BWKey(ref)
 	if err != nil {
 		return "", err
 	}

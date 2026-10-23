@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"sshr.dev/internal/pwmgr"
 )
 
 // fakeOP puts a shell script in place of op, read answers from files named
@@ -28,9 +30,9 @@ esac
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	old := opBin
-	opBin = bin
-	t.Cleanup(func() { opBin = old })
+	old := pwmgr.OPBin
+	pwmgr.OPBin = bin
+	t.Cleanup(func() { pwmgr.OPBin = old })
 	t.Setenv("FAKEOP_DIR", dir)
 	return dir
 }
@@ -133,9 +135,9 @@ func TestOnePasswordLocked(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not signed in") {
 		t.Errorf("Unlock locked = %v", err)
 	}
-	old := opBin
-	opBin = "sshr-no-such-op"
-	defer func() { opBin = old }()
+	old := pwmgr.OPBin
+	pwmgr.OPBin = "sshr-no-such-op"
+	defer func() { pwmgr.OPBin = old }()
 	if err := Unlock(h); !errors.Is(err, ErrNoOP) {
 		t.Errorf("no op: %v", err)
 	}

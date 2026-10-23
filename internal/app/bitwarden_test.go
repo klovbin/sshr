@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"sshr.dev/internal/pwmgr"
 )
 
 // fakeBW puts a shell script in place of bw, answers come from files named
@@ -26,9 +28,9 @@ cat "$f"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	old := bwBin
-	bwBin = bin
-	t.Cleanup(func() { bwBin = old })
+	old := pwmgr.BWBin
+	pwmgr.BWBin = bin
+	t.Cleanup(func() { pwmgr.BWBin = old })
 	t.Setenv("FAKEBW_DIR", dir)
 	return dir
 }

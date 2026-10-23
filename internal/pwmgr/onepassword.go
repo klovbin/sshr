@@ -1,4 +1,4 @@
-package app
+package pwmgr
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"sshr.dev/internal/settings"
 )
 
 // ErrNoOP means the 1Password CLI (op) is not installed
@@ -64,13 +66,13 @@ const opCLIInstallURL = "https://developer.1password.com/docs/cli/get-started/"
 // for a fingerprint or the account password
 const opTimeout = 2 * time.Minute
 
-// opBin is the op executable, tests point it at a fake
-var opBin = "op"
+// OPBin is the op executable, tests point it at a fake
+var OPBin = "op"
 
 // opCLI is the 1Password CLI, op asks the app for a fingerprint or the
 // account password, the timeout leaves time for that
 var opCLI = managerCLI{
-	name: "1Password", bin: &opBin, missing: ErrNoOP,
+	name: "1Password", bin: &OPBin, missing: ErrNoOP,
 	url: opCLIInstallURL, timeout: opTimeout,
 	stuck:   "1Password did not answer in time, is the app locked?",
 	resolve: resolveOpBin,
@@ -188,17 +190,17 @@ var opPathCandidates = []string{
 	"/usr/local/bin/op",
 }
 
-	func resolveOpBin() (string, error) {
-		if opBin != "op" {
-			bin, err := exec.LookPath(opBin)
-			if err != nil {
-				return "", fmt.Errorf("%w: %v", ErrNoOP, err)
-			}
-			return bin, nil
+func resolveOpBin() (string, error) {
+	if OPBin != "op" {
+		bin, err := exec.LookPath(OPBin)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrNoOP, err)
 		}
+		return bin, nil
+	}
 	// Use a properly signed op only (Team ID 2BUA8C4S2C). An ad-hoc copy
 	// next to sshr.app cannot talk to the desktop app over XPC.
-	if bin, err := exec.LookPath(opBin); err == nil {
+	if bin, err := exec.LookPath(OPBin); err == nil {
 		return bin, nil
 	}
 	for _, p := range opPathCandidates {
@@ -305,53 +307,41 @@ func opEnv(args []string) []string {
 		out = append(out, "HOME="+home)
 	}
 	if !listing {
-		if st, err := LoadSettings(); err == nil && st.OPAccount != "" {
+		if st, err := settings.Load(); err == nil && st.OPAccount != "" {
 			out = append(out, "OP_ACCOUNT="+st.OPAccount)
 		}
 	}
 	return out
 }
 
-// opRead reads one field by its secret reference
-func opRead(ref string) ([]byte, error) {
+// OPRead reads one field by its secret reference
+func OPRead(ref string) ([]byte, error) {
 	return opRun(nil, "read", "--no-newline", ref)
 }
 
-// opReadKey reads the private key of an SSH Key item in OpenSSH format,
+// OPReadKey reads the private key of an SSH Key item in OpenSSH format,
 // op gives PKCS#8 by default
-func opReadKey(ref string) ([]byte, error) {
+func OPReadKey(ref string) ([]byte, error) {
 	if !strings.Contains(ref, "?") {
 		ref += "?ssh-format=openssh"
 	}
-	return opRead(ref)
+	return OPRead(ref)
 }
 
-// opKeyPub reads the key of an SSH Key item once and returns its public
+// OPKeyPub reads the key of an SSH Key item once and returns its public
 // half, kept with the host for ssh -i and to show which key it is
-func opKeyPub(ref string) (string, error) {
-	plain, err := opReadKey(ref)
+func OPKeyPub(ref string) (string, error) {
+	plain, err := OPReadKey(ref)
 	if err != nil {
 		return "", err
 	}
 	return publicKeyOf(plain, ref)
 }
 
-// opStorePassword creates a 1Password item for a password typed with
-// PasswordOnePassword and keeps only its reference, the password itself is
-// not written to the host file
-func (s *Store) opStorePassword(h *Host) error {
-	if h.PasswordMode != PasswordOnePassword || h.Password == "" {
-		return nil
-	}
-	if h.PasswordRef != "" {
-		return errors.New("the host is linked to a 1Password item, change the password there and leave it empty here")
-	}
-	vault := ""
-	if s.OPVault != nil {
-		vault = *s.OPVault
-	} else if st, err := LoadSettings(); err == nil {
-		vault = st.OPVault
-	}
+// OPCreateLogin creates a 1Password Login item titled "sshr <name>" in
+// vault (the default vault when empty) and returns the secret reference of
+// its password
+func OPCreateLogin(name, user, password, vault string) (string, error) {
 	// the password goes in a JSON template on stdin, op warns that
 	// assignments in argv are visible to other processes
 	type field struct {
@@ -367,16 +357,16 @@ func (s *Store) opStorePassword(h *Host) error {
 		Tags     []string `json:"tags"`
 		Fields   []field  `json:"fields"`
 	}{
-		Title:    "sshr " + h.Name,
+		Title:    "sshr " + name,
 		Category: "LOGIN",
 		Tags:     []string{"sshr"},
 		Fields: []field{
-			{ID: "username", Type: "STRING", Purpose: "USERNAME", Label: "username", Value: h.User},
-			{ID: "password", Type: "CONCEALED", Purpose: "PASSWORD", Label: "password", Value: h.Password},
+			{ID: "username", Type: "STRING", Purpose: "USERNAME", Label: "username", Value: user},
+			{ID: "password", Type: "CONCEALED", Purpose: "PASSWORD", Label: "password", Value: password},
 		},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	args := []string{"item", "create", "--format", "json"}
 	if vault != "" {
@@ -384,7 +374,7 @@ func (s *Store) opStorePassword(h *Host) error {
 	}
 	out, err := opRun(tmpl, append(args, "-")...)
 	if err != nil {
-		return err
+		return "", err
 	}
 	var item struct {
 		ID    string `json:"id"`
@@ -397,7 +387,7 @@ func (s *Store) opStorePassword(h *Host) error {
 		} `json:"fields"`
 	}
 	if err := json.Unmarshal(out, &item); err != nil {
-		return fmt.Errorf("1Password: unexpected answer to item create: %v", err)
+		return "", fmt.Errorf("1Password: unexpected answer to item create: %v", err)
 	}
 	ref := ""
 	for _, f := range item.Fields {
@@ -407,10 +397,9 @@ func (s *Store) opStorePassword(h *Host) error {
 	}
 	if ref == "" {
 		if item.ID == "" || item.Vault.ID == "" {
-			return errors.New("1Password created the item but did not say where")
+			return "", errors.New("1Password created the item but did not say where")
 		}
 		ref = "op://" + item.Vault.ID + "/" + item.ID + "/password"
 	}
-	h.PasswordRef, h.Password = ref, ""
-	return nil
+	return ref, nil
 }
