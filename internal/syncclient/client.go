@@ -869,8 +869,8 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := m.Entries[id]
-		if broken[id] {
-			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
+		if why, ok := broken[id]; ok {
+			c.logf("skipped %s, %s", short(id, 8), why)
 			continue
 		}
 		delete(c.st.Skipped, id)
@@ -893,7 +893,14 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		// CLI is seen and a failed download leaves nothing behind
 		var p *payload
 		if !e.Deleted {
-			if p, err = c.fetchPayload(id, e, key, m.Epoch); err != nil {
+			if p, err = c.fetchPayload(id, e, key, m.Epoch); errors.Is(err, errBadPayload) {
+				// a payload this sshr cannot read (a newer field type) is
+				// carried on and tried again on every pull, as a host Import
+				// refuses is, the other hosts go on
+				c.st.Skipped[id] = e
+				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", short(id, 8), err)
+				continue
+			} else if err != nil {
 				return err
 			}
 		}
@@ -1047,6 +1054,10 @@ func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string
 }
 
 // fetchPayload downloads and opens the blob of entry id
+// errBadPayload is a payload that opens but does not read as a host, a
+// download that fails or a blob that does not open is another error
+var errBadPayload = errors.New("bad payload")
+
 func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch int) (*payload, error) {
 	plain, err := c.fetchBlob(id, e.Hash, key, epoch)
 	if err != nil {
@@ -1054,10 +1065,10 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 	}
 	var p payload
 	if err := json.Unmarshal(plain, &p); err != nil {
-		return nil, fmt.Errorf("entry %s: %v", short(id, 8), err)
+		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
 	}
 	if p.Host.ID != id {
-		return nil, fmt.Errorf("entry %s holds host %s", short(id, 8), p.Host.ID)
+		return nil, fmt.Errorf("%w: entry %s holds host %s", errBadPayload, short(id, 8), p.Host.ID)
 	}
 	return &p, nil
 }
@@ -1078,22 +1089,26 @@ func conflictName(name, device string) string {
 
 // localHosts returns the payload of every host here and the IDs of host
 // files that do not load, those are neither deleted nor overwritten
-func (c *Client) localHosts() (map[string][]byte, map[string]bool, error) {
+func (c *Client) localHosts() (map[string][]byte, map[string]string, error) {
 	hosts, unreadable, err := c.Store.ListAll()
 	if err != nil {
 		return nil, nil, err
+	}
+	// broken names the hosts that cannot sync from here and why, one host
+	// whose file does not load or whose password does not open must not
+	// stop the others, and must not be taken for a deleted one
+	broken := map[string]string{}
+	for _, id := range unreadable {
+		broken[id] = "its host file " + id + ".json here does not load, fix it, removing it deletes the host on every device"
 	}
 	out := map[string][]byte{}
 	for _, h := range hosts {
 		p, err := payloadOf(h)
 		if err != nil {
-			return nil, nil, fmt.Errorf("host %s: %v", h.Name, err)
+			broken[h.ID] = err.Error() + ", it does not sync from here until then"
+			continue
 		}
 		out[h.ID] = p
-	}
-	broken := map[string]bool{}
-	for _, id := range unreadable {
-		broken[id] = true
 	}
 	return out, broken, nil
 }
@@ -1201,8 +1216,8 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		if _, ok := c.st.Skipped[id]; ok {
 			continue
 		}
-		if broken[id] {
-			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
+		if why, ok := broken[id]; ok {
+			c.logf("kept %s on other devices, %s", short(id, 8), why)
 			continue
 		}
 		if _, ok := local[id]; !ok && !known.Deleted {

@@ -440,6 +440,29 @@ func TestSyncUnreadableHostIsNotDeleted(t *testing.T) {
 	}
 }
 
+// a host whose saved password does not open here (an address changed in
+// its file by hand, a keychain reset) is left out of the sync, the other
+// hosts still go both ways and the host is not deleted elsewhere (#144)
+func TestSyncUnsealableHostDoesNotStopTheOthers(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	writeRaw(t, w.b.Store, web.ID, func(m map[string]any) { m["host"] = "203.0.113.66" })
+	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, w.b.Pull())
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if _, err := w.a.Store.Find("other"); err != nil {
+		t.Fatalf("the other host did not sync: %v\n%s", err, w.log.String())
+	}
+	if h, err := w.a.Store.Find(web.ID); err != nil || h.Host != "10.0.0.1" {
+		t.Fatalf("the host that does not open on b changed or went on a: %+v %v", h, err)
+	}
+	if !strings.Contains(w.log.String(), "does not open here") {
+		t.Errorf("no word about the host:\n%s", w.log.String())
+	}
+}
+
 // writeRaw edits a host file behind the Store, the way a newer sshr would
 // write a field this one does not know
 func writeRaw(t *testing.T, s *app.Store, id string, edit func(map[string]any)) {
