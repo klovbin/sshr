@@ -1273,3 +1273,31 @@ func TestPayloadLeavesTheSaveCounterHere(t *testing.T) {
 		t.Errorf("Rev reaches the payload, every save would look like an edit to push: %s", a)
 	}
 }
+
+// a server that lost the whole account answers 404 for the manifest, a
+// device that saw changes refuses it unless told the server was restored
+// (#128)
+func TestSyncLostAccountIsARollback(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	empty := func(r *http.Request) (*http.Response, error) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/manifest"):
+			return answer(http.StatusNotFound), nil
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/manifests"):
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("[]")), Header: http.Header{}}, nil
+		}
+		return nil, nil
+	}
+	w.b.HTTP = &http.Client{Transport: hookRT{empty}}
+	if err := w.b.Pull(); err == nil || !strings.Contains(err.Error(), "rolled") {
+		t.Fatalf("a lost account = %v", err)
+	}
+	w.b.AcceptReset = true
+	if err := w.b.Pull(); err != nil {
+		t.Fatalf("a lost account with --accept-reset: %v", err)
+	}
+	if w.b.st.Counter != 0 {
+		t.Errorf("counter %d after the reset, want 0", w.b.st.Counter)
+	}
+}
