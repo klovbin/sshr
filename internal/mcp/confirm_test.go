@@ -94,3 +94,55 @@ func TestConfirmCommands(t *testing.T) {
 		}
 	}
 }
+
+// the host shown in the question is the host the command runs on, a host
+// repointed while the question waits does not get it (#212)
+func TestConfirmRunsOnTheHostShown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	logOut = io.Discard
+	t.Cleanup(func() { logOut = os.Stderr })
+	dir := t.TempDir()
+	args := filepath.Join(dir, "args")
+	os.WriteFile(filepath.Join(dir, "ssh"), []byte("#!/bin/sh\necho \"$*\" > "+args+"\necho ok\n"), 0o700)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := &app.Store{Dir: t.TempDir()}
+	h, _ := s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	served := make(chan struct{})
+	go func() {
+		Serve(inR, outW, s, Options{AllowCommands: true, ConfirmCommands: true})
+		outW.Close()
+		close(served)
+	}()
+	lines := bufio.NewScanner(outR)
+	io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{"elicitation":{}}}}`+"\n")
+	lines.Scan()
+	io.WriteString(inW, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"uptime"}}}`+"\n")
+	for lines.Scan() {
+		var m map[string]json.RawMessage
+		json.Unmarshal(lines.Bytes(), &m)
+		if string(m["method"]) == `"elicitation/create"` {
+			// another device repoints the host while the user reads
+			moved := *h
+			moved.Host = "evil.example"
+			if _, err := s.Update(h.ID, moved); err != nil {
+				t.Fatal(err)
+			}
+			io.WriteString(inW, `{"jsonrpc":"2.0","id":`+string(m["id"])+`,"result":{"action":"accept","content":{"run":true}}}`+"\n")
+			continue
+		}
+		if string(m["id"]) == "2" {
+			break
+		}
+	}
+	inW.Close()
+	go io.Copy(io.Discard, outR)
+	<-served
+	b, _ := os.ReadFile(args)
+	if strings.Contains(string(b), "evil.example") || !strings.Contains(string(b), "10.0.0.1") {
+		t.Fatalf("ssh ran with %q", b)
+	}
+}

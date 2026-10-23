@@ -314,12 +314,19 @@ func (s *server) call(name string, raw json.RawMessage) (toolResult, error) {
 		}
 		// the question comes before the slot, eight unanswered questions
 		// would hold every upload otherwise
-		if err := s.allowRun(a.Host, a.Command); err != nil {
+		// one lookup: the host checked and shown in the question is the
+		// host the command runs on, a sync during the question changes
+		// nothing
+		h, err := s.findHost(a.Host)
+		if err != nil {
+			return toolResult{}, err
+		}
+		if err := s.allowRun(h, a.Command); err != nil {
 			return toolResult{}, err
 		}
 		s.slots <- struct{}{}
 		defer func() { <-s.slots }()
-		return s.runCommand(a.Host, a.Command, a.TimeoutSeconds)
+		return s.runCommand(h, a.Command, a.TimeoutSeconds)
 	}
 	return toolResult{}, fmt.Errorf("%w %q", errUnknownTool, name)
 }
@@ -408,11 +415,7 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 
 // allowRun checks a command before it waits for a slot: the host is
 // allowed and, when asked for, the user said yes
-func (s *server) allowRun(host, command string) error {
-	h, err := s.findHost(host)
-	if err != nil {
-		return err
-	}
+func (s *server) allowRun(h *app.Host, command string) error {
 	if s.opts.CommandsAllowed != nil {
 		if err := s.opts.CommandsAllowed(h); err != nil {
 			return err
@@ -424,11 +427,7 @@ func (s *server) allowRun(host, command string) error {
 	return nil
 }
 
-func (s *server) runCommand(host, command string, timeout int) (toolResult, error) {
-	h, err := s.findHost(host)
-	if err != nil {
-		return toolResult{}, err
-	}
+func (s *server) runCommand(h *app.Host, command string, timeout int) (toolResult, error) {
 	if strings.TrimSpace(command) == "" {
 		return toolResult{}, errors.New("empty command")
 	}
