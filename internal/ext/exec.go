@@ -35,6 +35,17 @@ var secretEnvPrefixes = []string{"OP_SESSION_", "SSHR_"}
 // private agent of a key kept in sshr, app.StripAuthEnv puts the user's own
 // back first
 func Env(parent []string, kind, dir, sshrBin string) []string {
+	return append(cleanEnv(parent),
+		"SSHR_EXT_PROTOCOL="+strconv.Itoa(Protocol),
+		"SSHR_EXT_KIND="+kind,
+		"SSHR_EXT_DIR="+dir,
+		"SSHR_BIN="+sshrBin,
+	)
+}
+
+// cleanEnv is parent without the secrets above and with the user's own
+// agent, also what git is started with to fetch an extension
+func cleanEnv(parent []string) []string {
 	parent = app.StripAuthEnv(parent)
 	out := make([]string, 0, len(parent)+4)
 	for _, kv := range parent {
@@ -44,12 +55,7 @@ func Env(parent []string, kind, dir, sshrBin string) []string {
 		}
 		out = append(out, kv)
 	}
-	return append(out,
-		"SSHR_EXT_PROTOCOL="+strconv.Itoa(Protocol),
-		"SSHR_EXT_KIND="+kind,
-		"SSHR_EXT_DIR="+dir,
-		"SSHR_BIN="+sshrBin,
-	)
+	return out
 }
 
 func isSecretEnv(name string) bool {

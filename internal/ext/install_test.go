@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // source makes a folder with an extension in it
@@ -143,21 +144,35 @@ func TestIsGitURL(t *testing.T) {
 	}
 }
 
+// gitStub puts a fake git first in PATH, a clone copies fixture into the last
+// argument and adds a .git folder, rev-parse prints a fixed hash, every call
+// is logged with the arguments and the environment
+func gitStub(t *testing.T, fixture, body string) (log string) {
+	t.Helper()
+	bin := t.TempDir()
+	log = filepath.Join(t.TempDir(), "log")
+	stub := "#!/bin/sh\n" +
+		"{ echo \"ARGS $*\"; env; } >> " + log + "\n" +
+		"case \" $* \" in *\" clone \"*)\n" +
+		body +
+		"  for last; do :; done\n" +
+		"  cp -r " + fixture + " \"$last\" && mkdir \"$last/.git\" && echo ref > \"$last/.git/HEAD\" ;;\n" +
+		"*\" rev-parse \"*) echo 0123456789abcdef0123456789abcdef01234567 ;;\n" +
+		"esac\n"
+	os.WriteFile(filepath.Join(bin, "git"), []byte(stub), 0o700)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
 func TestPrepareFromGitRecordsTheCommitAndDropsTheHistory(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the git stub is a shell script")
 	}
-	fixture := source(t, "gitted", "#!/bin/sh\necho hi\n")
-	bin := t.TempDir()
-	envLog := filepath.Join(t.TempDir(), "env")
-	stub := "#!/bin/sh\n" +
-		"if [ \"$1\" = clone ]; then\n" +
-		"  for last; do :; done\n" +
-		"  echo \"$GIT_ALLOW_PROTOCOL $GIT_TERMINAL_PROMPT $*\" > " + envLog + "\n" +
-		"  cp -r " + fixture + " \"$last\" && mkdir \"$last/.git\" && echo ref > \"$last/.git/HEAD\"\n" +
-		"elif [ \"$3\" = rev-parse ]; then echo 0123456789abcdef0123456789abcdef01234567; fi\n"
-	os.WriteFile(filepath.Join(bin, "git"), []byte(stub), 0o700)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BW_SESSION", "secret")
+	t.Setenv("OP_SESSION_acme", "secret")
+	t.Setenv("GIT_SSH_COMMAND", "")
+	os.Unsetenv("GIT_SSH_COMMAND")
+	log := gitStub(t, source(t, "gitted", "#!/bin/sh\necho hi\n"), "")
 	st, err := Prepare("https://example.com/a/gitted.git")
 	if err != nil {
 		t.Fatal(err)
@@ -169,10 +184,39 @@ func TestPrepareFromGitRecordsTheCommitAndDropsTheHistory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(st.files, ".git")); err == nil {
 		t.Error("the git history was kept")
 	}
-	got, _ := os.ReadFile(envLog)
-	for _, want := range []string{"https:ssh 0 clone --depth 1", "-- https://example.com/a/gitted.git"} {
-		if !strings.Contains(string(got), want) {
-			t.Errorf("git was run as %q, missing %q", got, want)
+	b, _ := os.ReadFile(log)
+	got := string(b)
+	for _, want := range []string{
+		"clone --depth 1 --no-tags --single-branch --no-recurse-submodules --filter=blob:limit=5m --template= -- https://example.com/a/gitted.git",
+		"protocol.allow=never", "protocol.https.allow=always", "protocol.ssh.allow=always",
+		"core.hooksPath=" + os.DevNull, "filter.lfs.required=false",
+		"GIT_ALLOW_PROTOCOL=https:ssh", "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("git was run without %q:\n%s", want, got)
 		}
+	}
+	for _, secret := range []string{"BW_SESSION", "OP_SESSION_acme"} {
+		if strings.Contains(got, secret) {
+			t.Errorf("%s reached git", secret)
+		}
+	}
+}
+
+func TestACloneThatHangsIsStopped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the git stub is a shell script")
+	}
+	old := cloneTimeout
+	cloneTimeout = 300 * time.Millisecond
+	defer func() { cloneTimeout = old }()
+	gitStub(t, source(t, "slow", "#!/bin/sh\n"), "  exec sleep 10\n")
+	start := time.Now()
+	_, err := Prepare("https://example.com/a/slow.git")
+	if err == nil || !strings.Contains(err.Error(), "did not finish") {
+		t.Fatalf("err = %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Error("the clone was not stopped at the limit")
 	}
 }

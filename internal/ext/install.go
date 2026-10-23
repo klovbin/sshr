@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Staged is an extension fetched into a temporary folder and checked, not
@@ -91,19 +93,50 @@ func Prepare(source string) (*Staged, error) {
 	return s, nil
 }
 
+// cloneTimeout is how long a clone may take, a server that sends a byte now
+// and then would otherwise hold sshr for good
+var cloneTimeout = 60 * time.Second
+
 // cloneGit fetches the newest commit of url into dest and returns its hash,
-// no prompt for a password, only https and ssh, git runs no file of the clone
+// git gets the environment without secrets, no prompt on any terminal, only
+// https and ssh, no hooks, templates or git-lfs filters of the user, blobs
+// over 5 MiB are not downloaded, and git runs no file of the clone
 func cloneGit(url, dest string) (string, error) {
-	cmd := exec.Command("git", "clone", "--depth", "1", "--no-tags", "--", url, dest)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git",
+		"-c", "core.hooksPath="+os.DevNull,
+		"-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
+		"-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+		"clone", "--depth", "1", "--no-tags", "--single-branch", "--no-recurse-submodules",
+		"--filter=blob:limit=5m", "--template=", "--", url, dest)
+	cmd.Env = gitEnv(os.Environ())
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("git clone %s did not finish in %s", url, cloneTimeout)
+	}
+	if err != nil {
 		return "", fmt.Errorf("git clone %s failed: %s", url, strings.TrimSpace(string(out)))
 	}
-	out, err := exec.Command("git", "-C", dest, "rev-parse", "HEAD").Output()
+	rev := exec.Command("git", "-C", dest, "rev-parse", "HEAD")
+	rev.Env = gitEnv(os.Environ())
+	commit, err := rev.Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse in the clone failed: %v", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(commit)), nil
+}
+
+// gitEnv is the environment of git: no secrets, no question on the terminal,
+// ssh in batch mode unless the user chose their own ssh command
+func gitEnv(parent []string) []string {
+	env := append(cleanEnv(parent), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh")
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_SSH_COMMAND=") {
+			return env
+		}
+	}
+	return append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 }
 
 // copyTree copies a folder of plain files and returns how many, .git is left
