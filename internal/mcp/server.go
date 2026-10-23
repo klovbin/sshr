@@ -21,6 +21,10 @@ import (
 // protocol versions this server speaks, newest first
 var versions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
+// logOut is where the server says what it runs, stderr, which the MCP
+// client shows or logs
+var logOut io.Writer = os.Stderr
+
 // Options are the choices made when the server starts
 type Options struct {
 	// AllowCommands offers run_command, off by default: an assistant that
@@ -335,7 +339,9 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 	if timeout > 600 {
 		timeout = 600
 	}
-	fmt.Fprintf(os.Stderr, "sshr mcp: run on %s: %s\n", h.Name, command)
+	// quoted, a carriage return or an escape sequence in the command cannot
+	// rewrite lines in the log of the client
+	fmt.Fprintf(logOut, "sshr mcp: run on %q: %q\n", h.Name, command)
 	res, err := s.store.RunRemote(h, command, nil, time.Duration(timeout)*time.Second)
 	if err != nil {
 		return toolResult{}, err

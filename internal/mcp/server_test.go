@@ -219,3 +219,26 @@ func TestToolErrorWordsAsksPassword(t *testing.T) {
 		t.Fatalf("result = %v, want a sentence about the password", res)
 	}
 }
+
+// the command in the log is quoted, a carriage return or an escape in it
+// cannot rewrite the log of the client (#198)
+func TestRunCommandLogQuoted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "ssh"), []byte("#!/bin/sh\necho ok\n"), 0o700)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var log bytes.Buffer
+	old := logOut
+	logOut = &log
+	t.Cleanup(func() { logOut = old })
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"id\r\u001b[2Kfake line\nsshr mcp: run on web: ok"}}}`
+	exchange(t, s, Options{AllowCommands: true}, call)
+	out := log.String()
+	if strings.ContainsAny(out, "\r\x1b") || strings.Count(out, "\n") != 1 {
+		t.Fatalf("control characters reach the log: %q", out)
+	}
+}

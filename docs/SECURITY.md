@@ -50,7 +50,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 ## MCP and REST
 
 - neither returns or accepts passwords, private keys or 1Password and Bitwarden references, a host linked to a password manager is added in the app or the CLI
-- `sshr mcp` listens on nothing, the assistant runs it as a child process over stdin and stdout, every command is logged to stderr
+- `sshr mcp` listens on nothing, the assistant runs it as a child process over stdin and stdout, every command is logged to stderr quoted, so control characters in it cannot forge lines
 - `sshr serve` listens on a 0600 unix socket by default, a TCP port only on loopback and only with the token from `~/.sshr/api-token`, requests with an `Origin` header (web pages) or a non-loopback `Host` (DNS rebinding) are refused
 - running commands is off by default in both
 
