@@ -253,7 +253,7 @@ sshr ext list
 sshr ext remove hello
 ```
 
-An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
 
 ```json
 {

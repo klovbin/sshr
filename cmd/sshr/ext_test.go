@@ -221,3 +221,34 @@ func TestExtInstallRefusesABuiltinName(t *testing.T) {
 		t.Errorf("a refused install left something: %q", out)
 	}
 }
+
+// the example extension reads the hosts back through SSHR_BIN, which needs
+// the real binary, the test binary cannot stand in for it
+func TestExampleExtensionGreetsTheHosts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the example is a shell script")
+	}
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go tool to build sshr")
+	}
+	bin := filepath.Join(t.TempDir(), "sshr")
+	if out, err := exec.Command(goTool, "build", "-tags", "nocgo", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("building sshr: %v\n%s", err, out)
+	}
+	home := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("sshr %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	run("add", "10.0.0.9", "-u", "u", "-n", "web", "--ask-password")
+	run("ext", "install", filepath.Join("..", "..", "examples", "extensions", "hello"), "--yes")
+	if got := run("hello", "hi"); !strings.Contains(got, "hi, web") {
+		t.Errorf("sshr hello printed %q", got)
+	}
+}

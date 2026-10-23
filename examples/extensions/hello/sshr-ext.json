@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "hello",
+  "version": "0.1.0",
+  "description": "greets each saved host by name, an example of an extension",
+  "command": { "default": ["./hello.sh"] },
+  "kinds": ["command"]
+}
