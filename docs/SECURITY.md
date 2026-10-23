@@ -54,6 +54,8 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - removing a device revokes its token first, then rotates the vault key and re-encrypts every host, the new key is delivered to the other devices only after the manifest without that device is written, a removal that loses the race to another push plans again from the newer state, a delivery cut short resumes on the next sync of that device and the others wait for it
 - limits: a new device trusts whatever the server shows first, a server can show two devices different histories (compare the state fingerprint in `sshr sync status`), the server sees host count, push times, addresses and device names, and can hold back changes, a removed device keeps what it downloaded
 
+- a sync through an object store (an S3 bucket, a WebDAV folder, `syncclient.ObjectBackend`, not in the CLI yet) keeps the same encryption, signatures and chain, the next manifest is created only if its name is free, so two devices never both win, what the store cannot do that sshr-sync does: every device shares one store credential, so a removed device can still write and delete objects (the others see a rollback and stop, it gets no new key) and a device waiting for approval can read the ciphertext and the device list, rotate the store credential after removing a device
+
 ## Sync server
 
 - stores device public keys, encrypted blobs and signed manifests, it cannot read hosts, it can only lose data or refuse service

@@ -275,6 +275,15 @@ func (c *Client) save() error {
 	return fileio.WriteFile(c.statePath(), b, 0o600)
 }
 
+// serverOf is the server of a new state: an sshr-sync address, or the
+// name of the store of another Backend as it is
+func (c *Client) serverOf(server string) (string, error) {
+	if c.Backend != nil {
+		return server, nil
+	}
+	return checkServer(server)
+}
+
 // checkServer refuses plain HTTP except to this machine
 func checkServer(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimRight(raw, "/"))
@@ -463,7 +472,7 @@ func (c *Client) initAccount(server, name string) error {
 	if _, err := os.Stat(c.statePath()); err == nil {
 		return errors.New("sync is already set up here, see sshr sync status")
 	}
-	srv, err := checkServer(server)
+	srv, err := c.serverOf(server)
 	if err != nil {
 		return err
 	}
@@ -538,7 +547,7 @@ func (c *Client) join(server, code, name string) (string, error) {
 	if _, err := os.Stat(c.statePath()); err == nil {
 		return "", errors.New("sync is already set up here, see sshr sync status")
 	}
-	srv, err := checkServer(server)
+	srv, err := c.serverOf(server)
 	if err != nil {
 		return "", err
 	}
