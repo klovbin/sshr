@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -79,7 +80,8 @@ func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 	}
 	p := &SessionPlan{Host: &hc, Tool: "ssh", Via: hc.Via(), Session: session, batch: o.Batch}
 	dest := hc.Dest()
-	sshOpts := opts
+	// clipped, an append to sshOpts must never write into the plan's args
+	sshOpts := slices.Clip(opts)
 	if o.Tunnel {
 		// without it ssh keeps running when a port is taken, and the tunnel
 		// silently does nothing
