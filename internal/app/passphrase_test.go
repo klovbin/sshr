@@ -339,3 +339,47 @@ func TestMoveSecretsRemovesTheSource(t *testing.T) {
 		t.Fatalf("the file does not hold it: %v", err)
 	}
 }
+
+// pickyKeychain refuses to read the names in fail and passes the rest on
+type pickyKeychain struct {
+	Keychain
+	fail map[string]bool
+}
+
+func (k pickyKeychain) Get(name string) (string, error) {
+	if k.fail[name] {
+		return "", errors.New("locked")
+	}
+	return k.Keychain.Get(name)
+}
+
+// a passphrase change that fails keeps the old vault key file, it is the
+// only wrapped copy of the key (#188)
+func TestPassphraseChangeFailureKeepsOldFile(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	key, err := VaultKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetVaultPassphrase(pass, nil); err != nil {
+		t.Fatal(err)
+	}
+	SecretSet("sync-device", []byte("seed"))
+	old := keychain
+	keychain = pickyKeychain{old, map[string]bool{"sync-device": true}}
+	t.Cleanup(func() { keychain = old })
+	if err := SetVaultPassphrase("another long passphrase", []string{"sync-device"}); err == nil {
+		t.Fatal("the change went through a key that does not read")
+	}
+	keyring.MockInitWithError(errors.New("no bus"))
+	t.Cleanup(keyring.MockInit)
+	forgetVaultKey()
+	got, err := VaultKey()
+	if err != nil || string(got) != string(key) {
+		t.Fatalf("the old passphrase does not open the vault key now: %v", err)
+	}
+}

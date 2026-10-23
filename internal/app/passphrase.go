@@ -231,13 +231,26 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 	if err != nil {
 		return err
 	}
+	// a passphrase changed again replaces the only wrapped copy of the key,
+	// a failed change puts the old file back instead of removing it
+	old, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	undo := func() {
+		if old != nil {
+			WriteFileAtomic(path, old, 0o600)
+		} else {
+			os.Remove(path)
+		}
+	}
 	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	// the named secrets move before the mode changes, the mode never points
 	// at a file that does not hold them
 	if err := MoveSecrets(secretNames, true); err != nil {
-		os.Remove(path)
+		undo()
 		return fmt.Errorf("the sync keys did not move, nothing is changed: %v", err)
 	}
 	// a settings file that does not read is not replaced with defaults
