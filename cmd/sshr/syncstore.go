@@ -67,8 +67,8 @@ func (f *storeFlags) setup(c *syncclient.Client, server string) (string, error) 
 	if f.s3.Endpoint == "" || f.s3.Bucket == "" || f.s3.KeyID == "" {
 		return "", errors.New("an S3 account needs --endpoint <url> --bucket <name> --key-id <id>")
 	}
-	if !strings.HasPrefix(f.s3.Endpoint, "https://") {
-		return "", errors.New("the S3 endpoint has to be https://")
+	if err := s3store.CheckEndpoint(f.s3.Endpoint); err != nil {
+		return "", err
 	}
 	secret, err := s3Secret(f.s3.KeyID)
 	if err != nil {

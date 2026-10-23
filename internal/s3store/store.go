@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -51,6 +53,9 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.KeyID == "" || secret == "" {
 		return nil, errors.New("an S3 store needs an endpoint, a bucket, a key id and a secret")
 	}
+	if err := CheckEndpoint(cfg.Endpoint); err != nil {
+		return nil, err
+	}
 	region := cfg.Region
 	if region == "" {
 		region = "auto"
@@ -74,6 +79,29 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 		prefix += "/"
 	}
 	return &Store{client: s3.New(opts), bucket: cfg.Bucket, prefix: prefix}, nil
+}
+
+// CheckEndpoint takes an HTTPS address, plain HTTP only to this machine,
+// the sync state can be edited and must not send the requests in the
+// clear, a user and password in the address would end up in the state
+func CheckEndpoint(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("bad S3 endpoint %q", raw)
+	}
+	if u.User != nil {
+		return errors.New("the S3 endpoint must not carry a user or password, the key id and secret go apart")
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		host := u.Hostname()
+		if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("the S3 endpoint has to be https://, plain http only to this machine: %q", raw)
 }
 
 func ctx() (context.Context, context.CancelFunc) {

@@ -189,3 +189,28 @@ func TestSyncThroughBucket(t *testing.T) {
 		t.Fatalf("hosts on b %+v", got)
 	}
 }
+
+// an edited sync state cannot send the requests in the clear or keep a
+// password in the address (#231)
+func TestCheckEndpoint(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"https://e.example":         true,
+		"https://e.example:9000/":   true,
+		"http://127.0.0.1:9000":     true,
+		"http://localhost:9000":     true,
+		"http://[::1]:9000":         true,
+		"http://e.example":          false,
+		"http://10.0.0.1:9000":      false,
+		"ftp://e.example":           false,
+		"https://user:pw@e.example": false,
+		"https://":                  false,
+		"e.example":                 false,
+	} {
+		if err := CheckEndpoint(raw); (err == nil) != ok {
+			t.Errorf("%q: %v", raw, err)
+		}
+	}
+	if _, err := New(Config{Endpoint: "http://e.example", Bucket: "b", KeyID: "k"}, "s", nil); err == nil {
+		t.Error("New opened a plain http endpoint")
+	}
+}
