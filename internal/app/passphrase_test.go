@@ -202,3 +202,21 @@ type forgetfulKeychain struct{}
 func (forgetfulKeychain) Get(string) (string, error) { return "", keyring.ErrNotFound }
 func (forgetfulKeychain) Set(string, string) error   { return nil }
 func (forgetfulKeychain) Delete(string) error        { return nil }
+
+// a settings.json that does not read is not replaced with defaults when
+// the vault mode changes (#182)
+func TestVaultModeKeepsDamagedSettings(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	path, _ := settingsPath()
+	os.WriteFile(path, []byte("{broken"), 0o600)
+	if err := SetVaultPassphrase(pass); err == nil {
+		t.Fatal("the mode changed over a settings file that does not read")
+	}
+	if b, _ := os.ReadFile(path); string(b) != "{broken" {
+		t.Fatalf("settings.json was replaced: %s", b)
+	}
+}

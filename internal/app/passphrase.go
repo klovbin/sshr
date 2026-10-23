@@ -208,7 +208,11 @@ func SetVaultPassphrase(pass string) error {
 	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
-	st, _ := LoadSettings()
+	// a settings file that does not read is not replaced with defaults
+	st, err := LoadSettings()
+	if err != nil {
+		return fmt.Errorf("the vault key is wrapped in %s but settings.json does not read, the mode is not changed: %v", path, err)
+	}
 	st.Vault = VaultPassphrase
 	return SaveSettings(st)
 }
@@ -231,7 +235,10 @@ func UseKeychainVault() error {
 		}
 		return err
 	}
-	st, _ := LoadSettings()
+	st, err := LoadSettings()
+	if err != nil {
+		return fmt.Errorf("the vault key is in the keychain but settings.json does not read, the mode is not changed: %v", err)
+	}
 	st.Vault = ""
 	if err := SaveSettings(st); err != nil {
 		return err
