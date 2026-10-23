@@ -3,6 +3,7 @@ package syncclient
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,11 @@ type overStore struct{ *memStore }
 
 func (s overStore) Create(name string, data []byte) error { return s.Put(name, data) }
 
+// keepStore refuses every delete
+type keepStore struct{ *memStore }
+
+func (s keepStore) Delete(string) error { return errors.New("AccessDenied") }
+
 // the probe takes a store that refuses the second create and turns down
 // one that writes over it (#128)
 func TestProbeCreate(t *testing.T) {
@@ -68,6 +74,10 @@ func TestProbeCreate(t *testing.T) {
 	}
 	if err := ProbeCreate(overStore{newMemStore()}); err == nil || !strings.Contains(err.Error(), "wrote over") {
 		t.Errorf("a store that writes over passed: %v", err)
+	}
+	// a probe object left behind is named (#237)
+	if err := ProbeCreate(keepStore{newMemStore()}); err == nil || !strings.Contains(err.Error(), "did not delete the probe object probe/") {
+		t.Errorf("a store that keeps the probe passed: %v", err)
 	}
 }
 

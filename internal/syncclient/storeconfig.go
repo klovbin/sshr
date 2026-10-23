@@ -72,16 +72,22 @@ func (c *Client) saveNew() error {
 }
 
 // ProbeCreate checks that store refuses a second create of one name, a
-// store without that write would let two devices fork the history
-func ProbeCreate(store ObjectStore) error {
+// store without that write would let two devices fork the history, the
+// probe object is deleted again, a key that cannot delete is an error
+// too, removing a device deletes its record
+func ProbeCreate(store ObjectStore) (err error) {
 	var b [8]byte
 	rand.Read(b[:])
 	name := "probe/" + hex.EncodeToString(b[:])
 	if err := store.Create(name, []byte("first")); err != nil {
 		return fmt.Errorf("the store did not take a create: %v", err)
 	}
-	defer store.Delete(name)
-	err := store.Create(name, []byte("second"))
+	defer func() {
+		if derr := store.Delete(name); derr != nil && err == nil {
+			err = fmt.Errorf("the store did not delete the probe object %s, delete it by hand, sync needs to delete objects: %v", name, derr)
+		}
+	}()
+	err = store.Create(name, []byte("second"))
 	if err == nil {
 		return errors.New("the store wrote over an object it should have refused, it cannot keep two devices from forking the history, use another store or sshr-sync")
 	}
