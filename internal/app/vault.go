@@ -149,15 +149,11 @@ func keyringCall(f func() (string, error)) (string, error) {
 }
 
 func getVaultKey() ([]byte, bool, error) {
-	v, err := keyringCall(func() (string, error) { return keyring.Get(keyringService, keyringUser) })
-	if errors.Is(err, keyring.ErrNotFound) {
-		return nil, false, nil
+	key, ok, err := SecretGet(keyringUser)
+	if err != nil || !ok {
+		return nil, false, err
 	}
-	if err != nil {
-		return nil, false, keychainError(err)
-	}
-	key, err := base64.StdEncoding.DecodeString(v)
-	if err != nil || len(key) != chacha20poly1305.KeySize {
+	if len(key) != chacha20poly1305.KeySize {
 		return nil, false, keychainError(errors.New("the vault key in the keychain is damaged"))
 	}
 	return key, true, nil
@@ -276,11 +272,8 @@ func createVaultKey() ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	enc := base64.StdEncoding.EncodeToString(key)
-	if _, err := keyringCall(func() (string, error) {
-		return "", keyring.Set(keyringService, keyringUser, enc)
-	}); err != nil {
-		return nil, keychainError(err)
+	if err := SecretSet(keyringUser, key); err != nil {
+		return nil, err
 	}
 	// read back what the keychain holds, that is the key every other process
 	// will get
@@ -390,10 +383,33 @@ func CheckKeychain() error {
 // the sync server keeps one instance per data directory with it
 func LockFile(path string) (func(), error) { return lockFile(path) }
 
+// Keychain is where sshr keeps its own secrets: the vault key and the keys
+// of the sync device, values are base64 text under a name, Get returns
+// keyring.ErrNotFound for a name it does not hold, the system keychain is
+// the one implementation today, a passphrase file or a phone keystore can
+// take its place
+type Keychain interface {
+	Get(name string) (string, error)
+	Set(name, value string) error
+	Delete(name string) error
+}
+
+// systemKeychain is the keychain of the system through go-keyring: Secret
+// Service on Linux, Keychain on macOS, Credential Manager on Windows
+type systemKeychain struct{}
+
+func (systemKeychain) Get(name string) (string, error) { return keyring.Get(keyringService, name) }
+func (systemKeychain) Set(name, value string) error    { return keyring.Set(keyringService, name, value) }
+func (systemKeychain) Delete(name string) error        { return keyring.Delete(keyringService, name) }
+
+// keychain is the keychain every secret of sshr goes through, every call
+// still runs through keyringCall for its time limit
+var keychain Keychain = systemKeychain{}
+
 // SecretGet reads a value sshr keeps in the system keychain, ok is false
 // when there is none
 func SecretGet(name string) (value []byte, ok bool, err error) {
-	v, err := keyringCall(func() (string, error) { return keyring.Get(keyringService, name) })
+	v, err := keyringCall(func() (string, error) { return keychain.Get(name) })
 	if errors.Is(err, keyring.ErrNotFound) {
 		return nil, false, nil
 	}
@@ -411,7 +427,7 @@ func SecretGet(name string) (value []byte, ok bool, err error) {
 func SecretSet(name string, value []byte) error {
 	enc := base64.StdEncoding.EncodeToString(value)
 	if _, err := keyringCall(func() (string, error) {
-		return "", keyring.Set(keyringService, name, enc)
+		return "", keychain.Set(name, enc)
 	}); err != nil {
 		return keychainError(err)
 	}
@@ -421,7 +437,7 @@ func SecretSet(name string, value []byte) error {
 // SecretDelete removes a value from the system keychain, a missing one is
 // not an error
 func SecretDelete(name string) error {
-	_, err := keyringCall(func() (string, error) { return "", keyring.Delete(keyringService, name) })
+	_, err := keyringCall(func() (string, error) { return "", keychain.Delete(name) })
 	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
 		return keychainError(err)
 	}

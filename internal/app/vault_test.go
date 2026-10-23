@@ -259,3 +259,40 @@ func TestKeychainQuietAfterATimeout(t *testing.T) {
 		t.Errorf("message %q", err)
 	}
 }
+
+// mapKeychain is a Keychain in memory
+type mapKeychain map[string]string
+
+func (m mapKeychain) Get(name string) (string, error) {
+	v, ok := m[name]
+	if !ok {
+		return "", keyring.ErrNotFound
+	}
+	return v, nil
+}
+func (m mapKeychain) Set(name, value string) error { m[name] = value; return nil }
+func (m mapKeychain) Delete(name string) error     { delete(m, name); return nil }
+
+// every secret of sshr goes through the Keychain, another implementation
+// takes the vault key and the named secrets without the system keychain
+func TestKeychainCanBeReplaced(t *testing.T) {
+	resetVault(t)
+	m := mapKeychain{}
+	old := keychain
+	keychain = m
+	t.Cleanup(func() { keychain = old })
+	key, err := VaultKey()
+	if err != nil || len(key) != 32 || m["vault-key"] == "" {
+		t.Fatalf("vault key %v, keychain %v", err, m)
+	}
+	if err := SecretSet("x", []byte("v")); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := SecretGet("x"); err != nil || !ok || string(v) != "v" {
+		t.Fatalf("%q %v %v", v, ok, err)
+	}
+	SecretDelete("x")
+	if _, ok, _ := SecretGet("x"); ok {
+		t.Error("the secret stayed")
+	}
+}
