@@ -52,7 +52,7 @@ func cmdServe(store *app.Store, args []string) {
 		}
 	}
 	opts.Audit, opts.Client = openAudit(st, auditOn), peerName
-	opts.CommandsAllowed = commandPolicy(listedOnly)
+	opts.CommandsAllowed = commandPolicy(store, listedOnly)
 	ln, where, err := apiListener(listen, &opts)
 	if err != nil {
 		fatal(err)

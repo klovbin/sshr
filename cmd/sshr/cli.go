@@ -1202,7 +1202,7 @@ func cmdCommands(store *app.Store, args []string) {
 				continue
 			}
 			state := "allowed"
-			if st.CommandsAllowed(&hosts[i]) != nil && st.CommandsListedOnly {
+			if st.CommandHosts[hosts[i].ID] != store.CommandTarget(&hosts[i]) {
 				state = "points elsewhere since it was allowed, allow it again"
 			}
 			fmt.Printf("  %s (%s): %s\n", hosts[i].Name, hosts[i].Dest(), state)
@@ -1213,7 +1213,8 @@ func cmdCommands(store *app.Store, args []string) {
 	case args[0] == "all" && len(args) == 1:
 		st.CommandsListedOnly = false
 	case args[0] == "allow" && len(args) == 2:
-		st.AllowCommands(findHost(store, "commands allow", args[1]))
+		h := findHost(store, "commands allow", args[1])
+		st.AllowCommands(h, store.CommandTarget(h))
 	case args[0] == "deny" && len(args) == 2:
 		st.DenyCommands(findHost(store, "commands deny", args[1]).ID)
 	default:
@@ -1228,7 +1229,7 @@ func cmdCommands(store *app.Store, args []string) {
 // commandPolicy checks a host before a command from sshr mcp or sshr
 // serve, it reads the settings each time so sshr commands allow works
 // without a restart, a settings file that does not read refuses
-func commandPolicy(listedOnly *bool) func(*app.Host) error {
+func commandPolicy(store *app.Store, listedOnly *bool) func(*app.Host) error {
 	return func(h *app.Host) error {
 		st, err := app.LoadSettings()
 		if err != nil {
@@ -1237,7 +1238,7 @@ func commandPolicy(listedOnly *bool) func(*app.Host) error {
 		if listedOnly != nil {
 			st.CommandsListedOnly = *listedOnly
 		}
-		return st.CommandsAllowed(h)
+		return st.CommandsAllowed(h, store.CommandTarget(h))
 	}
 }
 

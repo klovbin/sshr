@@ -41,7 +41,7 @@ func cmdMCP(store *app.Store, args []string) {
 		}
 	}
 	opts.Audit = openAudit(st, auditOn)
-	opts.CommandsAllowed = commandPolicy(listedOnly)
+	opts.CommandsAllowed = commandPolicy(store, listedOnly)
 	if err := mcp.Serve(os.Stdin, os.Stdout, store, opts); err != nil {
 		fatal(err)
 	}
