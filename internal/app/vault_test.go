@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -25,6 +26,35 @@ func resetVault(t *testing.T) {
 	vaultMu.Unlock()
 	dir := t.TempDir()
 	vaultLockPath = func() (string, error) { return filepath.Join(dir, ".lock"), nil }
+}
+
+// a keychain that lost the vault key, or holds another one, is reported,
+// a second key is not made over secrets sealed with the first (#145)
+func TestVaultKeyLostIsNotReplaced(t *testing.T) {
+	useMockKeychain(t)
+	first, err := VaultKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vaultMu.Lock()
+	vaultKey = nil
+	vaultMu.Unlock()
+	keyring.Delete(keyringService, keyringUser)
+	if _, err := VaultKey(); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("a lost key: %v", err)
+	}
+	if _, ok, _ := getVaultKey(); ok {
+		t.Fatal("a second key was stored")
+	}
+	other := make([]byte, len(first))
+	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(other))
+	if _, err := VaultKey(); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("another key: %v", err)
+	}
+	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(first))
+	if got, err := VaultKey(); err != nil || string(got) != string(first) {
+		t.Fatalf("the key brought back: %v", err)
+	}
 }
 
 func TestSealBindsHostAndField(t *testing.T) {

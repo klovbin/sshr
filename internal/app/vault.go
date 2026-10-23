@@ -2,7 +2,9 @@ package app
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -116,8 +118,68 @@ func VaultKey() ([]byte, error) {
 			return nil, err
 		}
 	}
+	if err := checkVaultKey(key); err != nil {
+		return nil, err
+	}
 	vaultKey = key
 	return key, nil
+}
+
+// ErrVaultKeyLost means the keychain no longer holds the vault key the
+// saved secrets were sealed with, or holds another one
+var ErrVaultKeyLost = errors.New("vault_key_lost")
+
+// keyCheckPath is the file that tells which vault key the secrets on this
+// machine were sealed with, a hash of the key and not the key, it sits
+// next to the lock
+func keyCheckPath() (string, error) {
+	lock, err := vaultLockPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(lock), "key-check"), nil
+}
+
+func keyCheckValue(key []byte) string {
+	sum := sha256.Sum256(append([]byte("sshr vault key check\x00"), key...))
+	return hex.EncodeToString(sum[:16])
+}
+
+// readKeyCheck returns the recorded check value, empty when none is kept
+func readKeyCheck() (string, error) {
+	path, err := keyCheckPath()
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	return strings.TrimSpace(string(b)), err
+}
+
+// checkVaultKey compares key with the one the secrets here were sealed
+// with, the first key seen is recorded, a keychain that lost its item or
+// was swapped for another (gnome-keyring for KeePassXC) is told apart
+// from a first start instead of sealing everything anew with a second key
+func checkVaultKey(key []byte) error {
+	want, err := readKeyCheck()
+	if err != nil {
+		return err
+	}
+	got := keyCheckValue(key)
+	if want == "" {
+		path, err := keyCheckPath()
+		if err != nil {
+			return err
+		}
+		return WriteFileAtomic(path, []byte(got+"\n"), 0o600)
+	}
+	if want != got {
+		path, _ := keyCheckPath()
+		return fmt.Errorf("%w: the system keychain holds another vault key than the one the saved passwords and keys here were sealed with (a reset keychain or another keychain program), bring back the keychain item sshr/vault-key, or delete %s and save the passwords and keys again", ErrVaultKeyLost, path)
+	}
+	return nil
 }
 
 // createVaultKey makes the vault key under a file lock, two processes
@@ -135,6 +197,14 @@ func createVaultKey() ([]byte, error) {
 	defer unlock()
 	if key, ok, err := getVaultKey(); err != nil || ok {
 		return key, err
+	}
+	// a check value without a key in the keychain means the key was lost,
+	// a new one would make every saved secret here unreadable for good
+	if want, err := readKeyCheck(); err != nil {
+		return nil, err
+	} else if want != "" {
+		path, _ := keyCheckPath()
+		return nil, fmt.Errorf("%w: the system keychain lost the vault key the saved passwords and keys here were sealed with (a reset keychain or another keychain program), bring back the keychain item sshr/vault-key, or delete %s and save the passwords and keys again", ErrVaultKeyLost, path)
 	}
 	key := make([]byte, chacha20poly1305.KeySize)
 	if _, err := rand.Read(key); err != nil {

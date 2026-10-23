@@ -31,6 +31,10 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	keyring.MockInit()
+	// the vault keeps a check of its key in the home folder, the mock
+	// keychain must not leave one in the real home
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	data := t.TempDir()
 	s, err := syncserver.New(data)
 	if err != nil {

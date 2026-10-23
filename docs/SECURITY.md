@@ -9,6 +9,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - every keychain call has a 5 s limit, a locked keyring that nobody answers does not hang sshr, with no keychain a saved password cannot be added, ask mode and key files keep working
 - `sshr list` and the host form never decrypt, an empty password field keeps the saved one
 - a reset keychain or `~/.sshr` copied to another machine makes saved secrets unreadable, sshr asks to save them again
+- `~/.sshr/vault/key-check` holds a hash of the vault key (not the key), when the keychain lost the key or holds another one (a reset, another keychain program) sshr says so and does not make a second key over the secrets sealed with the first, bringing the item back or deleting that file and saving the secrets again ends it
 - a key with a passphrase is opened once when added and stored without it, the vault encryption takes its place
 
 ## How a password reaches ssh
