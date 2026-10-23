@@ -65,6 +65,8 @@ type state struct {
 	// not reached every kept device yet, the next sync delivers it
 	Rotation *rotation `json:"rotation,omitempty"`
 	LastSync time.Time `json:"last_sync"`
+	// Backend is the store of an account that is not sshr-sync
+	Backend *BackendRef `json:"backend,omitempty"`
 	// extra are the keys a newer sshr wrote, kept through every save
 	extra map[string]json.RawMessage
 }
@@ -109,6 +111,12 @@ type Client struct {
 	// Backend is the store the sync goes through, nil is sshr-sync over
 	// HTTP at the server of the state
 	Backend Backend
+	// BackendRef and StoreSecret name the store Init and Join set up and
+	// keep in the state and the keychain, OpenBackend opens it again on
+	// later runs
+	BackendRef  *BackendRef
+	StoreSecret string
+	OpenBackend func(ref BackendRef, secret string) (Backend, error)
 
 	st   *state
 	keys *deviceKeys
@@ -195,7 +203,7 @@ func (c *Client) statePath() string { return filepath.Join(c.Dir, "state.json") 
 // that exists and does not read is an error, the names of older epochs
 // would be missed
 func SecretNames(dir string) ([]string, error) {
-	names := []string{"sync-device", "sync-key-pending"}
+	names := []string{"sync-device", "sync-key-pending", "sync-store-secret"}
 	b, err := fileio.ReadFileShared(filepath.Join(dir, "state.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return names, nil
@@ -256,6 +264,10 @@ func (c *Client) load() error {
 		return err
 	}
 	c.st = &st
+	if err := c.openBackend(); err != nil {
+		c.st = nil
+		return err
+	}
 	return nil
 }
 
@@ -483,6 +495,9 @@ func (c *Client) initAccount(server, name string) error {
 		return err
 	}
 	c.st = &state{Server: srv, Name: name, Entries: map[string]entryState{}}
+	if err := c.keepBackend(); err != nil {
+		return err
+	}
 	self := c.self()
 	body, _ := json.Marshal(syncproto.NewAccountRequest{Device: self})
 	b, err := c.backend().CreateAccount(body)
@@ -562,6 +577,9 @@ func (c *Client) join(server, code, name string) (string, error) {
 		return "", err
 	}
 	c.st = &state{Server: srv, Account: account, Name: name, Approver: approver, Entries: map[string]entryState{}}
+	if err := c.keepBackend(); err != nil {
+		return "", err
+	}
 	self := c.self()
 	body, _ := json.Marshal(syncproto.NewAccountRequest{Device: self})
 	b, err := c.backend().Join(body)
@@ -1583,6 +1601,7 @@ func (c *Client) leave(force bool) error {
 	}
 	vault.SecretDelete(c.prefix() + "key-pending")
 	vault.SecretDelete(c.prefix() + "device")
+	vault.SecretDelete(c.storeSecretName())
 	if err := os.Remove(c.statePath()); err != nil && !os.IsNotExist(err) {
 		return err
 	}

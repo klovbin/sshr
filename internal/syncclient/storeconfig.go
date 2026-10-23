@@ -1,0 +1,79 @@
+package syncclient
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"sshr.dev/internal/vault"
+)
+
+// BackendRef names the store of an account that is not sshr-sync, it is
+// kept in the sync state, Config is what OpenBackend needs and never a
+// secret, the secret is in the keychain beside the device key
+type BackendRef struct {
+	Kind   string          `json:"kind"`
+	Config json.RawMessage `json:"config"`
+}
+
+// storeSecretName is the keychain item of the secret of the store
+func (c *Client) storeSecretName() string { return c.prefix() + "store-secret" }
+
+// openBackend opens the store a loaded state names, sshr-sync needs none
+func (c *Client) openBackend() error {
+	if c.Backend != nil || c.st.Backend == nil {
+		return nil
+	}
+	if c.OpenBackend == nil {
+		return fmt.Errorf("this sshr cannot open a sync store of kind %q", c.st.Backend.Kind)
+	}
+	secret, ok, err := vault.SecretGet(c.storeSecretName())
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("the secret of the sync store is gone from the keychain, run sshr sync leave and join again")
+	}
+	b, err := c.OpenBackend(*c.st.Backend, string(secret))
+	if err != nil {
+		return err
+	}
+	c.Backend = b
+	return nil
+}
+
+// keepBackend writes the store a new account or join uses into the state
+// and its secret into the keychain
+func (c *Client) keepBackend() error {
+	if c.BackendRef == nil {
+		return nil
+	}
+	ref := *c.BackendRef
+	c.st.Backend = &ref
+	if c.StoreSecret == "" {
+		return nil
+	}
+	return vault.SecretSet(c.storeSecretName(), []byte(c.StoreSecret))
+}
+
+// ProbeCreate checks that store refuses a second create of one name, a
+// store without that write would let two devices fork the history
+func ProbeCreate(store ObjectStore) error {
+	var b [8]byte
+	rand.Read(b[:])
+	name := "probe/" + hex.EncodeToString(b[:])
+	if err := store.Create(name, []byte("first")); err != nil {
+		return fmt.Errorf("the store did not take a create: %v", err)
+	}
+	defer store.Delete(name)
+	err := store.Create(name, []byte("second"))
+	if err == nil {
+		return errors.New("the store wrote over an object it should have refused, it cannot keep two devices from forking the history, use another store or sshr-sync")
+	}
+	if !errors.Is(err, ErrExists) {
+		return fmt.Errorf("the store answered a second create with: %v", err)
+	}
+	return nil
+}
