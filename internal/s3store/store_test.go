@@ -197,7 +197,7 @@ func TestCheckEndpoint(t *testing.T) {
 		"https://e.example":         true,
 		"https://e.example:9000/":   true,
 		"http://127.0.0.1:9000":     true,
-		"http://localhost:9000":     true,
+		"http://localhost:9000":     false,
 		"http://[::1]:9000":         true,
 		"http://e.example":          false,
 		"http://10.0.0.1:9000":      false,

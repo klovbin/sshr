@@ -81,7 +81,7 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 	return &Store{client: s3.New(opts), bucket: cfg.Bucket, prefix: prefix}, nil
 }
 
-// CheckEndpoint takes an HTTPS address, plain HTTP only to this machine,
+// CheckEndpoint takes an HTTPS address, plain HTTP only to a loopback IP,
 // the sync state can be edited and must not send the requests in the
 // clear, a user and password in the address would end up in the state
 func CheckEndpoint(raw string) error {
@@ -97,8 +97,9 @@ func CheckEndpoint(raw string) error {
 	case "https":
 		return nil
 	case "http":
-		host := u.Hostname()
-		if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+		// a loopback address, not the name localhost, a resolver may send
+		// that name elsewhere
+		if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
 			return nil
 		}
 	}
