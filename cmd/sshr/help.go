@@ -66,7 +66,8 @@ Examples:
 	{name: "show", usage: "sshr show <name or id>", short: "show a host and the ssh command it runs",
 		details: `Prints the fields of the host and the exact ssh command sshr connect runs,
 quoted so it can be copied, passwords never show, they reach ssh through
-a socket and not the command line
+a socket and not the command line, a host with a gateway shows the direct
+way, connect goes through the gateway when the host does not answer
 
 Examples:
   sshr show web`},

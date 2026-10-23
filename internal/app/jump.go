@@ -135,13 +135,28 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	return []string{"-o", "ProxyCommand=" + cmd}, nil
 }
 
-// ConnectArgs is SSHArgs plus the jump options for h
+// ConnectArgs is SSHArgs plus the jump options for h, a host with a
+// Gateway is checked first and goes through it when down directly
 func (s *Store) ConnectArgs(h *Host) ([]string, error) {
+	return s.connectArgs(h, true)
+}
+
+// DirectArgs is ConnectArgs without the check of a host with a Gateway,
+// the options of the direct way, for showing a command without waiting
+// on the network
+func (s *Store) DirectArgs(h *Host) ([]string, error) {
+	return s.connectArgs(h, false)
+}
+
+func (s *Store) connectArgs(h *Host, check bool) ([]string, error) {
 	// the host file may come from another device or an older version
 	if err := checkAddress(h.Host); err != nil {
 		return nil, err
 	}
-	pickRoute(h)
+	h.route = ""
+	if check {
+		pickRoute(h)
+	}
 	jump, err := s.JumpArgs(h)
 	if err != nil {
 		return nil, err
