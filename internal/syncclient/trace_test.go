@@ -131,7 +131,8 @@ func TestHTTPTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v, run go test -run TestHTTPTrace -update-trace once", err)
 	}
-	if got != string(want) {
+	// a checkout with CRLF line ends compares the same
+	if got != strings.ReplaceAll(string(want), "\r\n", "\n") {
 		t.Errorf("the requests changed, got:\n%s\nwant:\n%s", got, want)
 	}
 }

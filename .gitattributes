@@ -1,0 +1,2 @@
+# golden files compare byte for byte, a CRLF checkout on Windows breaks them
+*.golden text eol=lf
