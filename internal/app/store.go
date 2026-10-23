@@ -130,23 +130,6 @@ type Host struct {
 	format int
 }
 
-// Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
-type Store struct {
-	Dir string
-	// Reuse overrides the "reuse" setting for this run, nil means the
-	// setting decides
-	Reuse *bool
-	// OPVault overrides the "op_vault" setting for this run
-	OPVault *string
-	// SSHConfigOut is where the hosts are exported for plain ssh, empty
-	// turns the export off, it is rewritten on every change once installed
-	SSHConfigOut string
-
-	// tx is the held host store of a Store that Locked hands out, its
-	// methods do not take the lock again
-	tx *hostStore
-}
-
 // hostStore reads and writes the host files, what a change needs from
 // the parts that run programs comes through hooks, so it runs none itself
 type hostStore struct {
@@ -195,21 +178,6 @@ func (s *hostStore) locked(fn func(tx *hostStore) error) error {
 // Locked runs fn under the lock of the host folder, see locked, the sync
 // reads a host, decides and writes it in one go with it
 func (s *hostStore) Locked(fn func(tx *hostStore) error) error { return s.locked(fn) }
-
-// DefaultStore creates ~/.sshr/vault/hosts if needed.
-func DefaultStore() (*Store, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	dir := filepath.Join(home, ".sshr", "vault", "hosts")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, err
-	}
-	s := &Store{Dir: dir, SSHConfigOut: filepath.Join(home, ".sshr", "ssh_config")}
-	s.upgradeSeals()
-	return s, nil
-}
 
 // upgradeSeals seals passwords saved by an older sshr again for their
 // destination (v1 to v2), until then a host file whose address is changed
@@ -909,7 +877,7 @@ func (s *hostStore) duplicate(id, name string) (*Host, error) {
 	// only a password sealed by sshr has to be opened and sealed again, a
 	// password manager entry keeps its reference and is not read at all
 	if h.PasswordMode == PasswordSaved {
-		if err := Unlock(&h); err != nil {
+		if err := unlockSaved(&h); err != nil {
 			return nil, err
 		}
 	}
@@ -963,30 +931,6 @@ func (s *hostStore) keyPub(h *Host) error {
 		return nil
 	}
 	return s.hooks.keyPub(h)
-}
-
-// fillKeyPub reads the public half of a key kept in 1Password or Bitwarden
-// once, when the host does not have it yet, cleanHost only checks fields
-// and runs no program, so a host is validated without op or bw
-func fillKeyPub(h *Host) error {
-	if h.KeyPub != "" {
-		return nil
-	}
-	var pub string
-	var err error
-	switch h.KeyMode {
-	case KeyOnePassword:
-		pub, err = opKeyPub(h.KeyRef)
-	case KeyBitwarden:
-		pub, err = bwKeyPub(h.KeyRef)
-	default:
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	h.KeyPub = pub
-	return nil
 }
 
 // needSecret refuses PasswordSaved with no password and KeyVault with no
@@ -1063,29 +1007,10 @@ func sealPassword(h *Host) error {
 	return nil
 }
 
-// Unlock fills h.Password from the vault or 1Password before connecting, a
-// host without a saved password is left as it is
-func Unlock(h *Host) error {
-	if h.Password != "" {
-		return nil
-	}
-	if h.PasswordMode == PasswordOnePassword {
-		pw, err := opRead(h.PasswordRef)
-		if err != nil {
-			return err
-		}
-		h.Password = string(pw)
-		return nil
-	}
-	if h.PasswordMode == PasswordBitwarden {
-		pw, err := bwPassword(h.PasswordRef)
-		if err != nil {
-			return err
-		}
-		h.Password = string(pw)
-		return nil
-	}
-	if h.PasswordMode != PasswordSaved {
+// unlockSaved fills h.Password from a password sealed in the host file, a
+// host without one, a password manager entry among them, is left as it is
+func unlockSaved(h *Host) error {
+	if h.Password != "" || h.PasswordMode != PasswordSaved {
 		return nil
 	}
 	switch {
@@ -1143,14 +1068,6 @@ func (s *hostStore) save(h *Host) error {
 func (s *hostStore) changed() {
 	if s.hooks.changed != nil {
 		s.hooks.changed(s)
-	}
-}
-
-// hostsChanged rewrites the ssh config export when it is installed, the
-// host is saved already, a failed export is reported and does not undo it
-func (s *Store) hostsChanged() {
-	if _, err := s.refreshSSHConfig(false); err != nil {
-		fmt.Fprintf(os.Stderr, "sshr: ssh config export: %v\n", err)
 	}
 }
 

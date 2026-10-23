@@ -1,5 +1,100 @@
 package app
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
+type Store struct {
+	Dir string
+	// Reuse overrides the "reuse" setting for this run, nil means the
+	// setting decides
+	Reuse *bool
+	// OPVault overrides the "op_vault" setting for this run
+	OPVault *string
+	// SSHConfigOut is where the hosts are exported for plain ssh, empty
+	// turns the export off, it is rewritten on every change once installed
+	SSHConfigOut string
+
+	// tx is the held host store of a Store that Locked hands out, its
+	// methods do not take the lock again
+	tx *hostStore
+}
+
+// DefaultStore creates ~/.sshr/vault/hosts if needed.
+func DefaultStore() (*Store, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".sshr", "vault", "hosts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	s := &Store{Dir: dir, SSHConfigOut: filepath.Join(home, ".sshr", "ssh_config")}
+	s.upgradeSeals()
+	return s, nil
+}
+
+// fillKeyPub reads the public half of a key kept in 1Password or Bitwarden
+// once, when the host does not have it yet, cleanHost only checks fields
+// and runs no program, so a host is validated without op or bw
+func fillKeyPub(h *Host) error {
+	if h.KeyPub != "" {
+		return nil
+	}
+	var pub string
+	var err error
+	switch h.KeyMode {
+	case KeyOnePassword:
+		pub, err = opKeyPub(h.KeyRef)
+	case KeyBitwarden:
+		pub, err = bwKeyPub(h.KeyRef)
+	default:
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	h.KeyPub = pub
+	return nil
+}
+
+// hostsChanged rewrites the ssh config export when it is installed, the
+// host is saved already, a failed export is reported and does not undo it
+func (s *Store) hostsChanged() {
+	if _, err := s.refreshSSHConfig(false); err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: ssh config export: %v\n", err)
+	}
+}
+
+// Unlock fills h.Password from the vault, 1Password or Bitwarden before
+// connecting, a host without a saved password is left as it is
+func Unlock(h *Host) error {
+	if h.Password != "" {
+		return nil
+	}
+	switch h.PasswordMode {
+	case PasswordOnePassword:
+		pw, err := opRead(h.PasswordRef)
+		if err != nil {
+			return err
+		}
+		h.Password = string(pw)
+		return nil
+	case PasswordBitwarden:
+		pw, err := bwPassword(h.PasswordRef)
+		if err != nil {
+			return err
+		}
+		h.Password = string(pw)
+		return nil
+	}
+	return unlockSaved(h)
+}
+
 // The methods below are the host store as the front ends and the code
 // that runs ssh know it, they hand the work to hostStore with the hooks
 // that need this Store: the agent, the password managers and the ssh
