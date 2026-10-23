@@ -30,16 +30,20 @@ var secretEnvPrefixes = []string{"OP_SESSION_", "SSHR_"}
 // Env returns the environment of an extension: the one of the caller
 // without the secrets above and with what sshr tells an extension, the
 // protocol, the kind it was started for, its folder and the sshr binary to
-// call back (sshr list --json), names are compared in upper case because
+// call back (sshr list --json), the folder it may write to, names are compared in upper case because
 // Windows spells them either way, inside a hop of sshr SSH_AUTH_SOCK is the
 // private agent of a key kept in sshr, app.StripAuthEnv puts the user's own
 // back first
-func Env(parent []string, kind, dir, sshrBin string) []string {
+func Env(parent []string, kind, dir, data, sshrBin string) []string {
 	return append(cleanEnv(parent),
 		"SSHR_EXT_PROTOCOL="+strconv.Itoa(Protocol),
 		"SSHR_EXT_KIND="+kind,
 		"SSHR_EXT_DIR="+dir,
+		"SSHR_EXT_DATA="+data,
 		"SSHR_BIN="+sshrBin,
+		// the files of the extension are pinned, a byte code cache written
+		// into the folder would stop the next run
+		"PYTHONDONTWRITEBYTECODE=1",
 	)
 }
 
@@ -107,7 +111,10 @@ func (i *Installed) Command(kind string, args []string, sshrBin string) (*exec.C
 	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 		return nil, fmt.Errorf("extension %s: %s is not executable, fix it in the extension and install it again", i.Name, argv[0])
 	}
+	if err := os.MkdirAll(i.Data, 0o700); err != nil {
+		return nil, fmt.Errorf("extension %s: %v", i.Name, err)
+	}
 	cmd := exec.Command(program, append(argv[1:], args...)...)
-	cmd.Env = Env(os.Environ(), kind, i.Dir, sshrBin)
+	cmd.Env = Env(os.Environ(), kind, i.Dir, i.Data, sshrBin)
 	return cmd, nil
 }

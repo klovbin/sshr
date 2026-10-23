@@ -51,14 +51,28 @@ type Lock struct {
 // Installed is an extension found in the extensions folder
 type Installed struct {
 	Manifest
-	// Dir is the folder of the extension
-	Dir  string
+	// Dir is the folder of the extension, its files are pinned
+	Dir string
+	// Data is the folder it may write to, state and caches go there
+	Data string
 	Lock Lock
 }
 
 // Registry is the folder the extensions are installed into
 type Registry struct {
 	Root string
+	// DataRoot holds one folder per extension to write to, empty means
+	// .data inside Root
+	DataRoot string
+}
+
+// dataDir is the folder extension name may write to, it stays when the
+// extension is removed, so a new install keeps its state
+func (r *Registry) dataDir(name string) string {
+	if r.DataRoot != "" {
+		return filepath.Join(r.DataRoot, name)
+	}
+	return filepath.Join(r.Root, ".data", name)
 }
 
 // DefaultRegistry is ~/.sshr/extensions, it is not created until an
@@ -68,7 +82,10 @@ func DefaultRegistry() (*Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Registry{Root: filepath.Join(home, ".sshr", "extensions")}, nil
+	return &Registry{
+		Root:     filepath.Join(home, ".sshr", "extensions"),
+		DataRoot: filepath.Join(home, ".sshr", "extension-data"),
+	}, nil
 }
 
 // ErrNotInstalled means there is no extension of that name
@@ -183,7 +200,7 @@ func (r *Registry) load(dir, name string, pins map[string]Lock) (*Installed, err
 	if !ok || lock.Tree == "" {
 		return nil, fmt.Errorf("extension %s: the folder was not installed by sshr ext install and is not trusted, install it from its source to use it", name)
 	}
-	return &Installed{Manifest: m, Dir: dir, Lock: lock}, nil
+	return &Installed{Manifest: m, Dir: dir, Data: r.dataDir(name), Lock: lock}, nil
 }
 
 // List returns the installed extensions by name, a folder that does not

@@ -17,14 +17,14 @@ func TestEnvDropsSecretsAndAddsTheProtocol(t *testing.T) {
 		"BW_SESSION=s", "OP_SESSION_my=s", "OP_SERVICE_ACCOUNT_TOKEN=t",
 		"SSHR_ASKPASS_TOKEN=t", "SSHR_SYNC_KEYS=k",
 	}
-	got := strings.Join(Env(parent, KindCommand, "/ext/dir", "/usr/bin/sshr"), "\n")
+	got := strings.Join(Env(parent, KindCommand, "/ext/dir", "/ext/data", "/usr/bin/sshr"), "\n")
 	for _, bad := range []string{"SSH_ASKPASS", "ssh_askpass_require", "BW_SESSION", "OP_SESSION_my", "OP_SERVICE_ACCOUNT_TOKEN", "SSHR_ASKPASS_TOKEN", "SSHR_SYNC_KEYS"} {
 		if strings.Contains(got, bad) {
 			t.Errorf("%s reaches the extension", bad)
 		}
 	}
 	for _, want := range []string{"PATH=/bin", "HOME=/home/u", "LANG=C", "SSH_AUTH_SOCK=/agent",
-		"SSHR_EXT_PROTOCOL=1", "SSHR_EXT_KIND=command", "SSHR_EXT_DIR=/ext/dir", "SSHR_BIN=/usr/bin/sshr"} {
+		"SSHR_EXT_PROTOCOL=1", "SSHR_EXT_KIND=command", "SSHR_EXT_DIR=/ext/dir", "SSHR_EXT_DATA=/ext/data", "SSHR_BIN=/usr/bin/sshr", "PYTHONDONTWRITEBYTECODE=1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%s is missing from the environment", want)
 		}
@@ -97,7 +97,7 @@ func TestCommandRefusesAProgramThatIsNotExecutable(t *testing.T) {
 
 func TestEnvGivesTheUsersAgentNotTheVaultAgent(t *testing.T) {
 	parent := []string{"SSH_AUTH_SOCK=/run/sshr/vault-agent", "SSHR_AUTH_SOCK_ORIG=/run/user/1000/agent", "SSH_ASKPASS=/x"}
-	got := Env(parent, KindCommand, "/d", "/b")
+	got := Env(parent, KindCommand, "/d", "/data", "/b")
 	var socks []string
 	for _, kv := range got {
 		if strings.HasPrefix(kv, "SSH_AUTH_SOCK=") {
@@ -124,5 +124,34 @@ func TestCommandUsesTheManifestThatWasChecked(t *testing.T) {
 	inst.Manifest.Command = map[string][]string{"default": {"./other.sh", "--wipe"}}
 	if _, err := inst.Command(KindCommand, nil, "sshr"); !errors.Is(err, ErrChanged) {
 		t.Errorf("a manifest that differs from the checked one ran: %v", err)
+	}
+}
+
+func TestAnExtensionWritesToItsDataFolderAndStillVerifies(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the extension is a shell script")
+	}
+	r := &Registry{Root: filepath.Join(t.TempDir(), "extensions"), DataRoot: filepath.Join(t.TempDir(), "data")}
+	install(t, r, "hello", map[string]string{
+		ManifestFile: manifestOf("hello"),
+		"run.sh":     "#!/bin/sh\necho x >> \"$SSHR_EXT_DATA/state\"\necho \"$PYTHONDONTWRITEBYTECODE\"\n",
+	})
+	for i := 0; i < 2; i++ {
+		inst, err := r.Find("hello")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd, err := inst.Command(KindCommand, nil, "sshr")
+		if err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) != "1" {
+			t.Fatalf("run %d: %q, %v", i+1, out, err)
+		}
+	}
+	state, _ := os.ReadFile(filepath.Join(r.DataRoot, "hello", "state"))
+	if string(state) != "x\nx\n" {
+		t.Errorf("state = %q, want two runs written to the data folder", state)
 	}
 }

@@ -269,7 +269,8 @@ A working one to copy from is `examples/extensions/hello` (`sshr ext install ./e
 - `name` is lower case letters, digits and `-`, it is the word after `sshr`, an extension cannot take the name of a command of sshr
 - `command` is a list of arguments per system (`linux`, `darwin`, `windows`, `default` for the rest), the first one is a file of the folder, no shell is involved, the arguments you type after the name are added
 - the program gets the terminal of the user and its exit code is the exit code of sshr
-- sshr passes `SSHR_EXT_PROTOCOL` (1), `SSHR_EXT_KIND` (`command`), `SSHR_EXT_DIR` (its folder) and `SSHR_BIN` (the sshr binary), `"$SSHR_BIN" list --json` gives it the hosts
+- sshr passes `SSHR_EXT_PROTOCOL` (1), `SSHR_EXT_KIND` (`command`), `SSHR_EXT_DIR` (its folder), `SSHR_EXT_DATA` (a folder it may write to, `~/.sshr/extension-data/<name>`, it stays when the extension is removed) and `SSHR_BIN` (the sshr binary), `"$SSHR_BIN" list --json` gives it the hosts
+- the files of the folder are pinned, so write state, caches and logs to `SSHR_EXT_DATA` and never into the folder, a file that appears there stops the extension, `PYTHONDONTWRITEBYTECODE=1` is set for Python ones
 - passwords, keys, secret references and the variables of ssh askpass, Bitwarden and 1Password are never in its environment
 - `sshr ext install` pins every file of the folder, changing one (a `git pull` in the folder, an edit) stops the extension until you install it again, how that is checked and what it does not cover is in [SECURITY.md](SECURITY.md#extensions)
 

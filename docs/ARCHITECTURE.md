@@ -86,6 +86,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/sync/state.json` | the sync state: chain head, trusted devices, entry states, skipped entries, a pending key rotation | `syncclient.save` through `WriteFileAtomic` |
 | keychain, service `sshr`, entries `sync-device`, `sync-key-<epoch>`, `sync-key-pending` | device seed, vault keys per epoch, a key not delivered yet | `syncclient` |
 | `~/.sshr/extensions/<name>/` | an installed extension: its files and `sshr-ext.json` by the author | `sshr ext install`, `ext.Registry.Install` |
+| `~/.sshr/extension-data/<name>/` | what an extension writes, state and caches, it stays when the extension is removed | the extension itself, `SSHR_EXT_DATA` |
 | `~/.sshr/extensions/.pins.json` | the pin of each installed extension: source, commit, hash of every file, outside the folders so a folder cannot bring its own, an extension folder without a pin is not trusted | `ext.Registry.Install` under `~/.sshr/extensions/.lock` |
 | `~/.sshr/api-token` | token of the REST API on a TCP port | `apiToken` through `WriteFileAtomic` |
 | `$XDG_RUNTIME_DIR/sshr` or `~/.sshr/cm` | ControlMaster sockets, askpass and agent sockets, `api.sock` | ssh, `sshauth`, `vaultkey`, `sshr serve` |
