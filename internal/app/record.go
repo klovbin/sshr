@@ -23,9 +23,11 @@ var ErrNewerFormat = errors.New("newer_format")
 // hostKeys are the JSON names of the fields of Host in lower case,
 // encoding/json matches keys without regard to case, so "Key_Sealed" is
 // the key_sealed field and not a field of a newer sshr
-var hostKeys = func() map[string]bool {
+var hostKeys = jsonKeys(reflect.TypeOf(Host{}))
+
+// jsonKeys are the JSON names of the exported fields of typ in lower case
+func jsonKeys(typ reflect.Type) map[string]bool {
 	keys := map[string]bool{}
-	typ := reflect.TypeOf(Host{})
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
 		if !f.IsExported() {
@@ -41,7 +43,66 @@ var hostKeys = func() map[string]bool {
 		keys[strings.ToLower(name)] = true
 	}
 	return keys
-}()
+}
+
+// unknownKeys are the keys of the JSON object b that match none of known
+// and are not "version", nil when there are none
+func unknownKeys(b []byte, known map[string]bool) (map[string]json.RawMessage, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, err
+	}
+	var out map[string]json.RawMessage
+	for k, v := range raw {
+		if known[strings.ToLower(k)] || k == "version" {
+			continue
+		}
+		if out == nil {
+			out = map[string]json.RawMessage{}
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// formatOf is the "version" of the JSON object b, 0 when it has none
+func formatOf(b []byte) (int, error) {
+	var v struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return 0, fmt.Errorf("version: %v", err)
+	}
+	return v.Version, nil
+}
+
+// appendKeys writes the keys of extra in name order into the JSON object
+// b, indented as MarshalIndent with two spaces writes, b comes back as it
+// is when extra is empty
+func appendKeys(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
+	if len(extra) == 0 {
+		return b, nil
+	}
+	end := bytes.LastIndexByte(b, '}')
+	var out bytes.Buffer
+	out.Write(bytes.TrimRight(b[:end], " \n"))
+	for _, k := range slices.Sorted(maps.Keys(extra)) {
+		name, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		var v bytes.Buffer
+		if err := json.Compact(&v, extra[k]); err != nil {
+			return nil, err
+		}
+		out.WriteString(",\n  ")
+		out.Write(name)
+		out.WriteString(": ")
+		out.Write(v.Bytes())
+	}
+	out.WriteString("\n}")
+	return out.Bytes(), nil
+}
 
 // decodeHost reads a host file, the keys this build does not know (a
 // field a newer sshr wrote) are kept in h.extra and written back on save
@@ -50,23 +111,12 @@ func decodeHost(b []byte) (Host, error) {
 	if err := json.Unmarshal(b, &h); err != nil {
 		return Host{}, err
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
+	var err error
+	if h.format, err = formatOf(b); err != nil {
 		return Host{}, err
 	}
-	if v, ok := raw["version"]; ok {
-		if err := json.Unmarshal(v, &h.format); err != nil {
-			return Host{}, fmt.Errorf("version: %v", err)
-		}
-	}
-	for k, v := range raw {
-		if hostKeys[strings.ToLower(k)] || k == "version" {
-			continue
-		}
-		if h.extra == nil {
-			h.extra = map[string]json.RawMessage{}
-		}
-		h.extra[k] = v
+	if h.extra, err = unknownKeys(b, hostKeys); err != nil {
+		return Host{}, err
 	}
 	return h, nil
 }
@@ -79,28 +129,10 @@ func encodeHost(h *Host) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %s was saved by a newer sshr (format %d), this one reads it but does not change it, update sshr to edit it", ErrNewerFormat, h.Name, h.format)
 	}
 	b, err := json.MarshalIndent(h, "", "  ")
-	if err != nil || len(h.extra) == 0 {
-		return b, err
+	if err != nil {
+		return nil, err
 	}
-	end := bytes.LastIndexByte(b, '}')
-	var out bytes.Buffer
-	out.Write(bytes.TrimRight(b[:end], " \n"))
-	for _, k := range slices.Sorted(maps.Keys(h.extra)) {
-		name, err := json.Marshal(k)
-		if err != nil {
-			return nil, err
-		}
-		var v bytes.Buffer
-		if err := json.Compact(&v, h.extra[k]); err != nil {
-			return nil, err
-		}
-		out.WriteString(",\n  ")
-		out.Write(name)
-		out.WriteString(": ")
-		out.Write(v.Bytes())
-	}
-	out.WriteString("\n}")
-	return out.Bytes(), nil
+	return appendKeys(b, h.extra)
 }
 
 // localPrefix starts the keys a newer sshr keeps on its own machine, they
