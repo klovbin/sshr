@@ -176,3 +176,27 @@ func TestAPIRunLimit(t *testing.T) {
 		t.Fatalf("a free slot was not used or not given back: %v %d", ran, len(a.slots))
 	}
 }
+
+// the command in the log is quoted, control characters in it cannot
+// rewrite the terminal or the log (#200)
+func TestAPIRunLogQuoted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "ssh"), []byte("#!/bin/sh\necho ok\n"), 0o700)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var log strings.Builder
+	old := logOut
+	logOut = &log
+	t.Cleanup(func() { logOut = old })
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	body := `{"command":"id\r\u001b[2Kfake\nsshr serve: run on web: ok"}`
+	if code, out := do(t, New(s, Options{AllowCommands: true}), "POST", "/v1/hosts/web/run", body, nil); code != 200 {
+		t.Fatalf("run = %d %s", code, out)
+	}
+	if out := log.String(); strings.ContainsAny(out, "\r\x1b") || strings.Count(out, "\n") != 1 {
+		t.Fatalf("control characters reach the log: %q", out)
+	}
+}

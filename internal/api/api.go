@@ -31,6 +31,9 @@ type Options struct {
 	AllowCommands bool
 }
 
+// logOut is where the server says what it runs
+var logOut io.Writer = os.Stderr
+
 // uploadMax bounds an upload body
 const uploadMax = 100 << 20
 
@@ -324,7 +327,9 @@ func (a *api) run(w http.ResponseWriter, r *http.Request) {
 	if in.TimeoutSeconds > 600 {
 		in.TimeoutSeconds = 600
 	}
-	fmt.Fprintf(os.Stderr, "sshr serve: run on %s: %s\n", h.Name, in.Command)
+	// quoted, a carriage return or an escape sequence in the command cannot
+	// rewrite lines in the terminal or log
+	fmt.Fprintf(logOut, "sshr serve: run on %q: %q\n", h.Name, in.Command)
 	res, err := a.store.RunRemote(h, in.Command, nil, time.Duration(in.TimeoutSeconds)*time.Second)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err)
