@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"sshr.dev/internal/app"
@@ -88,23 +87,19 @@ func cmdTunnel(store *app.Store, args []string) {
 	if len(fs) == 0 {
 		fatal(fmt.Errorf("%s has no saved forwards", h.Name))
 	}
-	sshArgs, err := store.ConnectArgs(h)
+	plan, err := store.PlanSession(h, app.LaunchOptions{Forwards: fs, Tunnel: true})
 	if err != nil {
 		fatal(err)
 	}
-	// Without it ssh keeps running when a port is taken, and the tunnel
-	// silently does nothing
-	sshArgs = append(sshArgs, "-N", "-o", "ExitOnForwardFailure=yes")
 	for _, f := range fs {
-		sshArgs = append(sshArgs, f.Args()...)
 		fmt.Printf("  %s\n", f)
 	}
 	fmt.Printf("Tunnel to %s is open, Ctrl+C to close\n", h.Name)
-	sshBin, err := exec.LookPath("ssh")
+	cmd, cleanup, err := plan.Command()
 	if err != nil {
-		fatal(fmt.Errorf("ssh not found in PATH"))
+		fatal(err)
 	}
-	os.Exit(run(h, sshBin, append(sshArgs, "--", h.Dest())...))
+	os.Exit(runAttached(cmd, cleanup))
 }
 
 // findHost resolves a host query or exits with the usual message
