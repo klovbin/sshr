@@ -981,6 +981,12 @@ func Unlock(h *Host) error {
 }
 
 func (s *Store) save(h *Host) error {
+	// a host of a newer format is refused before anything leaves the
+	// process, a 1Password item made for a file that is then not written
+	// would be left behind
+	if h.format > hostFormat {
+		return newerHostError(h)
+	}
 	if err := sealPassword(h); err != nil {
 		return err
 	}

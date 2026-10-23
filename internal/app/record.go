@@ -20,6 +20,11 @@ const hostFormat = 1
 // build reads but must not write, it would erase what it does not know
 var ErrNewerFormat = errors.New("newer_format")
 
+// newerHostError says that h is of a newer format and stays as it is
+func newerHostError(h *Host) error {
+	return fmt.Errorf("%w: %s was saved by a newer sshr (format %d), this one reads it but does not change it, update sshr to edit it", ErrNewerFormat, h.Name, h.format)
+}
+
 // hostKeys are the JSON names of the fields of Host in lower case,
 // encoding/json matches keys without regard to case, so "Key_Sealed" is
 // the key_sealed field and not a field of a newer sshr
@@ -130,7 +135,7 @@ func decodeHost(b []byte) (Host, error) {
 // same bytes as a plain marshal
 func encodeHost(h *Host) ([]byte, error) {
 	if h.format > hostFormat {
-		return nil, fmt.Errorf("%w: %s was saved by a newer sshr (format %d), this one reads it but does not change it, update sshr to edit it", ErrNewerFormat, h.Name, h.format)
+		return nil, newerHostError(h)
 	}
 	b, err := json.MarshalIndent(h, "", "  ")
 	if err != nil {
