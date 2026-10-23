@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/zalando/go-keyring"
 )
 
 // fileKeychain keeps the named secrets of sshr (the keys of the sync
@@ -63,7 +61,7 @@ func (fileKeychain) Get(name string) (string, error) {
 	}
 	sealed, ok := f.Secrets[name]
 	if !ok {
-		return "", keyring.ErrNotFound
+		return "", errSecretNotFound
 	}
 	plain, err := unsealRaw(sealed, secretAAD(name))
 	if err != nil {
@@ -112,7 +110,7 @@ func (k fileKeychain) Set(name, value string) error {
 func (k fileKeychain) Delete(name string) error {
 	return k.change(func(m map[string]string) error {
 		if _, ok := m[name]; !ok {
-			return keyring.ErrNotFound
+			return errSecretNotFound
 		}
 		delete(m, name)
 		return nil
@@ -161,7 +159,7 @@ func moveSecrets(names []string, toFile bool) ([]string, error) {
 	var moved []string
 	for _, name := range names {
 		v, err := callStore(from, func(k Keychain) (string, error) { return k.Get(name) })
-		if errors.Is(err, keyring.ErrNotFound) || (toFile && errors.Is(err, ErrKeychainMissing)) {
+		if errors.Is(err, errSecretNotFound) || (toFile && errors.Is(err, ErrKeychainMissing)) {
 			continue
 		}
 		if err != nil {
@@ -174,7 +172,7 @@ func moveSecrets(names []string, toFile bool) ([]string, error) {
 		if err != nil || back != v {
 			return moved, fmt.Errorf("the secret %s did not read back from its new place, it stays where it was", name)
 		}
-		if _, err := callStore(from, func(k Keychain) (string, error) { return "", k.Delete(name) }); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		if _, err := callStore(from, func(k Keychain) (string, error) { return "", k.Delete(name) }); err != nil && !errors.Is(err, errSecretNotFound) {
 			return moved, err
 		}
 		moved = append(moved, name)

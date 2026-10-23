@@ -412,7 +412,7 @@ func CheckKeychain() error {
 
 // Keychain is where sshr keeps its own secrets: the vault key and the keys
 // of the sync device, values are base64 text under a name, Get returns
-// keyring.ErrNotFound for a name it does not hold, the system keychain is
+// errSecretNotFound for a name it does not hold, the system keychain is
 // the one implementation today, a passphrase file or a phone keystore can
 // take its place
 type Keychain interface {
@@ -425,9 +425,26 @@ type Keychain interface {
 // Service on Linux, Keychain on macOS, Credential Manager on Windows
 type systemKeychain struct{}
 
-func (systemKeychain) Get(name string) (string, error) { return keyring.Get(keyringService, name) }
-func (systemKeychain) Set(name, value string) error    { return keyring.Set(keyringService, name, value) }
-func (systemKeychain) Delete(name string) error        { return keyring.Delete(keyringService, name) }
+func (systemKeychain) Get(name string) (string, error) {
+	v, err := keyring.Get(keyringService, name)
+	return v, notFound(err)
+}
+func (systemKeychain) Set(name, value string) error { return keyring.Set(keyringService, name, value) }
+func (systemKeychain) Delete(name string) error {
+	return notFound(keyring.Delete(keyringService, name))
+}
+
+// errSecretNotFound is what a Keychain returns for a name it does not
+// hold, the code that uses a keychain does not depend on go-keyring
+var errSecretNotFound = errors.New("secret not found in the keychain")
+
+// notFound turns the not-found error of go-keyring into errSecretNotFound
+func notFound(err error) error {
+	if errors.Is(err, keyring.ErrNotFound) {
+		return errSecretNotFound
+	}
+	return err
+}
 
 // keychain is the keychain every secret of sshr goes through, every call
 // still runs through keyringCall for its time limit
@@ -437,7 +454,7 @@ var keychain Keychain = systemKeychain{}
 // when there is none
 func SecretGet(name string) (value []byte, ok bool, err error) {
 	v, err := callStore(secretStore(name), func(k Keychain) (string, error) { return k.Get(name) })
-	if errors.Is(err, keyring.ErrNotFound) {
+	if errors.Is(err, errSecretNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -461,7 +478,7 @@ func SecretSet(name string, value []byte) error {
 // SecretDelete removes a value, a missing one is not an error
 func SecretDelete(name string) error {
 	_, err := callStore(secretStore(name), func(k Keychain) (string, error) { return "", k.Delete(name) })
-	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+	if err != nil && !errors.Is(err, errSecretNotFound) {
 		return err
 	}
 	return nil
@@ -475,7 +492,7 @@ func callStore(k Keychain, f func(Keychain) (string, error)) (string, error) {
 		return f(k)
 	}
 	v, err := keyringCall(func() (string, error) { return f(k) })
-	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+	if err != nil && !errors.Is(err, errSecretNotFound) {
 		return "", keychainError(err)
 	}
 	return v, err

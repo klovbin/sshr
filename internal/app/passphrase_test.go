@@ -204,7 +204,7 @@ func TestUseKeychainVerifiesTheKey(t *testing.T) {
 // forgetfulKeychain takes every write and keeps nothing
 type forgetfulKeychain struct{}
 
-func (forgetfulKeychain) Get(string) (string, error) { return "", keyring.ErrNotFound }
+func (forgetfulKeychain) Get(string) (string, error) { return "", errSecretNotFound }
 func (forgetfulKeychain) Set(string, string) error   { return nil }
 func (forgetfulKeychain) Delete(string) error        { return nil }
 

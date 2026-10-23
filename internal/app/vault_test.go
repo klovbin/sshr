@@ -266,7 +266,7 @@ type mapKeychain map[string]string
 func (m mapKeychain) Get(name string) (string, error) {
 	v, ok := m[name]
 	if !ok {
-		return "", keyring.ErrNotFound
+		return "", errSecretNotFound
 	}
 	return v, nil
 }
