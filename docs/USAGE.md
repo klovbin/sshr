@@ -118,6 +118,7 @@ sshr gateway db --off                        # connect directly again
 - connect, run, send, get, tunnel and paste first check the host directly, a TCP connect and the SSH banner, up to 3 s each, and go through the gateway only when it does not answer, `connect` prints `via bastion (no answer directly)`
 - off by default: a host that is down directly costs that wait on every connect, a host with `-J` always goes through its jump hosts and cannot have a gateway
 - `sshr ping` says `connect goes through bastion` next to a host that is down directly, the ssh config export writes the direct way, plain ssh has no fallback
+- the gateway syncs like jump hosts, a device with an older sshr drops it when it saves that host until versioned records land ([#97](https://github.com/klovbin/sshr/issues/97))
 
 ## Keeping the session on the server
 
