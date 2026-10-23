@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -104,6 +106,34 @@ func TestSyncStoreFlagMistakes(t *testing.T) {
 		_, errOut, code := sshrIn(t, home, c.args...)
 		if code == 0 || !strings.Contains(errOut, c.want) {
 			t.Errorf("%v: %d %q, want %q", c.args, code, errOut, c.want)
+		}
+	}
+}
+
+// a wrong join or a machine that already syncs stops before the secret is
+// asked for and before the bucket gets a probe (#233)
+func TestSyncStoreChecksBeforeSecret(t *testing.T) {
+	home := t.TempDir()
+	s3 := []string{"--backend", "s3", "--endpoint", "https://127.0.0.1:1", "--bucket", "b", "--key-id", "K"}
+	_, errOut, code := sshrIn(t, home, append([]string{"sync", "join"}, s3...)...)
+	if code == 0 || !strings.Contains(errOut, "sshr sync join --server <url> <code>") || strings.Contains(errOut, "secret") {
+		t.Errorf("join without a code: %d %q", code, errOut)
+	}
+	dir := filepath.Join(home, ".sshr", "sync")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range []string{"init", "join"} {
+		args := append([]string{"sync", sub}, s3...)
+		if sub == "join" {
+			args = append(args, "code")
+		}
+		_, errOut, code := sshrIn(t, home, args...)
+		if code == 0 || !strings.Contains(errOut, "already set up here") {
+			t.Errorf("%s on a machine that syncs: %d %q", sub, code, errOut)
 		}
 	}
 }

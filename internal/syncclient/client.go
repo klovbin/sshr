@@ -197,6 +197,18 @@ func (c *Client) prefix() string {
 
 func (c *Client) statePath() string { return filepath.Join(c.Dir, "state.json") }
 
+// errSetUp is the answer of init and join on a machine that already syncs
+var errSetUp = errors.New("sync is already set up here, see sshr sync status")
+
+// CheckFree fails when sync is already set up here, the CLI checks it
+// before it asks for the secret of a store and writes a probe into it
+func (c *Client) CheckFree() error {
+	if _, err := os.Stat(c.statePath()); err == nil {
+		return errSetUp
+	}
+	return nil
+}
+
 // SecretNames are the names of the secrets the sync of the default device
 // keeps (its key seed, the vault keys of every epoch, a key change still
 // to deliver), for moving them when the vault mode changes, a sync state
@@ -481,8 +493,8 @@ func (c *Client) Init(server, name string) error {
 }
 
 func (c *Client) initAccount(server, name string) error {
-	if _, err := os.Stat(c.statePath()); err == nil {
-		return errors.New("sync is already set up here, see sshr sync status")
+	if err := c.CheckFree(); err != nil {
+		return err
 	}
 	srv, err := c.serverOf(server)
 	if err != nil {
@@ -559,8 +571,8 @@ func (c *Client) Join(server, code, name string) (out string, err error) {
 }
 
 func (c *Client) join(server, code, name string) (string, error) {
-	if _, err := os.Stat(c.statePath()); err == nil {
-		return "", errors.New("sync is already set up here, see sshr sync status")
+	if err := c.CheckFree(); err != nil {
+		return "", err
 	}
 	srv, err := c.serverOf(server)
 	if err != nil {

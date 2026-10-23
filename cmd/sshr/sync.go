@@ -77,6 +77,9 @@ func cmdSync(store *app.Store, args []string) {
 	}
 	switch sub {
 	case "init":
+		if err := c.CheckFree(); err != nil {
+			fatal(err)
+		}
 		if server, err = sf.setup(c, server); err != nil {
 			fatal(err)
 		}
@@ -110,11 +113,14 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Printf("On the new device run:\n  sshr sync join %s %s\n", flags, code)
 	case "join":
-		if server, err = sf.setup(c, server); err != nil {
+		if (server == "" && sf.backend == "") || len(rest) != 1 {
+			fatal(fmt.Errorf("sshr sync join --server <url> <code>, or the --backend s3 flags of sshr sync invite"))
+		}
+		if err := c.CheckFree(); err != nil {
 			fatal(err)
 		}
-		if server == "" || len(rest) != 1 {
-			fatal(fmt.Errorf("sshr sync join --server <url> <code>, or the --backend s3 flags of sshr sync invite"))
+		if server, err = sf.setup(c, server); err != nil {
+			fatal(err)
 		}
 		fp, err := c.Join(server, rest[0], name)
 		if err != nil {
