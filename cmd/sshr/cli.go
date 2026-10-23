@@ -1130,6 +1130,17 @@ func cmdVault(args []string) {
 		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
 		os.Exit(1)
 	}
+	// the keys of the sync device move with the vault key
+	var names []string
+	if args[0] == "passphrase" || args[0] == "keychain" {
+		dir, err := syncclient.DefaultDir()
+		if err != nil {
+			fatal(err)
+		}
+		if names, err = syncclient.SecretNames(dir); err != nil {
+			fatal(fmt.Errorf("%v, nothing is changed", err))
+		}
+	}
 	switch args[0] {
 	case "status":
 		fmt.Println(app.VaultMode())
@@ -1145,27 +1156,15 @@ func cmdVault(args []string) {
 		if first != again {
 			fatal(fmt.Errorf("the two passphrases differ, nothing is changed"))
 		}
-		if err := app.SetVaultPassphrase(first); err != nil {
+		if err := app.SetVaultPassphrase(first, names); err != nil {
 			fatal(err)
 		}
-		// the keys of the sync device move along, a machine without a
-		// keychain syncs from the file
-		if dir, err := syncclient.DefaultDir(); err == nil {
-			if err := app.MoveSecrets(syncclient.SecretNames(dir), true); err != nil {
-				fmt.Fprintf(os.Stderr, "sshr: the sync keys stay in the keychain: %v\n", err)
-			}
-		}
-		fmt.Println("The vault key is now in ~/.sshr/vault/vault-key.json under the passphrase, a forgotten passphrase loses the saved passwords and keys")
+		fmt.Println("The vault key and the sync keys are now in ~/.sshr/vault under the passphrase, a forgotten passphrase loses the saved passwords and keys")
 	case "keychain":
-		if dir, err := syncclient.DefaultDir(); err == nil {
-			if err := app.MoveSecrets(syncclient.SecretNames(dir), false); err != nil {
-				fatal(fmt.Errorf("the sync keys could not move to the keychain, nothing is changed: %v", err))
-			}
-		}
-		if err := app.UseKeychainVault(); err != nil {
+		if err := app.UseKeychainVault(names); err != nil {
 			fatal(err)
 		}
-		fmt.Println("The vault key is in the system keychain again, the passphrase file is removed")
+		fmt.Println("The vault key and the sync keys are in the system keychain again, the passphrase files are removed")
 	default:
 		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
 		os.Exit(1)

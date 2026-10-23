@@ -197,7 +197,7 @@ func passphraseVaultKey() ([]byte, error) {
 // key file and turns the passphrase vault on, the key stays the same, so
 // every saved secret still opens, a key in the system keychain stays there,
 // the named secrets are moved by MoveSecrets
-func SetVaultPassphrase(pass string) error {
+func SetVaultPassphrase(pass string, secretNames []string) error {
 	// one mode change at a time, the setting and the files must agree
 	unlock, err := vaultModeLock()
 	if err != nil {
@@ -234,6 +234,12 @@ func SetVaultPassphrase(pass string) error {
 	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
+	// the named secrets move before the mode changes, the mode never points
+	// at a file that does not hold them
+	if err := MoveSecrets(secretNames, true); err != nil {
+		os.Remove(path)
+		return fmt.Errorf("the sync keys did not move, nothing is changed: %v", err)
+	}
 	// a settings file that does not read is not replaced with defaults
 	st, err := LoadSettings()
 	if err != nil {
@@ -245,7 +251,7 @@ func SetVaultPassphrase(pass string) error {
 
 // UseKeychainVault stores the current vault key in the system keychain,
 // turns the passphrase vault off and removes the vault key file
-func UseKeychainVault() error {
+func UseKeychainVault(secretNames []string) error {
 	unlock, err := vaultModeLock()
 	if err != nil {
 		return err
@@ -269,6 +275,9 @@ func UseKeychainVault() error {
 			err = errors.New("the keychain did not keep the vault key, the passphrase vault stays")
 		}
 		return err
+	}
+	if err := MoveSecrets(secretNames, false); err != nil {
+		return fmt.Errorf("the sync keys did not move to the keychain, the passphrase vault stays: %v", err)
 	}
 	st, err := LoadSettings()
 	if err != nil {

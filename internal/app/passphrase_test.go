@@ -42,10 +42,10 @@ func TestPassphraseVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetVaultPassphrase("short pass"); err == nil {
+	if err := SetVaultPassphrase("short pass", nil); err == nil {
 		t.Error("a short passphrase was taken")
 	}
-	if err := SetVaultPassphrase(pass); err != nil {
+	if err := SetVaultPassphrase(pass, nil); err != nil {
 		t.Fatal(err)
 	}
 	if VaultMode() != VaultPassphrase {
@@ -71,7 +71,7 @@ func TestPassphraseVault(t *testing.T) {
 	keyring.MockInit()
 	pass = "correct horse battery"
 	forgetVaultKey()
-	if err := UseKeychainVault(); err != nil {
+	if err := UseKeychainVault(nil); err != nil {
 		t.Fatal(err)
 	}
 	if VaultMode() != VaultKeychain {
@@ -119,11 +119,12 @@ func TestNamedSecretsInPassphraseMode(t *testing.T) {
 	if err := SecretSet("sync-device", []byte("seed")); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetVaultPassphrase(pass); err != nil {
+	if err := SetVaultPassphrase(pass, []string{"sync-device", "sync-key-1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := MoveSecrets([]string{"sync-device", "sync-key-1"}, true); err != nil {
-		t.Fatal(err)
+	// the keychain copy is gone once the file holds it (#187)
+	if _, err := keyring.Get(keyringService, "sync-device"); err == nil {
+		t.Error("the sync key stayed in the keychain")
 	}
 	keyring.MockInitWithError(errors.New("no bus"))
 	t.Cleanup(keyring.MockInit)
@@ -158,7 +159,7 @@ func TestPassphraseVaultWithoutKeychain(t *testing.T) {
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	pass := "correct horse battery"
 	cheapPassphrase(t, &pass)
-	if err := SetVaultPassphrase(pass); err != nil {
+	if err := SetVaultPassphrase(pass, nil); err != nil {
 		t.Fatalf("no keychain: %v", err)
 	}
 	key, _ := VaultKey()
@@ -173,7 +174,7 @@ func TestPassphraseVaultWithoutKeychain(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("SSHR_VAULT") })
 	path, _ := keyCheckPath()
 	os.WriteFile(path, []byte("0123\n"), 0o600)
-	if err := SetVaultPassphrase(pass); !errors.Is(err, ErrVaultKeyLost) {
+	if err := SetVaultPassphrase(pass, nil); !errors.Is(err, ErrVaultKeyLost) {
 		t.Fatalf("a key check of a lost key: %v", err)
 	}
 }
@@ -186,13 +187,13 @@ func TestUseKeychainVerifiesTheKey(t *testing.T) {
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	pass := "correct horse battery"
 	cheapPassphrase(t, &pass)
-	if err := SetVaultPassphrase(pass); err != nil {
+	if err := SetVaultPassphrase(pass, nil); err != nil {
 		t.Fatal(err)
 	}
 	old := keychain
 	keychain = forgetfulKeychain{}
 	t.Cleanup(func() { keychain = old })
-	if err := UseKeychainVault(); err == nil {
+	if err := UseKeychainVault(nil); err == nil {
 		t.Fatal("the mode changed though the keychain kept nothing")
 	}
 	if path, _ := passphraseFilePath(); !fileExists(path) || VaultMode() != VaultPassphrase {
@@ -217,7 +218,7 @@ func TestVaultModeKeepsDamagedSettings(t *testing.T) {
 	cheapPassphrase(t, &pass)
 	path, _ := settingsPath()
 	os.WriteFile(path, []byte("{broken"), 0o600)
-	if err := SetVaultPassphrase(pass); err == nil {
+	if err := SetVaultPassphrase(pass, nil); err == nil {
 		t.Fatal("the mode changed over a settings file that does not read")
 	}
 	if b, _ := os.ReadFile(path); string(b) != "{broken" {
@@ -253,7 +254,7 @@ func TestPassphraseVaultLockedKeychainMakesNoKey(t *testing.T) {
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	pass := "correct horse battery"
 	cheapPassphrase(t, &pass)
-	err := SetVaultPassphrase(pass)
+	err := SetVaultPassphrase(pass, nil)
 	if runtime.GOOS == "linux" && !errors.Is(err, ErrKeychainLocked) {
 		t.Fatalf("a locked keychain: %v", err)
 	}
@@ -276,19 +277,43 @@ func TestVaultModeKeepsKeysThatSealed(t *testing.T) {
 	hosts := filepath.Join(filepath.Dir(lock), "hosts")
 	os.MkdirAll(hosts, 0o700)
 	os.WriteFile(filepath.Join(hosts, "a.json"), []byte(`{"password_sealed": "v2:abc"}`), 0o600)
-	if err := SetVaultPassphrase(pass); !errors.Is(err, ErrVaultKeyLost) {
+	if err := SetVaultPassphrase(pass, nil); !errors.Is(err, ErrVaultKeyLost) {
 		t.Fatalf("a new key over sealed secrets: %v", err)
 	}
 	// another key in the keychain is not replaced
 	os.Remove(filepath.Join(hosts, "a.json"))
 	keyring.MockInit()
 	resetVault(t)
-	if err := SetVaultPassphrase(pass); err != nil {
+	if err := SetVaultPassphrase(pass, nil); err != nil {
 		t.Fatal(err)
 	}
 	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	if err := UseKeychainVault(); !errors.Is(err, ErrVaultKeyLost) {
+	if err := UseKeychainVault(nil); !errors.Is(err, ErrVaultKeyLost) {
 		t.Fatalf("another keychain key was replaced: %v", err)
+	}
+}
+
+// a move back to the keychain takes the sync keys along and removes the
+// secrets file, a stale copy does not come back later (#186, #187)
+func TestUseKeychainMovesSecretsBack(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	SecretSet("sync-device", []byte("seed"))
+	names := []string{"sync-device"}
+	if err := SetVaultPassphrase(pass, names); err != nil {
+		t.Fatal(err)
+	}
+	if err := UseKeychainVault(names); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := SecretGet("sync-device"); err != nil || !ok || string(v) != "seed" {
+		t.Fatalf("%q %v %v", v, ok, err)
+	}
+	if sp, _ := secretsPath(); fileExists(sp) {
+		t.Error("secrets.json stayed")
 	}
 }
 

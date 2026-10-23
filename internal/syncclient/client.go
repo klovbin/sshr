@@ -185,21 +185,28 @@ func (c *Client) statePath() string { return filepath.Join(c.Dir, "state.json") 
 
 // SecretNames are the names of the secrets the sync of the default device
 // keeps (its key seed, the vault keys of every epoch, a key change still
-// to deliver), for moving them when the vault mode changes
-func SecretNames(dir string) []string {
+// to deliver), for moving them when the vault mode changes, a sync state
+// that exists and does not read is an error, the names of older epochs
+// would be missed
+func SecretNames(dir string) ([]string, error) {
 	names := []string{"sync-device", "sync-key-pending"}
 	b, err := app.ReadFileShared(filepath.Join(dir, "state.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return names, nil
+	}
 	if err != nil {
-		return names
+		return nil, err
 	}
 	var st struct {
 		Epoch int `json:"epoch"`
 	}
-	json.Unmarshal(b, &st)
+	if err := json.Unmarshal(b, &st); err != nil {
+		return nil, fmt.Errorf("the sync state does not read: %v", err)
+	}
 	for e := 1; e <= st.Epoch; e++ {
 		names = append(names, "sync-key-"+strconv.Itoa(e))
 	}
-	return names
+	return names, nil
 }
 
 func (c *Client) load() error {
