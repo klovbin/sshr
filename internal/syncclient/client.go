@@ -106,6 +106,9 @@ type Client struct {
 	// Log gets one line per notable event
 	Log  io.Writer
 	HTTP *http.Client
+	// Backend is the store the sync goes through, nil is sshr-sync over
+	// HTTP at the server of the state
+	Backend Backend
 
 	st   *state
 	keys *deviceKeys
@@ -365,15 +368,12 @@ func (c *Client) checkKey(epoch int, key []byte) ([]byte, error) {
 	if c.keyOK[epoch] || c.st.Counter == 0 {
 		return key, nil
 	}
-	code, b, _, err := c.call("GET", "/manifest", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	if code == http.StatusNotFound {
+	_, b, err := c.backend().Head()
+	if errors.Is(err, ErrNotFound) {
 		return key, nil
 	}
-	if code != http.StatusOK {
-		return nil, serverError(code, b)
+	if err != nil {
+		return nil, err
 	}
 	var sm syncproto.Signed
 	var m syncproto.Manifest
@@ -408,15 +408,12 @@ func (c *Client) checkKey(epoch int, key []byte) ([]byte, error) {
 // envelopeKey reads the vault key of epoch from this device's envelope on
 // the server, without touching the keychain
 func (c *Client) envelopeKey(epoch int) ([]byte, error) {
-	code, b, _, err := c.call("GET", "/envelopes/"+c.st.DeviceID, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	if code == http.StatusNotFound {
+	b, err := c.backend().GetEnvelope(c.st.DeviceID)
+	if errors.Is(err, ErrNotFound) {
 		return nil, ErrKeyPending
 	}
-	if code != http.StatusOK {
-		return nil, serverError(code, b)
+	if err != nil {
+		return nil, err
 	}
 	var env syncproto.Envelope
 	if err := json.Unmarshal(b, &env); err != nil {
@@ -479,12 +476,9 @@ func (c *Client) initAccount(server, name string) error {
 	c.st = &state{Server: srv, Name: name, Entries: map[string]entryState{}}
 	self := c.self()
 	body, _ := json.Marshal(syncproto.NewAccountRequest{Device: self})
-	code, b, _, err := c.call("POST", "!/v1/accounts", body, nil)
+	b, err := c.backend().CreateAccount(body)
 	if err != nil {
 		return err
-	}
-	if code != http.StatusCreated {
-		return serverError(code, b)
 	}
 	var tr syncproto.TokenResponse
 	if err := json.Unmarshal(b, &tr); err != nil {
@@ -512,14 +506,10 @@ func (c *Client) putEnvelope(d syncproto.Device, epoch int, key []byte) error {
 		return err
 	}
 	b, _ := json.Marshal(env)
-	code, rb, _, err := c.call("PUT", "/envelopes/"+d.ID, b, nil)
-	if err != nil {
+	// a newer key already delivered to that device by a later rotation
+	// stays, writing this one over it would lock the device out
+	if err := c.backend().PutEnvelope(d.ID, b); err != nil && !errors.Is(err, ErrStaleEpoch) {
 		return err
-	}
-	// 409 is a newer key already delivered to that device by a later
-	// rotation, writing this one over it would lock the device out
-	if code != http.StatusNoContent && code != http.StatusConflict {
-		return serverError(code, rb)
 	}
 	return nil
 }
@@ -565,12 +555,9 @@ func (c *Client) join(server, code, name string) (string, error) {
 	c.st = &state{Server: srv, Account: account, Name: name, Approver: approver, Entries: map[string]entryState{}}
 	self := c.self()
 	body, _ := json.Marshal(syncproto.NewAccountRequest{Device: self})
-	rc, b, _, err := c.call("POST", "/join", body, nil)
+	b, err := c.backend().Join(body)
 	if err != nil {
 		return "", err
-	}
-	if rc != http.StatusCreated {
-		return "", serverError(rc, b)
 	}
 	var tr syncproto.TokenResponse
 	if err := json.Unmarshal(b, &tr); err != nil {
@@ -585,12 +572,9 @@ func (c *Client) Pending() ([]syncproto.DeviceRecord, error) {
 	if err := c.load(); err != nil {
 		return nil, err
 	}
-	code, b, _, err := c.call("GET", "/devices", nil, nil)
+	b, err := c.backend().Devices()
 	if err != nil {
 		return nil, err
-	}
-	if code != http.StatusOK {
-		return nil, serverError(code, b)
 	}
 	var all []syncproto.DeviceRecord
 	if err := json.Unmarshal(b, &all); err != nil {
@@ -656,12 +640,8 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	if err := c.putEnvelope(d.Device, c.st.Epoch, key); err != nil {
 		return nil, err
 	}
-	code, b, _, err := c.call("POST", "/devices/"+d.ID+"/activate", nil, nil)
-	if err != nil {
+	if err := c.backend().Activate(d.ID); err != nil {
 		return nil, err
-	}
-	if code != http.StatusNoContent {
-		return nil, serverError(code, b)
 	}
 	return &d, nil
 }
@@ -730,15 +710,12 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 	var out []syncproto.Signed
 	after := c.st.Counter
 	for {
-		code, b, _, err := c.call("GET", "/manifests?after="+strconv.FormatUint(after, 10), nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if code == http.StatusForbidden {
+		b, err := c.backend().ManifestsAfter(after)
+		if errors.Is(err, ErrPending) {
 			return nil, errors.New("this device still waits for approval, run sshr sync approve on a device that is already in")
 		}
-		if code != http.StatusOK {
-			return nil, serverError(code, b)
+		if err != nil {
+			return nil, err
 		}
 		var page []syncproto.Signed
 		if err := json.Unmarshal(b, &page); err != nil {
@@ -755,15 +732,9 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 		after = m.Counter
 	}
 	if len(out) == 0 && c.st.Counter > 0 {
-		code, b, hdr, err := c.call("GET", "/manifest", nil, nil)
-		if err != nil {
+		cur, _, err := c.backend().Head()
+		if err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
-		}
-		cur := uint64(0)
-		if code == http.StatusOK {
-			cur, _ = strconv.ParseUint(hdr.Get("ETag"), 10, 64)
-		} else if code != http.StatusNotFound {
-			return nil, serverError(code, b)
 		}
 		if cur < c.st.Counter && !c.AcceptReset {
 			return nil, fmt.Errorf("the server shows change %d, this device has seen %d, the server rolled the account back or lost data, run with --accept-reset only if the server was restored from a backup", cur, c.st.Counter)
@@ -1119,12 +1090,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 
 // fetchBlob downloads the blob hash of entry id and opens it
 func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
-	code, blob, _, err := c.call("GET", "/blobs/"+hash, nil, nil)
+	blob, err := c.backend().GetBlob(hash)
 	if err != nil {
 		return nil, err
-	}
-	if code != http.StatusOK {
-		return nil, serverError(code, blob)
 	}
 	if blobHash(blob) != hash {
 		return nil, fmt.Errorf("blob of %s does not match its hash", short(id, 8))
@@ -1139,12 +1107,8 @@ func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string
 		return "", err
 	}
 	h := blobHash(blob)
-	code, b, _, err := c.call("PUT", "/blobs/"+h, blob, nil)
-	if err != nil {
+	if err := c.backend().PutBlob(h, blob); err != nil {
 		return "", err
-	}
-	if code != http.StatusNoContent {
-		return "", serverError(code, b)
 	}
 	return h, nil
 }
@@ -1383,15 +1347,12 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	code, rb, _, err := c.call("PUT", "/manifest", b, map[string]string{"If-Match": strconv.FormatUint(c.st.Counter, 10)})
-	if err != nil {
-		return false, err
-	}
-	if code == http.StatusPreconditionFailed {
+	err = c.backend().PutManifest(c.st.Counter, b)
+	if errors.Is(err, ErrCASLost) {
 		return false, nil
 	}
-	if code != http.StatusNoContent {
-		return false, serverError(code, rb)
+	if err != nil {
+		return false, err
 	}
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
 	c.st.Epoch, c.st.Skipped = epoch, skipped
@@ -1434,12 +1395,8 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	// the token goes first, a removed device that can still push could
 	// block the others with manifests no one trusts, a rerun after a lost
 	// race finds the device still listed and gets 404 here
-	code, b, _, err := c.call("DELETE", "/devices/"+removed.ID, nil, nil)
-	if err != nil {
+	if err := c.backend().RemoveDevice(removed.ID); err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
-	}
-	if code != http.StatusNoContent && code != http.StatusNotFound {
-		return nil, serverError(code, b)
 	}
 	gone := false
 	plan := func() (pushPlan, error) {
