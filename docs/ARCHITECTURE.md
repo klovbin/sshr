@@ -94,7 +94,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/extensions/<name>/` | an installed extension: its files and `sshr-ext.json` by the author | `sshr ext install`, `ext.Registry.Install` |
 | `~/.sshr/extension-data/<name>/` | what an extension writes, state and caches, it stays when the extension is removed | the extension itself, `SSHR_EXT_DATA` |
 | `~/.sshr/extensions/.pins.json` | the pin of each installed extension: source, commit, hash of every file, outside the folders so a folder cannot bring its own, an extension folder without a pin is not trusted | `ext.Registry.Install` under `~/.sshr/extensions/.lock` |
-| `~/.sshr/audit.jsonl`, `audit.jsonl.1` | the audit log of `sshr mcp` and `sshr serve` with `--audit`, one JSON line per start and end of an action, 0600, moves to `.1` at `audit_max_mb` | `audit.Log.Begin` appending under `audit.jsonl.lock` |
+| `~/.sshr/audit.jsonl`, `audit.jsonl.1` to `.5` | the audit log of `sshr mcp` and `sshr serve` with `--audit`, one JSON line per start and end of an action, 0600, moves to `.1` at `audit_max_mb`, the older ones move on and five stay | `audit.Log.Begin` appending under `audit.jsonl.lock` |
 | `~/.sshr/audit.key` | key of the command hashes in the audit log | `audit.Open` |
 | `~/.sshr/api-token` | token of the REST API on a TCP port | `apiToken` through `WriteFileAtomic` |
 | `$XDG_RUNTIME_DIR/sshr` or `~/.sshr/cm` | ControlMaster sockets, askpass and agent sockets, `api.sock` | ssh, `sshauth`, `vaultkey`, `sshr serve` |

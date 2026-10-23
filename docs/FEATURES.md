@@ -271,7 +271,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What:** `sshr mcp --audit` and `sshr serve --audit` (or `"audit_log": true`) write every upload, command, host change and tunnel to `~/.sshr/audit.jsonl`, one JSON line when it starts and one when it ends, with the client, the host and the exit code, off by default
 - **What for:** an assistant or a script acts on your servers while you look elsewhere, afterwards you want to know what it did and where
 - **Why it helps:** one file answers which host got which command at what time and from which client, a start without an end shows a run that was cut off
-- **Why this way:** a command is kept as its length, first word and a keyed hash unless `"audit_commands": "full"`, a command may carry a password, lines are appended under a lock so several sshr processes never mix them, the file moves to `.1` at `audit_max_mb` (10 MB), an action whose start cannot be written does not run, the log is off by default because it is one more file that grows and tells which servers were used when
+- **Why this way:** a command is kept as its length, first word and a keyed hash unless `"audit_commands": "full"`, a command may carry a password, lines are appended under a lock so several sshr processes never mix them, the file moves to `.1` at `audit_max_mb` (10 MB) and five old files stay, an action whose start cannot be written does not run, the log is off by default because it is one more file that grows and tells which servers were used when
 
 ## Installing
 

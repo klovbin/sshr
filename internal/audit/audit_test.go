@@ -96,7 +96,7 @@ func TestTwoProcesses(t *testing.T) {
 	}
 }
 
-// a full log moves to .1 and only two files stay (#101)
+// a full log moves to .1, the older ones move on, five stay (#101, #205)
 func TestRotation(t *testing.T) {
 	dir := t.TempDir()
 	l, err := Open(dir, 1, false)
@@ -112,10 +112,10 @@ func TestRotation(t *testing.T) {
 		end(0, 10, nil)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, FileName+"*"))
-	if len(files) != 3 { // the log, .1 and the lock file
+	if len(files) != keep+2 { // the log, .1 to .5 and the lock file
 		t.Fatalf("files %v", files)
 	}
-	for _, f := range []string{FileName, FileName + ".1"} {
+	for _, f := range []string{FileName, FileName + ".1", fmt.Sprintf("%s.%d", FileName, keep)} {
 		if fi, err := os.Stat(filepath.Join(dir, f)); err != nil || fi.Size() > 3<<10 {
 			t.Errorf("%s: %v %v", f, fi, err)
 		}

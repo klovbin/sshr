@@ -69,7 +69,7 @@ type Settings struct {
 	Vault string `json:"vault,omitempty"`
 	// AuditLog keeps ~/.sshr/audit.jsonl, a record of every upload,
 	// command and host change made through sshr mcp and sshr serve, off by
-	// default: it is one more file that grows (up to twice AuditMaxMB) and
+	// default: it is one more file that grows (up to six times AuditMaxMB) and
 	// tells which servers were used when
 	AuditLog bool `json:"audit_log,omitempty"`
 	// AuditMaxMB is the size the log reaches before it moves to

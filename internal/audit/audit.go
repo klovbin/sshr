@@ -167,7 +167,7 @@ func (l *Log) write(r Record) error {
 	if fi, err := os.Stat(l.path); err == nil && fi.Size()+int64(len(line)) > l.maxBytes {
 		// a rename that fails (a scanner holds the file on Windows) leaves
 		// the log a bit longer, the record still goes in
-		os.Rename(l.path, l.path+".1")
+		l.rotate()
 	}
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -178,6 +178,18 @@ func (l *Log) write(r Record) error {
 		err = cerr
 	}
 	return err
+}
+
+// keep is how many full logs stay next to the current one, an assistant
+// would have to fill all of them to push out an earlier record
+const keep = 5
+
+// rotate moves .1 to .2 and so on, the oldest goes, the log becomes .1
+func (l *Log) rotate() {
+	for i := keep - 1; i >= 1; i-- {
+		os.Rename(fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1))
+	}
+	os.Rename(l.path, l.path+".1")
 }
 
 // encode makes the line of r, the free text fields are cut until it fits
