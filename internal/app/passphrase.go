@@ -433,8 +433,19 @@ func sealedSecretsHere() bool {
 		if err != nil {
 			return true
 		}
-		if bytes.Contains(b, []byte(`"`+sealPrefix)) || bytes.Contains(b, []byte(`"`+sealPrefix2)) {
+		// only the sealed fields count, a note that starts like a sealed
+		// value does not, a file that does not parse counts as sealed
+		var h struct {
+			PasswordSealed string `json:"password_sealed"`
+			KeySealed      string `json:"key_sealed"`
+		}
+		if json.Unmarshal(b, &h) != nil {
 			return true
+		}
+		for _, v := range []string{h.PasswordSealed, h.KeySealed} {
+			if strings.HasPrefix(v, sealPrefix) || strings.HasPrefix(v, sealPrefix2) {
+				return true
+			}
 		}
 	}
 	return false

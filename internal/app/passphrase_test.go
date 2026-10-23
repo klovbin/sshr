@@ -454,3 +454,25 @@ func TestUseKeychainMovesEverySecret(t *testing.T) {
 		t.Error("secrets.json stayed")
 	}
 }
+
+// only the sealed fields of a host file count as sealed secrets, a note
+// that starts like a sealed value does not (#191)
+func TestSealedSecretsHereReadsFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	lock, err := vaultLockPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(filepath.Dir(lock), "hosts")
+	os.MkdirAll(dir, 0o700)
+	file := filepath.Join(dir, "a.json")
+	os.WriteFile(file, []byte(`{"id":"a","notes":"v1: rack 4"}`), 0o600)
+	if sealedSecretsHere() {
+		t.Error("a note was taken for a sealed secret")
+	}
+	os.WriteFile(file, []byte(`{"id":"a","password_sealed":"v2:abc"}`), 0o600)
+	if !sealedSecretsHere() {
+		t.Error("a sealed password was missed")
+	}
+}
