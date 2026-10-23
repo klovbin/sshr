@@ -63,6 +63,8 @@ function esc(s,   out, i, c, n) {
 	return out
 }
 function str(k, v) { return "\"" k "\":\"" esc(v) "\"" }
+# okport tells a port sshr takes, 1 to 65535 written in digits only
+function okport(p) { return p ~ /^[0-9]+$/ && p + 0 >= 1 && p + 0 <= 65535 }
 function hexval(c) { return index("0123456789ABCDEF", toupper(c)) - 1 }
 # decode turns the %XX escapes of a session file name back into bytes
 function decode(s,   out, i, a, b) {
@@ -88,9 +90,9 @@ function flush(   name, host, user, port, obj, at, jump, proto) {
 		if (user == "") user = substr(host, 1, at - 1)
 		host = substr(host, at + 1)
 	}
-	port = v["PortNumber"] + 0
+	port = v["PortNumber"]
 	obj = "{" str("key", name) "," str("name", name) "," str("host", host)
-	if (port > 0) obj = obj ",\"port\":" port
+	if (okport(port)) obj = obj ",\"port\":" (port + 0)
 	if (user != "") obj = obj "," str("user", user)
 	if (v["PublicKeyFile"] ~ /\.[pP][pP][kK]$/) {
 		printf "putty: %s: the key %s is a PuTTY key, convert it with puttygen key.ppk -O private-openssh -o key and set it in sshr\n", name, v["PublicKeyFile"] > "/dev/stderr"
@@ -100,7 +102,7 @@ function flush(   name, host, user, port, obj, at, jump, proto) {
 	if (v["ProxyMethod"] == "6" && v["ProxyHost"] != "") {
 		jump = v["ProxyHost"]
 		if (v["ProxyUsername"] != "") jump = v["ProxyUsername"] "@" jump
-		if (v["ProxyPort"] + 0 > 0 && v["ProxyPort"] + 0 != 22) jump = jump ":" (v["ProxyPort"] + 0)
+		if (okport(v["ProxyPort"]) && v["ProxyPort"] + 0 != 22) jump = jump ":" (v["ProxyPort"] + 0)
 		obj = obj "," str("jump", jump)
 	} else if (v["ProxyMethod"] != "" && v["ProxyMethod"] != "0") {
 		printf "putty: %s: its proxy (ProxyMethod %s) is not carried, sshr goes direct or through jump hosts\n", name, v["ProxyMethod"] > "/dev/stderr"

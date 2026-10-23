@@ -52,6 +52,7 @@ func TestRemminaImporter(t *testing.T) {
 		"v6 one.remmina":        "[remmina]\r\nname=v6\r\nprotocol=SSH\r\nserver=[fd00::1]:22\r\n",
 		"plain.remmina":         "[other]\nserver=wrong\n[remmina]\nprotocol=SSH\nserver=db.internal\n",
 		"notes.txt":             "[remmina]\nprotocol=SSH\nserver=skipped\n",
+		"bigport.remmina":       "[remmina]\nprotocol=SSH\nserver=big.example:99999999999999999999\n",
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(prof, name), []byte(body), 0o600); err != nil {
@@ -63,8 +64,11 @@ func TestRemminaImporter(t *testing.T) {
 	for _, h := range hosts {
 		got[h.Key] = h
 	}
-	if len(hosts) != 3 {
+	if len(hosts) != 4 {
 		t.Fatalf("hosts %+v", hosts)
+	}
+	if b := got["bigport"]; b.Host != "big.example" || b.Port != 0 {
+		t.Errorf("a port out of range is left out, the host stays: %+v", b)
 	}
 	web := got["1600000000000"]
 	if web.Name != `Web "prod"` || web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" ||
@@ -93,6 +97,7 @@ func TestPuttyImporter(t *testing.T) {
 		"web%20prod":               "HostName=deploy@10.0.0.5\nPortNumber=2222\nProtocol=ssh\nPublicKeyFile=/home/u/k.ppk\n",
 		"db":                       "HostName=db.internal\nUserName=app\nProtocol=ssh\nPortNumber=22\nProxyMethod=6\nProxyHost=gw\nProxyUsername=ops\nProxyPort=2200\nPublicKeyFile=/home/u/.ssh/id\n",
 		"tel":                      "HostName=x\nProtocol=telnet\n",
+		"frac":                     "HostName=f.example\nPortNumber=22.5\n",
 		"Default%20Settings":       "HostName=defaults\nProtocol=ssh\n",
 		"%D0%9F%D1%80%D0%BE%D0%B4": "HostName=s\r\nProtocol=ssh\r\nProxyMethod=3\r\nProxyHost=p\r\n",
 	}
@@ -105,8 +110,11 @@ func TestPuttyImporter(t *testing.T) {
 	for _, h := range runImporter(t, "putty", dir) {
 		got[h.Key] = h
 	}
-	if len(got) != 3 {
+	if len(got) != 4 {
 		t.Fatalf("hosts %+v", got)
+	}
+	if f := got["frac"]; f.Host != "f.example" || f.Port != 0 {
+		t.Errorf("a port that is no whole number is left out: %+v", f)
 	}
 	if w := got["web prod"]; w.Host != "10.0.0.5" || w.User != "deploy" || w.Port != 2222 || w.KeyFile != "" {
 		t.Errorf("web %+v, a .ppk key must be left out", w)

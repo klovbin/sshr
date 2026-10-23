@@ -48,17 +48,19 @@ function esc(s,   out, i, c, n) {
 	return out
 }
 function str(k, v) { return "\"" k "\":\"" esc(v) "\"" }
+# okport tells a port sshr takes, 1 to 65535 written in digits only
+function okport(p) { return p ~ /^[0-9]+$/ && p + 0 >= 1 && p + 0 <= 65535 }
 function flush(   host, port, key, i, tags, t, n, obj) {
 	if (file == "" || tolower(f["protocol"]) != "ssh" || f["server"] == "") return
 	host = f["server"]; port = 0
 	if (host ~ /^\[.*\]:[0-9]+$/) {
-		i = index(host, "]:"); port = substr(host, i + 2) + 0; host = substr(host, 2, i - 2)
+		i = index(host, "]:"); port = substr(host, i + 2); host = substr(host, 2, i - 2)
 	} else if (host ~ /^[^:]+:[0-9]+$/) {
-		i = index(host, ":"); port = substr(host, i + 1) + 0; host = substr(host, 1, i - 1)
+		i = index(host, ":"); port = substr(host, i + 1); host = substr(host, 1, i - 1)
 	}
 	key = file; sub(/^.*\//, "", key); sub(/\.remmina$/, "", key)
 	obj = "{" str("key", key) "," str("name", f["name"] != "" ? f["name"] : host) "," str("host", host)
-	if (port > 0) obj = obj ",\"port\":" port
+	if (okport(port)) obj = obj ",\"port\":" (port + 0)
 	if (f["username"] != "") obj = obj "," str("user", f["username"])
 	if (f["ssh_privatekey"] != "") obj = obj "," str("key_file", f["ssh_privatekey"])
 	tags = ""
