@@ -84,11 +84,10 @@ func apiListener(listen string, opts *api.Options) (net.Listener, string, error)
 		if err := removeStaleSocket(path); err != nil {
 			return nil, "", err
 		}
-		ln, err := net.Listen("unix", path)
+		ln, err := listenPrivate(path)
 		if err != nil {
 			return nil, "", err
 		}
-		os.Chmod(path, 0o600)
 		return ln, "unix:" + path, nil
 	}
 	host, _, err := net.SplitHostPort(listen)
