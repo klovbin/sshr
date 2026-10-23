@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zalando/go-keyring"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
@@ -64,8 +63,8 @@ func keychainError(err error) *KeychainError {
 	e := &KeychainError{Err: err}
 	if errors.Is(err, errKeyringTimeout) {
 		e.State = ErrKeychainTimeout
-	} else {
-		e.State = keychainState(err)
+	} else if sk, ok := keychain.(stateKeychain); ok {
+		e.State = sk.State(err)
 	}
 	return e
 }
@@ -421,29 +420,14 @@ type Keychain interface {
 	Delete(name string) error
 }
 
-// systemKeychain is the keychain of the system through go-keyring: Secret
-// Service on Linux, Keychain on macOS, Credential Manager on Windows
-type systemKeychain struct{}
-
-func (systemKeychain) Get(name string) (string, error) {
-	v, err := keyring.Get(keyringService, name)
-	return v, notFound(err)
-}
-func (systemKeychain) Set(name, value string) error { return keyring.Set(keyringService, name, value) }
-func (systemKeychain) Delete(name string) error {
-	return notFound(keyring.Delete(keyringService, name))
-}
-
 // errSecretNotFound is what a Keychain returns for a name it does not
 // hold, the code that uses a keychain does not depend on go-keyring
 var errSecretNotFound = errors.New("secret not found in the keychain")
 
-// notFound turns the not-found error of go-keyring into errSecretNotFound
-func notFound(err error) error {
-	if errors.Is(err, keyring.ErrNotFound) {
-		return errSecretNotFound
-	}
-	return err
+// stateKeychain is a Keychain that can tell a failure that means it is
+// missing or locked from any other
+type stateKeychain interface {
+	State(err error) error
 }
 
 // keychain is the keychain every secret of sshr goes through, every call
