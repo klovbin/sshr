@@ -362,3 +362,23 @@ func TestClearPasswordIsSealedAtStart(t *testing.T) {
 		t.Fatalf("%v %q", err, h.Password)
 	}
 }
+
+// with no keychain the start upgrade does not rewrite a clear-password
+// host (#178)
+func TestClearPasswordLeftAloneWithoutKeychain(t *testing.T) {
+	keyring.MockInitWithError(errors.New("no bus"))
+	resetVault(t)
+	t.Cleanup(keyring.MockInit)
+	s := &Store{Dir: t.TempDir()}
+	id := "0123456789abcdef0123456789abcdef"
+	path := filepath.Join(s.Dir, id+".json")
+	raw := `{"id":"` + id + `","name":"w","host":"10.0.0.1","port":22,"user":"u","password":"pw","created_at":"2026-10-01T00:00:00Z"}`
+	os.WriteFile(path, []byte(raw), 0o600)
+	before, _ := os.Stat(path)
+	time.Sleep(10 * time.Millisecond)
+	s.upgradeSeals()
+	after, _ := os.Stat(path)
+	if b, _ := os.ReadFile(path); string(b) != raw || !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("the host was written:\n%s", b)
+	}
+}

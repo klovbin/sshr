@@ -214,6 +214,17 @@ func (s *Store) upgradeSealsLocked() {
 	if err != nil {
 		return
 	}
+	// the vault key is asked for once, and only when a clear password is
+	// there to seal, a keychain out of reach does not make every start
+	// rewrite those hosts and wait for it
+	asked, ready := false, false
+	keyReady := func() bool {
+		if !asked {
+			_, err := VaultKey()
+			asked, ready = true, err == nil
+		}
+		return ready
+	}
 	for i := range hosts {
 		h := &hosts[i]
 		// a host of a newer format is not written by this build, opening
@@ -230,7 +241,7 @@ func (s *Store) upgradeSealsLocked() {
 		}
 		// a password an old version wrote in clear, save seals it once the
 		// keychain works and leaves it as it is while there is none
-		if h.PasswordMode == PasswordSaved && h.PlainPassword != "" && h.PasswordSealed == "" {
+		if h.PasswordMode == PasswordSaved && h.PlainPassword != "" && h.PasswordSealed == "" && keyReady() {
 			changed = true
 		}
 		// a stored key sealed before keys were bound to their destination
