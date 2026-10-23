@@ -285,6 +285,10 @@ func UseKeychainVault() error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	// the secrets moved out, a stale copy would come back on the next switch
+	if sp, err := secretsPath(); err == nil {
+		os.Remove(sp)
+	}
 	return nil
 }
 

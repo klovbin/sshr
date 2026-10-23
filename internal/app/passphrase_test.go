@@ -291,3 +291,26 @@ func TestVaultModeKeepsKeysThatSealed(t *testing.T) {
 		t.Fatalf("another keychain key was replaced: %v", err)
 	}
 }
+
+// a moved secret is removed from where it came from once the new place
+// reads it back (#187)
+func TestMoveSecretsRemovesTheSource(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	SecretSet("sync-device", []byte("seed"))
+	if _, err := VaultKey(); err != nil {
+		t.Fatal(err)
+	}
+	if err := MoveSecrets([]string{"sync-device"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keyring.Get(keyringService, "sync-device"); err == nil {
+		t.Error("the keychain copy stayed")
+	}
+	if v, err := (fileKeychain{}).Get("sync-device"); err != nil || v == "" {
+		t.Fatalf("the file does not hold it: %v", err)
+	}
+}

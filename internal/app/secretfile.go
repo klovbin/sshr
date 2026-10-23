@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -129,8 +130,10 @@ func secretStore(name string) Keychain {
 }
 
 // MoveSecrets moves the named secrets from the system keychain to the
-// passphrase vault file, or back when toFile is false, a name that is in
-// neither is skipped, used when the vault mode changes
+// passphrase vault file, or back when toFile is false: each value is read
+// back from the target and only then removed from the source, a name in
+// neither place is skipped, a keychain that is not there holds nothing to
+// move
 func MoveSecrets(names []string, toFile bool) error {
 	var from, to Keychain = keychain, fileKeychain{}
 	if !toFile {
@@ -138,13 +141,20 @@ func MoveSecrets(names []string, toFile bool) error {
 	}
 	for _, name := range names {
 		v, err := callStore(from, func(k Keychain) (string, error) { return k.Get(name) })
-		if errors.Is(err, keyring.ErrNotFound) {
+		if errors.Is(err, keyring.ErrNotFound) || (toFile && errors.Is(err, ErrKeychainMissing)) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
 		if _, err := callStore(to, func(k Keychain) (string, error) { return "", k.Set(name, v) }); err != nil {
+			return err
+		}
+		back, err := callStore(to, func(k Keychain) (string, error) { return k.Get(name) })
+		if err != nil || back != v {
+			return fmt.Errorf("the secret %s did not read back from its new place, it stays where it was", name)
+		}
+		if _, err := callStore(from, func(k Keychain) (string, error) { return "", k.Delete(name) }); err != nil && !errors.Is(err, keyring.ErrNotFound) {
 			return err
 		}
 	}
