@@ -553,6 +553,12 @@ func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 	}
 	if h.PasswordMode == PasswordSaved && h.Password == "" && h.PasswordSealed != "" && h.PasswordSealed == cur.PasswordSealed && destination(h) != destination(*cur) {
 		plain, err := unsealFor(cur.PasswordSealed, cur.ID, "password", destination(*cur))
+		if errors.Is(err, ErrSealBroken) {
+			// a field edited in the file by hand breaks the seal, an edit
+			// that puts the host back where the password was sealed for
+			// (sshr gateway --off after a gateway added by hand) opens it
+			plain, err = unsealFor(cur.PasswordSealed, cur.ID, "password", destination(h))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("the saved password of %s does not open, type it again: %v", cur.Name, err)
 		}

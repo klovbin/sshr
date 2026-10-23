@@ -122,7 +122,15 @@ func TestGatewayAndSavedPassword(t *testing.T) {
 	if err := Unlock(tampered); err == nil {
 		t.Fatal("the password opened for a gateway added outside sshr")
 	}
-	os.WriteFile(path, b, 0o600)
+	// sshr gateway --off removes the hand-edited gateway and the
+	// password opens again
+	if _, err := s.SetGateway(h.ID, ""); err != nil {
+		t.Fatalf("removing a gateway added by hand: %v", err)
+	}
+	back, _ := s.Find(h.ID)
+	if err := Unlock(back); err != nil || back.Password != "pw" {
+		t.Fatalf("after removing it: %v %q", err, back.Password)
+	}
 	if _, err := s.SetGateway(h.ID, "bastion"); err != nil {
 		t.Fatal(err)
 	}
