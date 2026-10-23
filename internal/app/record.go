@@ -3,11 +3,22 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
 )
+
+// hostFormat is the format of host files this build writes, a file
+// without "version" is format 1, a breaking change of a known field
+// raises it and adds a migration on load, a new optional field does not
+const hostFormat = 1
+
+// ErrNewerFormat means a file was written by a newer sshr in a format this
+// build reads but must not write, it would erase what it does not know
+var ErrNewerFormat = errors.New("newer_format")
 
 // hostKeys are the JSON names of the fields of Host in lower case,
 // encoding/json matches keys without regard to case, so "Key_Sealed" is
@@ -43,8 +54,13 @@ func decodeHost(b []byte) (Host, error) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return Host{}, err
 	}
+	if v, ok := raw["version"]; ok {
+		if err := json.Unmarshal(v, &h.format); err != nil {
+			return Host{}, fmt.Errorf("version: %v", err)
+		}
+	}
 	for k, v := range raw {
-		if hostKeys[strings.ToLower(k)] {
+		if hostKeys[strings.ToLower(k)] || k == "version" {
 			continue
 		}
 		if h.extra == nil {
@@ -59,6 +75,9 @@ func decodeHost(b []byte) (Host, error) {
 // kept keys of a newer sshr in name order, a host without them gives the
 // same bytes as a plain marshal
 func encodeHost(h *Host) ([]byte, error) {
+	if h.format > hostFormat {
+		return nil, fmt.Errorf("%w: %s was saved by a newer sshr (format %d), this one reads it but does not change it, update sshr to edit it", ErrNewerFormat, h.Name, h.format)
+	}
 	b, err := json.MarshalIndent(h, "", "  ")
 	if err != nil || len(h.extra) == 0 {
 		return b, err

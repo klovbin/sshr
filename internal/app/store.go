@@ -135,6 +135,9 @@ type Host struct {
 	// extra are the keys of the host file this build does not know, a
 	// field a newer sshr wrote, kept through every save (record.go)
 	extra map[string]json.RawMessage
+	// format is the "version" of the host file, 0 and 1 are today's, a
+	// newer one is read and never written (record.go)
+	format int
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -583,8 +586,9 @@ func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 	h.ID, h.CreatedAt, h.Rev = cur.ID, cur.CreatedAt, cur.Rev+1
 	// only MarkConnected sets it, a host built from form fields has none
 	h.LastConnected = cur.LastConnected
-	// the fields of a newer sshr are not in a form this build drew
-	h.extra = maps.Clone(cur.extra)
+	// the fields of a newer sshr are not in a form this build drew, and a
+	// file of a newer format stays unwritten
+	h.extra, h.format = maps.Clone(cur.extra), cur.format
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -626,6 +630,9 @@ func (s *Store) importHost(in Host) (*Host, error) {
 	// does not carry them yet
 	if cur != nil && in.extra == nil {
 		in.extra = maps.Clone(cur.extra)
+	}
+	if cur != nil && in.format < cur.format {
+		in.format = cur.format
 	}
 	// jump hosts win over a gateway, as in Update, refusing the host would
 	// repeat the same sync error on every run

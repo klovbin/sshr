@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,5 +112,39 @@ func TestHostRecordBytes(t *testing.T) {
 		if strings.EqualFold(k, "key_sealed") {
 			t.Fatalf("a cleared field came back as %s", k)
 		}
+	}
+}
+
+// a host file of a newer format is listed and can be connected to, it is
+// never written by this build and its bytes stay as they are
+func TestNewerHostFileIsReadOnly(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "web", Host: "10.0.0.5", User: "u", PasswordMode: PasswordAsk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.Dir, h.ID+".json")
+	b, _ := os.ReadFile(path)
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	m["version"] = 99
+	b, _ = json.Marshal(m)
+	os.WriteFile(path, b, 0o600)
+	got, err := s.Find(h.ID)
+	if err != nil || got.Host != "10.0.0.5" {
+		t.Fatalf("a newer file does not read: %v", err)
+	}
+	if _, err := s.Update(h.ID, Host{Name: "web", Host: "10.0.0.6", User: "u", PasswordMode: PasswordAsk}); !errors.Is(err, ErrNewerFormat) {
+		t.Errorf("update: %v", err)
+	}
+	if _, err := s.SetGateway(h.ID, "gw"); !errors.Is(err, ErrNewerFormat) {
+		t.Errorf("gateway: %v", err)
+	}
+	s.MarkConnected(h.ID)
+	if after, _ := os.ReadFile(path); string(after) != string(b) {
+		t.Fatalf("the newer file was written:\n%s", after)
+	}
+	if err := s.Delete(h.ID); err != nil {
+		t.Errorf("a newer host cannot be removed: %v", err)
 	}
 }
