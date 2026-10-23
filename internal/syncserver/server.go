@@ -415,12 +415,38 @@ func (s *Server) putBlob(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
 		fail(w, http.StatusBadRequest, "hash does not match the body")
 		return
 	}
+	path := filepath.Join(s.accountDir(a), "blobs", h)
+	// one account does not fill the disk of the server, a blob already
+	// stored costs nothing again
+	if _, err := os.Stat(path); err != nil {
+		if n, size := blobUsage(filepath.Dir(path)); n+1 > syncproto.MaxAccountBlobs || size+int64(len(data)) > syncproto.MaxAccountBytes {
+			fail(w, http.StatusInsufficientStorage, fmt.Sprintf("the account is full (%d blobs, %d MiB), the server keeps at most %d blobs and %d MiB per account", n, size>>20, syncproto.MaxAccountBlobs, syncproto.MaxAccountBytes>>20))
+			return
+		}
+	}
 	// blobs are content-addressed, writing one twice is harmless
-	if err := writeFile(filepath.Join(s.accountDir(a), "blobs", h), data); err != nil {
+	if err := writeFile(path, data); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// blobUsage counts the blobs in dir and their bytes
+func blobUsage(dir string) (int, int64) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0
+	}
+	var n int
+	var size int64
+	for _, e := range entries {
+		if fi, err := e.Info(); err == nil && fi.Mode().IsRegular() && hashPattern.MatchString(e.Name()) {
+			n++
+			size += fi.Size()
+		}
+	}
+	return n, size
 }
 
 func (s *Server) getBlob(w http.ResponseWriter, r *http.Request, _ ctxDevice) {

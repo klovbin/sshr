@@ -17,6 +17,10 @@ const FormatVersion = 1
 const (
 	MaxBlob     = 1 << 20
 	MaxManifest = 8 << 20
+	// MaxAccountBlobs and MaxAccountBytes cap what one account stores, a
+	// host is one blob of about 512 bytes, unused blobs go after a day
+	MaxAccountBlobs = 20000
+	MaxAccountBytes = 256 << 20
 )
 
 // Device is a device of an account, its ID is derived from its signing key

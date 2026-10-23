@@ -59,7 +59,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - stores device public keys, encrypted blobs and signed manifests, it cannot read hosts, it can only lose data or refuse service
 - each device has its own bearer token, the server keeps its SHA-256, new accounts and joins are limited to 10 an hour per address, a joined device does nothing until approved
 - a manifest is replaced only with `If-Match` on the current counter and only when every blob it names is stored, two devices pushing at once cannot overwrite each other
-- blobs are content addressed (SHA-256, 1 MiB at most), unused blobs go after a day, the last 1000 manifests are kept for the history check
+- blobs are content addressed (SHA-256, 1 MiB at most, 20000 and 256 MiB per account), unused blobs go after a day, the last 1000 manifests are kept for the history check
 - TLS 1.3 only, plain HTTP only on loopback, one server per data directory
 
 ## MCP and REST

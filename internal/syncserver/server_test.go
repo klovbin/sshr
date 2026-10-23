@@ -345,3 +345,32 @@ func TestHealth(t *testing.T) {
 		t.Fatalf("health of a read-only folder = %d", rec.Code)
 	}
 }
+
+// an account that holds MaxAccountBytes takes no new blob, a blob it
+// already has can be sent again (#149)
+func TestAccountQuota(t *testing.T) {
+	srv, _, a, c1 := newAccount(t)
+	put := func(data string) int {
+		sum := sha256.Sum256([]byte(data))
+		code, _, _ := c1.do("PUT", a+"/blobs/"+hex.EncodeToString(sum[:]), []byte(data), nil)
+		return code
+	}
+	if code := put("first"); code != 204 {
+		t.Fatalf("put = %d", code)
+	}
+	acc := strings.TrimPrefix(a, "/v1/accounts/")
+	big := filepath.Join(srv.accountDir(acc), "blobs", strings.Repeat("a", 64))
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a sparse file takes no disk but counts with its size
+	f.Truncate(syncproto.MaxAccountBytes)
+	f.Close()
+	if code := put("second"); code != http.StatusInsufficientStorage {
+		t.Fatalf("a full account took a blob: %d", code)
+	}
+	if code := put("first"); code != 204 {
+		t.Fatalf("a blob already stored was refused: %d", code)
+	}
+}
