@@ -626,10 +626,10 @@ func (s *Store) importHost(in Host) (*Host, error) {
 		}
 	}
 	in.PlainPassword, in.PasswordSealed = "", ""
-	// the fields of a newer sshr kept in the file here stay, a payload
-	// does not carry them yet
-	if cur != nil && in.extra == nil {
-		in.extra = maps.Clone(cur.extra)
+	// the unknown keys the payload carried, and the local ones of the
+	// host here
+	if cur != nil {
+		in.extra = mergeExtra(in.extra, cur.extra)
 	}
 	if cur != nil && in.format < cur.format {
 		in.format = cur.format

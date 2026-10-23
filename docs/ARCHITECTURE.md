@@ -139,7 +139,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 - a feature goes into `app` first, front ends only parse input and print output
 - every host from another device enters through `Store.Import`, which runs `FromOtherDevice` and `cleanHost`: a field that names a local secret (an item, a socket, a file) is reset in `FromOtherDevice`, a field that reaches a command line gets a validator in `cleanHost` and a check again where the line is built
-- `payloadOf` strips fields from what syncs, everything else syncs, a new field that must stay on this machine has to be added there
+- `payloadOf` strips fields from what syncs, everything else syncs, a new field that must stay on this machine has to be added there, the unknown keys of a host travel too (`app.HostPayloadJSON`), except those named `local_...`, which a newer sshr uses for what stays on one machine, a payload with no unknown keys (from an older sshr) leaves the keys here as they are
 - files are written with `app.WriteFileAtomic`, never `os.WriteFile` over the target
 - a host file is read with `decodeHost` and written with `encodeHost` (`internal/app/record.go`): a key this build does not know, a field a newer sshr wrote, is kept in `Host.extra` and written back, `Update` carries it from the file, a form that never drew the field cannot erase it, a file whose `version` is newer than `hostFormat` is read and connected to, every write of it fails with `ErrNewerFormat`, removing it works
 - secrets never reach logs, errors or output, `Host` must not be printed with `%v`, its `json:"-"` fields would show (nothing enforces this yet)

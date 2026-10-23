@@ -624,6 +624,13 @@ type payload struct {
 	Password string   `json:"password,omitempty"`
 }
 
+// payloadJSON is the payload on the wire, the host is written and read by
+// app, which carries the fields of a newer sshr
+type payloadJSON struct {
+	Host     json.RawMessage `json:"host"`
+	Password string          `json:"password,omitempty"`
+}
+
 func payloadOf(h app.Host) ([]byte, error) {
 	p := payload{Host: h}
 	// only a password saved in sshr is read, one in 1Password stays there
@@ -642,7 +649,11 @@ func payloadOf(h app.Host) ([]byte, error) {
 	// references to secrets of this machine stay here, the other devices
 	// do not take them anyway (app.FromOtherDevice)
 	p.Host.PasswordRef, p.Host.KeyRef = "", ""
-	return json.Marshal(p)
+	host, err := app.HostPayloadJSON(p.Host)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(payloadJSON{Host: host, Password: p.Password})
 }
 
 // localHash is keyed with the device key, the state file holds it and must
@@ -1078,10 +1089,15 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 	if err != nil {
 		return nil, err
 	}
-	var p payload
-	if err := json.Unmarshal(plain, &p); err != nil {
+	var wire payloadJSON
+	if err := json.Unmarshal(plain, &wire); err != nil {
 		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
 	}
+	host, err := app.HostFromPayloadJSON(wire.Host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
+	}
+	p := payload{Host: host, Password: wire.Password}
 	if p.Host.ID != id {
 		return nil, fmt.Errorf("%w: entry %s holds host %q", errBadPayload, short(id, 8), short(p.Host.ID, 40))
 	}

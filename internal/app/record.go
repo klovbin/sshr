@@ -102,3 +102,79 @@ func encodeHost(h *Host) ([]byte, error) {
 	out.WriteString("\n}")
 	return out.Bytes(), nil
 }
+
+// localPrefix starts the keys a newer sshr keeps on its own machine, they
+// never travel in sync, a sealed value bound to this machine would break
+// anywhere else
+const localPrefix = "local_"
+
+// HostPayloadJSON is h as it travels in sync, the fields of Host and the
+// kept keys of a newer sshr except the local ones, a host without such
+// keys gives the bytes of a plain marshal, so the local change check of
+// the sync sees no change
+func HostPayloadJSON(h Host) ([]byte, error) {
+	b, err := json.Marshal(h)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for k := range h.extra {
+		if !strings.HasPrefix(k, localPrefix) {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return b, nil
+	}
+	slices.Sort(keys)
+	var out bytes.Buffer
+	out.Write(b[:bytes.LastIndexByte(b, '}')])
+	for _, k := range keys {
+		name, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		var v bytes.Buffer
+		if err := json.Compact(&v, h.extra[k]); err != nil {
+			return nil, err
+		}
+		out.WriteByte(',')
+		out.Write(name)
+		out.WriteByte(':')
+		out.Write(v.Bytes())
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
+// HostFromPayloadJSON reads a host that came in sync, with the keys of a
+// newer sshr it carried, a local key in it is dropped
+func HostFromPayloadJSON(b []byte) (Host, error) {
+	h, err := decodeHost(b)
+	if err != nil {
+		return Host{}, err
+	}
+	for k := range h.extra {
+		if strings.HasPrefix(k, localPrefix) {
+			delete(h.extra, k)
+		}
+	}
+	return h, nil
+}
+
+// mergeExtra is what a host from another device keeps of the unknown keys:
+// what it carried, and the local keys of the host here, a payload with no
+// unknown keys at all (from an older sshr) keeps every key of the host
+// here, it could not have carried them
+func mergeExtra(in, cur map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(in) == 0 {
+		return maps.Clone(cur)
+	}
+	out := maps.Clone(in)
+	for k, v := range cur {
+		if strings.HasPrefix(k, localPrefix) {
+			out[k] = v
+		}
+	}
+	return out
+}

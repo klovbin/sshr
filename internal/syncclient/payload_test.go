@@ -1,6 +1,9 @@
 package syncclient
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -76,4 +79,43 @@ func TestHostFieldsAreClassified(t *testing.T) {
 			t.Errorf("%s (%s) reaches the payload: %s", name, tag, b)
 		}
 	}
+}
+
+// a field of a newer sshr travels with its host and survives an edit on
+// another device, a local_ field stays on the device that wrote it (#97)
+func TestSyncCarriesUnknownFields(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	writeRaw(t, w.a.Store, web.ID, func(m map[string]any) {
+		m["future"] = map[string]any{"x": 1}
+		m["local_secret"] = "only here"
+	})
+	h, _ := w.a.Store.Find(web.ID)
+	h.Port = 2201
+	_, err := w.a.Store.Update(web.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	onB := readRaw(t, w.b.Store, web.ID)
+	if string(onB["future"]) != `{"x":1}` || onB["local_secret"] != nil {
+		t.Fatalf("on b: %v", onB)
+	}
+	hb, _ := w.b.Store.Find(web.ID)
+	_, err = w.b.Store.Update(web.ID, app.Host{Name: hb.Name, Host: hb.Host, Port: 2202, User: hb.User, PasswordMode: hb.PasswordMode, Rev: hb.Rev})
+	must(t, err)
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	onA := readRaw(t, w.a.Store, web.ID)
+	if string(onA["future"]) != `{"x":1}` || string(onA["local_secret"]) != `"only here"` || string(onA["port"]) != "2202" {
+		t.Fatalf("on a: %v\n%s", onA, w.log.String())
+	}
+}
+
+func readRaw(t *testing.T, s *app.Store, id string) map[string]json.RawMessage {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(s.Dir, id+".json"))
+	must(t, err)
+	var m map[string]json.RawMessage
+	must(t, json.Unmarshal(b, &m))
+	return m
 }
