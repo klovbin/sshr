@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"sshr.dev/internal/app"
 )
@@ -149,5 +151,28 @@ func TestAPITunnelCommandLine(t *testing.T) {
 	want := "batch=1 -i /k -p 22 -o BatchMode=yes -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 5432:localhost:5432 -- u@10.0.0.1\n"
 	if string(got) != want {
 		t.Errorf("ssh ran\n%q\nwant\n%q", got, want)
+	}
+}
+
+// uploads and commands take one of maxRunning slots, the next one waits
+// until a slot is free or its client goes away (#101)
+func TestAPIRunLimit(t *testing.T) {
+	a := &api{slots: make(chan struct{}, maxRunning)}
+	for i := 0; i < maxRunning; i++ {
+		a.slots <- struct{}{}
+	}
+	ran := false
+	h := a.limit(func(w http.ResponseWriter, r *http.Request) { ran = true })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest("POST", "/v1/hosts/web/run", nil).WithContext(ctx))
+	if ran || rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a ninth request ran: %v %d", ran, rec.Code)
+	}
+	<-a.slots
+	h(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/hosts/web/run", nil))
+	if !ran || len(a.slots) != maxRunning-1 {
+		t.Fatalf("a free slot was not used or not given back: %v %d", ran, len(a.slots))
 	}
 }

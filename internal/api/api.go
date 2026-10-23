@@ -42,16 +42,16 @@ type Server struct {
 
 // New makes the API for store
 func New(store *app.Store, opts Options) *Server {
-	a := &api{store: store, opts: opts, tunnels: map[string]*tunnel{}}
+	a := &api{store: store, opts: opts, tunnels: map[string]*tunnel{}, slots: make(chan struct{}, maxRunning)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/hosts", a.listHosts)
 	mux.HandleFunc("POST /v1/hosts", a.addHost)
 	mux.HandleFunc("GET /v1/hosts/{host}", a.getHost)
 	mux.HandleFunc("DELETE /v1/hosts/{host}", a.deleteHost)
 	mux.HandleFunc("GET /v1/hosts/{host}/connect", a.connect)
-	mux.HandleFunc("POST /v1/hosts/{host}/upload", a.upload)
-	mux.HandleFunc("POST /v1/hosts/{host}/run", a.run)
-	mux.HandleFunc("POST /v1/hosts/{host}/tunnels", a.openTunnel)
+	mux.HandleFunc("POST /v1/hosts/{host}/upload", a.limit(a.upload))
+	mux.HandleFunc("POST /v1/hosts/{host}/run", a.limit(a.run))
+	mux.HandleFunc("POST /v1/hosts/{host}/tunnels", a.limit(a.openTunnel))
 	mux.HandleFunc("GET /v1/tunnels", a.listTunnels)
 	mux.HandleFunc("DELETE /v1/tunnels/{id}", a.closeTunnel)
 	return &Server{Handler: a.guard(mux), a: a}
@@ -73,6 +73,27 @@ type api struct {
 	// tunnels are ssh -N processes started through the API, they live as
 	// long as the server
 	tunnels map[string]*tunnel
+	slots   chan struct{}
+}
+
+// maxRunning is how many uploads, commands and tunnel starts run at once,
+// as in sshr mcp, an upload holds its body in memory and a burst of them
+// would take gigabytes
+const maxRunning = 8
+
+// limit runs next in a free slot, a request waits for one until its client
+// goes away
+func (a *api) limit(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case a.slots <- struct{}{}:
+		case <-r.Context().Done():
+			fail(w, http.StatusServiceUnavailable, errors.New("too many uploads and commands at once"))
+			return
+		}
+		defer func() { <-a.slots }()
+		next(w, r)
+	}
 }
 
 // guard checks the token and refuses requests a browser page could send:
