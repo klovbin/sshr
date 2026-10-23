@@ -7,6 +7,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// lockOffset is the byte both locks take, far past the pid waitLock writes
+// at the start, a Windows lock keeps other processes from reading the bytes
+// it covers, LockFile and WaitLock on one path exclude each other
+const lockOffset = 1 << 30
+
 // lockFile holds an exclusive lock on path until the returned func runs
 func lockFile(path string) (func(), error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -14,7 +19,7 @@ func lockFile(path string) (func(), error) {
 		return nil, err
 	}
 	h := windows.Handle(f.Fd())
-	ol := new(windows.Overlapped)
+	ol := &windows.Overlapped{Offset: lockOffset}
 	if err := windows.LockFileEx(h, windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, ol); err != nil {
 		f.Close()
 		return nil, err
@@ -33,9 +38,7 @@ func tryLock(path string) (*os.File, func(), error) {
 		return nil, nil, err
 	}
 	h := windows.Handle(f.Fd())
-	// the locked byte lies far past the pid written at the start, a Windows
-	// lock keeps other processes from reading the bytes it covers
-	ol := &windows.Overlapped{Offset: 1 << 30}
+	ol := &windows.Overlapped{Offset: lockOffset}
 	if err := windows.LockFileEx(h, windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, ol); err != nil {
 		f.Close()
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_IO_PENDING) {
