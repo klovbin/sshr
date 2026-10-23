@@ -140,12 +140,17 @@ func readSettings() (Settings, error) {
 		}
 		return s, err
 	}
-	if err := json.Unmarshal(b, &s); err != nil {
+	// the format first: a newer sshr may have changed the type of a known
+	// field, the file must then read as newer and not as damaged, or a save
+	// would replace it with defaults
+	format, ferr := formatOf(b)
+	if err := json.Unmarshal(b, &s); err != nil && (ferr != nil || format <= settingsFormat) {
 		return Settings{Lang: "ru"}, err
 	}
-	if s.format, err = formatOf(b); err != nil {
-		return Settings{Lang: "ru"}, err
+	if ferr != nil {
+		return Settings{Lang: "ru"}, ferr
 	}
+	s.format = format
 	if s.extra, err = unknownKeys(b, settingsKeys); err != nil {
 		return Settings{Lang: "ru"}, err
 	}

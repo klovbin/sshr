@@ -168,4 +168,17 @@ func TestSettingsKeepKeysItDoesNotKnow(t *testing.T) {
 	if err := SaveSettings(Settings{Lang: "ru"}); !errors.Is(err, ErrNewerFormat) {
 		t.Errorf("a newer settings file was written over: %v", err)
 	}
+	// a newer format that changed the type of a known field reads as newer,
+	// not as damaged, and is not replaced (#160)
+	newer := `{"lang":"en","version":2,"op_accounts":{"changed":true}}`
+	os.WriteFile(path, []byte(newer), 0o600)
+	if st, err := LoadSettings(); err != nil || st.Lang != "en" {
+		t.Errorf("a newer file does not read: %v %+v", err, st)
+	}
+	if err := SaveSettings(Settings{Lang: "ru"}); !errors.Is(err, ErrNewerFormat) {
+		t.Errorf("a newer file with a changed field was written over: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != newer {
+		t.Errorf("settings.json changed: %s", b)
+	}
 }
