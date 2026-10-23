@@ -17,21 +17,37 @@ import (
 type storeFlags struct {
 	backend string
 	s3      s3store.Config
+	// given says that one of them was on the command line
+	given bool
+}
+
+// flagValue is the value after the flag at args[i], a missing one or the
+// next flag is an error, --bucket --key-id K must not make a bucket named
+// --key-id
+func flagValue(args []string, i *int) (string, error) {
+	if *i+1 >= len(args) || strings.HasPrefix(args[*i+1], "-") {
+		return "", fmt.Errorf("%s needs a value", args[*i])
+	}
+	*i++
+	return args[*i], nil
 }
 
 // take reads the flag at args[i] and its value, it says whether it was one
 // of the store flags
-func (f *storeFlags) take(args []string, i *int) bool {
+func (f *storeFlags) take(args []string, i *int) (bool, error) {
 	dst := map[string]*string{
 		"--backend": &f.backend, "--endpoint": &f.s3.Endpoint, "--bucket": &f.s3.Bucket,
 		"--prefix": &f.s3.Prefix, "--region": &f.s3.Region, "--key-id": &f.s3.KeyID,
 	}[args[*i]]
-	if dst == nil || *i+1 >= len(args) {
-		return false
+	if dst == nil {
+		return false, nil
 	}
-	*i++
-	*dst = args[*i]
-	return true
+	v, err := flagValue(args, i)
+	if err != nil {
+		return true, err
+	}
+	*dst, f.given = v, true
+	return true, nil
 }
 
 // s3Secret is the secret key of the bucket, from SSHR_S3_SECRET or asked

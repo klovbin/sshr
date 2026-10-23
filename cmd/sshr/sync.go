@@ -47,16 +47,22 @@ func cmdSync(store *app.Store, args []string) {
 	var rest []string
 	var sf storeFlags
 	for i := 0; i < len(args); i++ {
-		if sf.take(args, &i) {
+		if ok, err := sf.take(args, &i); err != nil {
+			fatal(err)
+		} else if ok {
 			continue
 		}
 		switch a := args[i]; {
-		case a == "--server" && i+1 < len(args):
-			i++
-			server = args[i]
-		case a == "--name" && i+1 < len(args):
-			i++
-			name = args[i]
+		case a == "--server" || a == "--name":
+			v, err := flagValue(args, &i)
+			if err != nil {
+				fatal(err)
+			}
+			if a == "--server" {
+				server = v
+			} else {
+				name = v
+			}
 		case a == "--accept-reset":
 			c.AcceptReset = true
 		case strings.HasPrefix(a, "-"):
@@ -65,6 +71,9 @@ func cmdSync(store *app.Store, args []string) {
 		default:
 			rest = append(rest, a)
 		}
+	}
+	if sf.given && sub != "init" && sub != "join" {
+		fatal(fmt.Errorf("--backend and the S3 flags are for sshr sync init and join, later runs read them from the sync state"))
 	}
 	switch sub {
 	case "init":
@@ -105,7 +114,7 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		if server == "" || len(rest) != 1 {
-			fatal(fmt.Errorf("sshr sync join --server <url> <code>"))
+			fatal(fmt.Errorf("sshr sync join --server <url> <code>, or the --backend s3 flags of sshr sync invite"))
 		}
 		fp, err := c.Join(server, rest[0], name)
 		if err != nil {

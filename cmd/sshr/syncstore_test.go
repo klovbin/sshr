@@ -17,13 +17,25 @@ func TestStoreFlags(t *testing.T) {
 	var f storeFlags
 	var rest []string
 	for i := 0; i < len(args); i++ {
-		if !f.take(args, &i) {
+		ok, err := f.take(args, &i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
 			rest = append(rest, args[i])
 		}
 	}
 	want := s3store.Config{Endpoint: "https://e.example", Bucket: "b", Prefix: "p", Region: "eu", KeyID: "K"}
-	if f.backend != "s3" || f.s3 != want || strings.Join(rest, " ") != "--name x" {
+	if f.backend != "s3" || f.s3 != want || !f.given || strings.Join(rest, " ") != "--name x" {
 		t.Fatalf("got %+v rest %v", f, rest)
+	}
+	// the next flag or the end is not a value (#235)
+	for _, bad := range [][]string{{"--bucket", "--key-id", "K"}, {"--bucket"}} {
+		var g storeFlags
+		i := 0
+		if ok, err := g.take(bad, &i); !ok || err == nil || g.s3.Bucket != "" {
+			t.Errorf("%v: took %+v, %v", bad, g, err)
+		}
 	}
 
 	t.Setenv("SSHR_S3_SECRET", "s")
@@ -74,5 +86,24 @@ func TestJoinFlagsAndOpenStore(t *testing.T) {
 	}
 	if _, err := openStore(*ref, ""); err == nil {
 		t.Error("opened a bucket without a secret")
+	}
+}
+
+// a store flag outside init and join, or one without a value, stops the
+// command before it reads the sync state or asks for a secret (#235)
+func TestSyncStoreFlagMistakes(t *testing.T) {
+	home := t.TempDir()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"sync", "pull", "--bucket", "b"}, "are for sshr sync init and join"},
+		{[]string{"sync", "init", "--backend", "s3", "--endpoint", "https://e.example", "--bucket", "--key-id", "K"}, "--bucket needs a value"},
+		{[]string{"sync", "join", "--server"}, "--server needs a value"},
+	} {
+		_, errOut, code := sshrIn(t, home, c.args...)
+		if code == 0 || !strings.Contains(errOut, c.want) {
+			t.Errorf("%v: %d %q, want %q", c.args, code, errOut, c.want)
+		}
 	}
 }
