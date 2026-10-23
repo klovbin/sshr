@@ -61,9 +61,10 @@ $f"
 	done
 done
 
-# bytes, not characters: %XX of a UTF-8 name decode one byte at a time,
-# gawk in a UTF-8 locale would turn each into a character of its own
+# bytes, not characters: a session file may hold any byte and gawk in a
+# UTF-8 locale would stop matching on one that is no UTF-8
 printf '%s\n' "$files" | LC_ALL=C awk '
+BEGIN { ascii = " !\"#$%&\047()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~" }
 function esc(s,   out, i, c, n) {
 	out = ""
 	n = length(s)
@@ -94,21 +95,59 @@ function shown(s,   out, i, c) {
 # okport tells a port sshr takes, 1 to 65535 written in digits only
 function okport(p) { return p ~ /^[0-9]+$/ && p + 0 >= 1 && p + 0 <= 65535 }
 function hexval(c) { return index("0123456789ABCDEF", toupper(c)) - 1 }
-# decode turns the %XX escapes of a session file name back into bytes
-function decode(s,   out, i, a, b) {
+# hex4 writes n as four lower case hex digits, for a JSON \u escape
+function hex4(n,   out, i) {
 	out = ""
+	for (i = 0; i < 4; i++) { out = substr("0123456789abcdef", n % 16 + 1, 1) out; n = int(n / 16) }
+	return out
+}
+# jsonname is the session name of a file name for a JSON string: the %XX
+# escapes PuTTY writes are decoded as UTF-8 and every character past
+# ASCII becomes a \u escape, so no awk turns a byte into a character of
+# its own, control characters are dropped, empty when the name is not
+# valid UTF-8 or holds a byte PuTTY would have escaped
+function jsonname(s,   n, b, i, c, a, h, out, cp, need, k) {
+	n = 0
 	for (i = 1; i <= length(s); i++) {
-		if (substr(s, i, 1) == "%" && i + 2 <= length(s)) {
-			a = hexval(substr(s, i + 1, 1)); b = hexval(substr(s, i + 2, 1))
-			if (a >= 0 && b >= 0) { out = out sprintf("%c", a * 16 + b); i += 2; continue }
+		c = substr(s, i, 1)
+		if (c == "%" && i + 2 <= length(s)) {
+			a = hexval(substr(s, i + 1, 1)); h = hexval(substr(s, i + 2, 1))
+			if (a < 0 || h < 0) return ""
+			b[++n] = a * 16 + h; i += 2
+		} else if (index(ascii, c) > 0) {
+			b[++n] = index(ascii, c) + 31
+		} else return ""
+	}
+	out = ""
+	for (i = 1; i <= n; i++) {
+		cp = b[i]
+		if (cp < 128) need = 0
+		else if (cp >= 194 && cp <= 223) { need = 1; cp -= 192 }
+		else if (cp >= 224 && cp <= 239) { need = 2; cp -= 224 }
+		else if (cp >= 240 && cp <= 244) { need = 3; cp -= 240 }
+		else return ""
+		for (k = 1; k <= need; k++) {
+			if (i + k > n || b[i + k] < 128 || b[i + k] > 191) return ""
+			cp = cp * 64 + b[i + k] - 128
 		}
-		out = out substr(s, i, 1)
+		i += need
+		if ((need == 2 && cp < 2048) || (need == 3 && (cp < 65536 || cp > 1114111)) || (cp >= 55296 && cp <= 57343)) return ""
+		if (cp < 32 || (cp >= 127 && cp <= 159)) continue
+		if (cp == 34) out = out "\\\""
+		else if (cp == 92) out = out "\\\\"
+		else if (cp < 127) out = out substr(ascii, cp - 31, 1)
+		else if (cp < 65536) out = out "\\u" hex4(cp)
+		else { cp -= 65536; out = out "\\u" hex4(55296 + int(cp / 1024)) "\\u" hex4(56320 + cp % 1024) }
 	}
 	return out
 }
-function flush(   name, host, user, port, obj, at, jump, proto) {
-	name = file; sub(/^.*\//, "", name); name = decode(name)
-	if (name == "Default Settings") return
+function flush(   name, title, host, user, port, obj, at, jump, proto) {
+	# the file name as it is on disk is the key, two names that decode the
+	# same (A and %41) stay two hosts
+	name = file; sub(/^.*\//, "", name)
+	if (name == "Default%20Settings") return
+	title = jsonname(name)
+	if (title == "") title = esc(name)
 	proto = tolower(v["Protocol"])
 	if (proto != "" && proto != "ssh" && proto != "default") return
 	host = v["HostName"]; user = v["UserName"]
@@ -119,7 +158,7 @@ function flush(   name, host, user, port, obj, at, jump, proto) {
 		host = substr(host, at + 1)
 	}
 	port = v["PortNumber"]
-	obj = "{" str("key", name) "," str("name", name) "," str("host", host)
+	obj = "{" str("key", name) ",\"name\":\"" title "\"," str("host", host)
 	if (okport(port)) obj = obj ",\"port\":" (port + 0)
 	if (user != "") obj = obj "," str("user", user)
 	if (v["PublicKeyFile"] ~ /\.[pP][pP][kK]$/) {

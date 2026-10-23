@@ -125,13 +125,13 @@ func TestPuttyImporter(t *testing.T) {
 	if f := got["frac"]; f.Host != "f.example" || f.Port != 0 {
 		t.Errorf("a port that is no whole number is left out: %+v", f)
 	}
-	if w := got["web prod"]; w.Host != "10.0.0.5" || w.User != "deploy" || w.Port != 2222 || w.KeyFile != "" {
+	if w := got["web%20prod"]; w.Name != "web prod" || w.Host != "10.0.0.5" || w.User != "deploy" || w.Port != 2222 || w.KeyFile != "" {
 		t.Errorf("web %+v, a .ppk key must be left out", w)
 	}
 	if d := got["db"]; d.Jump != "ops@gw:2200" || d.KeyFile != "/home/u/.ssh/id" || d.User != "app" {
 		t.Errorf("db %+v", d)
 	}
-	if p, ok := got["Прод"]; !ok || p.Host != "s" || p.Jump != "" {
+	if p, ok := got["%D0%9F%D1%80%D0%BE%D0%B4"]; !ok || p.Name != "Прод" || p.Host != "s" || p.Jump != "" {
 		t.Errorf("a UTF-8 session name or an HTTP proxy: %+v", got)
 	}
 	for _, h := range got {
@@ -227,5 +227,30 @@ func TestImportersDropControlCharacters(t *testing.T) {
 	os.WriteFile(filepath.Join(rdir, "r.remmina"), []byte("[remmina]\nname=we\x7fb\xc2\x9b\x1b[0m\nprotocol=SSH\nserver=r.example\n"), 0o600)
 	if hosts := runImporter(t, "remmina", rdir); len(hosts) != 1 || hosts[0].Name != "web[0m" {
 		t.Errorf("remmina %+v", hosts)
+	}
+}
+
+// the key is the file name as PuTTY wrote it, so names that decode alike
+// stay apart, a name that is not UTF-8 keeps its escapes
+func TestPuttyImporterKeysAndNames(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"A", "%41", "%C8", "%C9", "q%22b%5C", "%F0%9F%98%80"} {
+		os.WriteFile(filepath.Join(dir, n), []byte("HostName=h.example\n"), 0o600)
+	}
+	got := map[string]string{}
+	for _, h := range runImporter(t, "putty", dir) {
+		got[h.Key] = h.Name
+	}
+	want := map[string]string{"A": "A", "%41": "A", "%C8": "%C8", "%C9": "%C9", "q%22b%5C": `q"b\`, "%F0%9F%98%80": "😀"}
+	if len(got) != len(want) {
+		t.Fatalf("%q", got)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s: name %q, want %q", k, got[k], v)
+		}
+	}
+	if HostID("putty", "A") == HostID("putty", "%41") {
+		t.Error("two files share a host")
 	}
 }
