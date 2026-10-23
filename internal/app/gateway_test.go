@@ -227,3 +227,26 @@ func TestImportDropsGatewayOfJumpHost(t *testing.T) {
 		t.Fatalf("import: %+v, %v", got, err)
 	}
 }
+
+// a file edited by hand to send the host elsewhere and through another
+// gateway keeps its password locked whatever is saved over it
+func TestTamperedHostKeepsPasswordLocked(t *testing.T) {
+	useMockKeychain(t)
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "w", Host: "10.0.0.1", User: "u", PasswordMode: PasswordSaved, Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.Dir, h.ID+".json")
+	b, _ := os.ReadFile(path)
+	evil := strings.Replace(string(b), `"10.0.0.1"`, `"203.0.113.66"`, 1)
+	evil = strings.Replace(evil, `"user": "u",`, `"user": "u", "gateway": "evil@203.0.113.67",`, 1)
+	os.WriteFile(path, []byte(evil), 0o600)
+	if _, err := s.SetGateway(h.ID, ""); err == nil {
+		t.Fatal("the password was resealed for an address changed by hand")
+	}
+	got, _ := s.Find(h.ID)
+	if err := Unlock(got); err == nil || got.Password != "" {
+		t.Fatalf("the password opened: %v %q", err, got.Password)
+	}
+}
