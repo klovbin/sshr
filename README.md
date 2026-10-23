@@ -55,4 +55,6 @@ Bugs and ideas go to [issues](https://github.com/klovbin/sshr/issues), build wit
 
 ## License
 
-[MIT](LICENSE)
+Copyright (c) 2026 klovbin
+
+sshr is released under the [MIT License](LICENSE). You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, provided the copyright notice and permission notice are included in all copies or substantial portions of the software. The software is provided "as is", without warranty of any kind.
