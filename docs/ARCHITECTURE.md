@@ -125,15 +125,15 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 | Question | Decision | Instead of |
 |----|----|----|
-| storage | one JSON file per host, a cross-process lock for the concurrency (planned change 1) | SQLite: a broken file costs one host, sync entries map to files |
+| storage | one JSON file per host, a cross-process lock for the concurrency (#95) | SQLite: a broken file costs one host, sync entries map to files |
 | connecting | system ssh as a child process | an SSH library: known_hosts, config, FIDO, agents and fixes come with OpenSSH, an embedded transport only for phones |
 | processes | no background service | a daemon: nothing needs to stay up, `serve` and `mcp` run on demand |
-| core boundary | concrete functions of `app`, one interface where the core calls out to secrets (planned change 4), tests use fake binaries on PATH instead of a process interface | a facade with interfaces for every front end |
+| core boundary | concrete functions of `app`, one interface where the core calls out to secrets (planned change 4), tests use fake binaries on PATH instead of a process interface, the app still gets `app.Host` with its in-memory secret fields, API and MCP get `HostSummary` | a facade with interfaces for every front end |
 | packages | few packages, `app` split only once its seams are stable | many small packages early |
-| settings | JSON | TOML: one format, a handful of fields |
-| conflicts | keep both, the later change keeps the name | last writer wins per field: host, user and jump must never be picked silently |
+| settings | JSON with a version and unknown keys kept (#97) | TOML: one format, a handful of fields, the version rules apply either way |
+| conflicts | keep both, the later change keeps the name, a three-way merge of changes to different fields is deferred (#152) | last writer wins per field: host, user and jump must never be picked silently |
 | extensions | executables with a fixed protocol, installed with a pinned hash (#105) | Go plugins or WASM |
-| updates | GitHub releases with a pinned signing key | the sync server: anyone can run one |
+| updates | GitHub releases with a pinned signing key, planned (#146), today a build attestation | the sync server: anyone can run one |
 
 ## Rules for new code
 
@@ -144,18 +144,19 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - secrets never reach logs, errors or output, `Host` must not be printed with `%v`, its `json:"-"` fields would show (nothing enforces this yet)
 - a feature with a cost is off by default, with a setting, a flag and a fallback
 - tests use fake `ssh`, `op` and `bw` on PATH and a local sync server, never real hosts, `.github/e2e.sh` checks against a real sshd
+- one host that does not unseal or decode is skipped with a note, it never stops a sync or an import of the others (#144, #136)
 
 ## Planned changes
 
-In this order, each one its own issue and commits:
+In this order, each one its own issue and commits, the order was checked against the research and the code (`opus-check-2026-10-23`), the bugs #144 and #145 come before 3:
 
 1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is fixed by #106 and #107
 2. (#96) done: `PlanSession` and `SessionPlan.Command` in `app` plan connect, tunnel and the API tunnels, the CLI keeps running the process and its signals, the app can build its connect on it (#90)
-3. (#97) a versioned host record on disk and a sync payload that keeps fields it does not know, before any release, so an older device does not erase what a newer one wrote
-4. (#98) a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works
+3. (#97) a versioned host record on disk and a sync payload that keeps fields it does not know, a file newer than the binary is read and not written, settings, sync state and extension pins get the same, the manifest version stays compatible (a field is added without a bump), the test that every `Host` field is synced, stripped or reset comes with it, a release blocker
+4. (#98) a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, keychain states told apart (locked, missing, timeout), keys stored in sshr sealed for their destination like passwords, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works
 5. (#99) move `LockFile`, `WriteFileAtomic` into a small leaf package, so `cmd/sshr-sync` and `syncserver` stop linking or copying the core, `.pub` files through it too
-6. (#100) rules as tests: no `os/exec` in `ui`, `mcp`, `syncserver`, Gio only in `ui`, a test that every `Host` field is classified as synced, stripped or reset, a redacting format for `Host`, CODEOWNERS for `internal/ui`
-7. (#101) an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, the API token on the unix socket too
-8. (#102) done: `scripts/release.sh` and `.github/workflows/release.yml` build the six CLI files on a tag, checksums and a build attestation, the GUI is not in them, packages (#17) are next
+6. (#100) rules as tests, before 9: no `os/exec` in `ui`, `mcp`, `syncserver` and the packages a phone build needs, Gio only in `ui`, a test that every `Host` field is classified as synced, stripped or reset, a redacting format for `Host`, CODEOWNERS for `internal/ui`
+7. (#101) an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, approval that fails closed, remote output marked as data, the API token on the unix socket too, a concurrency limit for REST
+8. (#102) done in part: `scripts/release.sh` and `.github/workflows/release.yml` build the six CLI files on a tag, checksums and a build attestation, the GUI is not in them, the pinned-key signature and its check in install.sh are #146, packages (#17) are next
 9. (#103) split `app` by its areas once 2 and 4 have settled the seams
-10. (#128) a sync backend interface in `syncclient`, `sshr-sync` over HTTP as its first implementation, then Supabase, 1Password and a synced folder, after 3 so every backend carries the versioned payload
+10. (#128) a sync backend interface in `syncclient`, `sshr-sync` over HTTP as its first implementation, then Supabase, 1Password and a synced folder, after 3 so every backend carries the versioned payload, a backend must offer compare and swap on the manifest or the protocol must say how a fork merges, a fork looks like a rollback today and stops sync
