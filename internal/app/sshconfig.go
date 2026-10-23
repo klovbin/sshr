@@ -63,15 +63,16 @@ func collectAliases(path, base string, depth int, open map[string]bool, add func
 	}
 	open[abs] = true
 	defer delete(open, abs)
-	f, err := os.Open(path)
+	// sshr itself rewrites ~/.ssh/config and the export, on Windows a read
+	// during that fails unless it waits
+	data, err := ReadFileShared(path)
 	if err != nil {
 		if os.IsNotExist(err) && depth > 0 {
 			return nil
 		}
 		return err
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
 		key, args := configLine(sc.Text())
 		switch key {

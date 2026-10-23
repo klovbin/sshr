@@ -118,7 +118,9 @@ func apiToken() (token, path string, err error) {
 		return "", "", err
 	}
 	path = filepath.Join(home, ".sshr", "api-token")
-	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) >= 32 {
+	// a read during a rewrite by another sshr serve fails on Windows, a new
+	// token here would leave that one with a stale token
+	if b, err := app.ReadFileShared(path); err == nil && len(strings.TrimSpace(string(b))) >= 32 {
 		return strings.TrimSpace(string(b)), path, nil
 	}
 	var buf [32]byte
