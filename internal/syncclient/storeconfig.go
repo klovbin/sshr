@@ -146,6 +146,13 @@ func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) 
 		if _, _, err := b.Head(); err != nil {
 			return fmt.Errorf("the new key does not read this account: %v", err)
 		}
+		// a key scoped to fewer folders would pass the manifests and fail
+		// the next sync, the vault key of this device is read as well
+		if c.st.Approver == "" && c.st.Epoch > 0 {
+			if _, err := b.GetEnvelope(c.st.DeviceID, c.st.Epoch); err != nil {
+				return fmt.Errorf("the new key does not read the vault key of this device: %v", err)
+			}
+		}
 		name := c.storeSecretName()
 		old, hadOld, err := vault.SecretGet(name)
 		if err != nil {

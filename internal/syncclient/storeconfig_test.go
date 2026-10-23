@@ -211,6 +211,10 @@ func TestReplaceStoreKey(t *testing.T) {
 	if err := mk().ReplaceStoreKey(*got, BackendRef{Kind: "s3"}, "x", ObjectBackend{Store: store}); err == nil {
 		t.Error("a key of another kind of store was taken")
 	}
+	// a key that reads the manifests but not the envelopes (#243)
+	if err := mk().ReplaceStoreKey(*got, newRef, "x", ObjectBackend{Store: noEnvelopes{store}}); err == nil || !strings.Contains(err.Error(), "vault key of this device") {
+		t.Errorf("a key without the envelopes: %v", err)
+	}
 	// settings that are no longer the ones of the state (#242)
 	stale := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"other"}`)}
 	if err := mk().ReplaceStoreKey(stale, newRef, "x", ObjectBackend{Store: store}); err == nil || !strings.Contains(err.Error(), "changed meanwhile") {
@@ -231,4 +235,14 @@ func TestReplaceStoreKey(t *testing.T) {
 	if cfg.Key != "new" || secret != "new-secret" {
 		t.Errorf("opened %s with %q", opened.Config, secret)
 	}
+}
+
+// noEnvelopes refuses to read envelopes, a key scoped to fewer folders
+type noEnvelopes struct{ *memStore }
+
+func (s noEnvelopes) Get(name string, max int) ([]byte, error) {
+	if strings.HasPrefix(name, "envelopes/") {
+		return nil, errors.New("AccessDenied")
+	}
+	return s.memStore.Get(name, max)
 }
