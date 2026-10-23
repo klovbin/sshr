@@ -528,3 +528,20 @@ func TestPassphraseChangeKeepsKeysInFile(t *testing.T) {
 		t.Error("the key went to the keychain the mode does not read")
 	}
 }
+
+// a secret that does not read is named when it stops a move (#194)
+func TestMoveNamesSecretThatDoesNotRead(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	SecretSet("sync-key-7", []byte("k7"))
+	old := keychain
+	keychain = pickyKeychain{old, map[string]bool{"sync-key-7": true}}
+	t.Cleanup(func() { keychain = old })
+	err := SetVaultPassphrase(pass, []string{"sync-key-7"})
+	if err == nil || !strings.Contains(err.Error(), "sync-key-7") {
+		t.Fatalf("the error does not name the secret: %v", err)
+	}
+}

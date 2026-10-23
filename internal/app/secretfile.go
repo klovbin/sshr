@@ -165,7 +165,7 @@ func moveSecrets(names []string, toFile bool) ([]string, error) {
 			continue
 		}
 		if err != nil {
-			return moved, err
+			return moved, fmt.Errorf("the secret %s does not read where it is now, it may be damaged or sealed with another key, remove it there if it is not needed: %w", name, err)
 		}
 		if _, err := callStore(to, func(k Keychain) (string, error) { return "", k.Set(name, v) }); err != nil {
 			return moved, err
