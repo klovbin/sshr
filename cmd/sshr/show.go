@@ -57,6 +57,7 @@ func writeShow(w io.Writer, h *app.Host, argv []string, now time.Time) {
 	row("key file", h.Key)
 	row("agent", h.Agent)
 	row("jump hosts", h.Jump)
+	row("gateway", h.Gateway)
 	row("session", h.Session)
 	for _, f := range h.Forwards {
 		row("forward", f.Name+" -"+f.Kind+" "+f.Spec)

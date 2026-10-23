@@ -107,6 +107,10 @@ type Host struct {
 	// Jump lists hosts to go through, "a,b": saved host names/IDs or
 	// [user@]host[:port], empty means a direct connection
 	Jump string `json:"jump,omitempty"`
+	// Gateway is a jump spec tried only when the host does not answer
+	// directly, for a server reachable at the office and through a bastion
+	// from home, empty means no fallback, a host with Jump cannot have one
+	Gateway string `json:"gateway,omitempty"`
 	// Session is "tmux" or "zellij" to attach to a remote session named
 	// SessionName on connect, empty means a plain shell
 	Session string `json:"session,omitempty"`
@@ -123,6 +127,11 @@ type Host struct {
 	// Import raise it, Update refuses a copy with another Rev, 0 skips the
 	// check, it stays on this machine and does not sync
 	Rev int `json:"rev,omitempty"`
+
+	// route is the Gateway when ConnectArgs found the host down directly,
+	// routeChecked keeps it from checking twice for one connection
+	route        string
+	routeChecked bool
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -366,6 +375,12 @@ func cleanHost(h Host) (Host, error) {
 	if h.Jump, err = checkJump(h.Jump, h.Name); err != nil {
 		return h, err
 	}
+	if h.Gateway, err = checkJump(h.Gateway, h.Name); err != nil {
+		return h, fmt.Errorf("gateway: %w", err)
+	}
+	if h.Gateway != "" && h.Jump != "" {
+		return h, fmt.Errorf("host %q always goes through %s, a gateway is only for a host reached directly", h.Name, h.Jump)
+	}
 	h.Session = strings.TrimSpace(h.Session)
 	if err := checkSession(h.Session); err != nil {
 		return h, err
@@ -481,19 +496,36 @@ func (s *Store) delete(id string) error {
 	return nil
 }
 
-// Update rewrites an existing host with the fields of in, ID, CreatedAt
-// and LastConnected are kept, a Rev in in that is not the saved one returns
-// ErrChanged and saves nothing, a copy read before a sync or another save
-// would undo it, in.Rev 0 overwrites without the check
+// Update rewrites an existing host with the fields of in, ID, CreatedAt,
+// LastConnected and Gateway are kept, jump hosts in in drop the gateway, a
+// Rev in in that is not the saved one returns ErrChanged and saves nothing,
+// a copy read before a sync or another save would undo it, in.Rev 0
+// overwrites without the check
 func (s *Store) Update(id string, in Host) (out *Host, err error) {
 	err = s.locked(func(tx *Store) error {
-		out, err = tx.update(id, in)
+		out, err = tx.update(id, in, false)
 		return err
 	})
 	return out, err
 }
 
-func (s *Store) update(id string, in Host) (*Host, error) {
+// SetGateway sets the gateway of host id, empty removes it, Update keeps
+// the gateway because a form without that field would erase it
+func (s *Store) SetGateway(id, gateway string) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		cur, err := tx.Find(id)
+		if err != nil {
+			return err
+		}
+		in := *cur
+		in.Gateway, in.Rev = gateway, 0
+		out, err = tx.update(id, in, true)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, ErrNotFound
@@ -504,6 +536,12 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 	}
 	if in.Rev != 0 && in.Rev != cur.Rev {
 		return nil, ErrChanged
+	}
+	if !setGateway {
+		in.Gateway = cur.Gateway
+		if strings.TrimSpace(in.Jump) != "" {
+			in.Gateway = ""
+		}
 	}
 	h, err := cleanHost(in)
 	if err != nil {
@@ -700,14 +738,20 @@ func sameDestination(a, b Host) bool {
 	return strings.EqualFold(strings.TrimSpace(a.Host), strings.TrimSpace(b.Host)) &&
 		strings.TrimSpace(a.User) == strings.TrimSpace(b.User) &&
 		effectivePort(a.Port) == effectivePort(b.Port) &&
-		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "")
+		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "") &&
+		strings.ReplaceAll(a.Gateway, " ", "") == strings.ReplaceAll(b.Gateway, " ", "")
 }
 
 // destination is what a saved password is sealed for, the server it may
-// be sent to
+// be sent to, the gateway is added only when set, so passwords sealed
+// before gateways existed still open
 func destination(h Host) string {
-	return strings.ToLower(strings.TrimSpace(h.Host)) + "\x00" + strings.TrimSpace(h.User) + "\x00" +
+	d := strings.ToLower(strings.TrimSpace(h.Host)) + "\x00" + strings.TrimSpace(h.User) + "\x00" +
 		strconv.Itoa(effectivePort(h.Port)) + "\x00" + strings.ReplaceAll(h.Jump, " ", "")
+	if gw := strings.ReplaceAll(h.Gateway, " ", ""); gw != "" {
+		d += "\x00gateway\x00" + gw
+	}
+	return d
 }
 
 func effectivePort(p int) int {

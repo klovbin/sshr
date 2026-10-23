@@ -60,6 +60,8 @@ func runCLI(args []string) {
 		cmdKey(store, args[1:])
 	case "tag":
 		cmdTag(store, args[1:])
+	case "gateway":
+		cmdGateway(store, args[1:])
 	case "run":
 		cmdRun(store, args[1:])
 	case "send":
@@ -212,7 +214,7 @@ func cmdList(store *app.Store, args []string) {
 }
 
 func cmdAdd(store *app.Store, args []string) {
-	var host, name, user, key, jump, session string
+	var host, name, user, key, jump, gateway, session string
 	noKey, askPassword, keyStdin := false, false, false
 	// 1Password: --op-password / --op-key link existing items,
 	// --store 1password creates an item from the password typed now
@@ -242,6 +244,11 @@ func cmdAdd(store *app.Store, args []string) {
 		} else if (a == "-J" || a == "--jump") && i+1 < len(args) {
 			i++
 			jump = args[i]
+		} else if strings.HasPrefix(a, "--gateway=") {
+			gateway = strings.SplitN(a, "=", 2)[1]
+		} else if a == "--gateway" && i+1 < len(args) {
+			i++
+			gateway = args[i]
 		} else if strings.HasPrefix(a, "--session=") {
 			session = strings.SplitN(a, "=", 2)[1]
 		} else if a == "--session" && i+1 < len(args) {
@@ -385,7 +392,7 @@ func cmdAdd(store *app.Store, args []string) {
 		Key: key, KeyData: keyData, KeyMode: keyMode, KeyRef: keyRef,
 		Agent: agentName, AgentKey: agentKey,
 		PasswordMode: passwordMode, Password: password, PasswordRef: passwordRef,
-		Jump: jump, Session: session, Tags: tags,
+		Jump: jump, Gateway: gateway, Session: session, Tags: tags,
 	}
 	h, err := store.Add(in)
 	if errors.Is(err, app.ErrKeyPassphrase) {
@@ -408,6 +415,9 @@ func cmdAdd(store *app.Store, args []string) {
 	}
 	if h.Jump != "" {
 		msg += " via " + h.Jump
+	}
+	if h.Gateway != "" {
+		msg += " gateway=" + h.Gateway
 	}
 	if h.Session != "" {
 		msg += " session=" + h.Session
@@ -512,7 +522,7 @@ func cmdConnect(store *app.Store, args []string) {
 
 	// mosh needs a direct UDP path to the server, which a bastion does not
 	// give, and its --ssh cannot carry a quoted ProxyCommand
-	if useMosh && h.Jump != "" {
+	if useMosh && h.Via() != "" {
 		fmt.Fprintln(os.Stderr, "sshr: mosh does not work through jump hosts, using ssh")
 		useMosh = false
 	}
@@ -528,8 +538,11 @@ func cmdConnect(store *app.Store, args []string) {
 		fatal(fmt.Errorf("ssh not found in PATH"))
 	}
 	via := ""
-	if h.Jump != "" {
-		via = " via " + h.Jump
+	if h.Via() != "" {
+		via = " via " + h.Via()
+	}
+	if h.Jump == "" && h.Via() != "" {
+		via += " (no answer directly)"
 	}
 	if session != "" {
 		via += ", " + session + " session " + app.SessionName
@@ -1097,16 +1110,25 @@ func cmdPing(store *app.Store, args []string) {
 					key += " THE SERVER KEY CHANGED, check before connecting"
 				}
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, r.Label(), r.Reason, key)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, r.Label(), gatewayReason(h, r), key)
 			continue
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), r.Reason)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), gatewayReason(h, r))
 	}
 	if asJSON {
 		printJSON(out)
 	}
 	w.Flush()
 	os.Exit(code)
+}
+
+// gatewayReason is the reason of a ping result, a host down directly that
+// has a gateway says connect goes through it
+func gatewayReason(h app.Host, r app.Health) string {
+	if r.State != app.HealthDown || h.Gateway == "" {
+		return r.Reason
+	}
+	return r.Reason + ", connect goes through " + h.Gateway
 }
 
 // cmdDesktopEntry adds sshr to the application menu or removes it
@@ -1133,6 +1155,37 @@ func cmdDesktopEntry(args []string) {
 }
 
 // cmdTag shows a host's tags or changes them: +x or x adds, -x removes
+// cmdGateway shows, sets or removes the host connect falls back to when
+// a host does not answer directly
+func cmdGateway(store *app.Store, args []string) {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: sshr gateway <name or id> [<gateway>|--off]")
+		os.Exit(1)
+	}
+	h := findHost(store, "gateway", args[0])
+	if len(args) == 1 {
+		if h.Gateway == "" {
+			fmt.Printf("%s: no gateway, connects directly\n", h.Name)
+			return
+		}
+		fmt.Printf("%s: through %s when it does not answer directly\n", h.Name, h.Gateway)
+		return
+	}
+	gateway := args[1]
+	if gateway == "--off" {
+		gateway = ""
+	}
+	saved, err := store.SetGateway(h.ID, gateway)
+	if err != nil {
+		fatal(err)
+	}
+	if saved.Gateway == "" {
+		fmt.Printf("%s: no gateway, connects directly\n", saved.Name)
+		return
+	}
+	fmt.Printf("%s: through %s when it does not answer directly\n", saved.Name, saved.Gateway)
+}
+
 func cmdTag(store *app.Store, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Usage: sshr tag <name or id> [+tag|-tag|tag...]")

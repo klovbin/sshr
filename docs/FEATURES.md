@@ -134,6 +134,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** one command instead of two logins, keys stay on your machine, forwards, copies, `run` and paste follow the same path
 - **Why this way:** saved hops run through sshr as `ProxyCommand` so each logs in with its own key or password, a host with a saved password never uses `-J`, so a plain hop cannot see that password
 
+### Gateway when the host does not answer
+- **What:** a host can name a gateway, sshr connects directly and goes through the gateway only when the host does not answer, off by default per host, `sshr add --gateway` or `sshr gateway <host> <gateway>`
+- **What for:** a server reachable directly at the office or on the VPN and only through a bastion from home
+- **Why it helps:** one saved host works from both places, no second copy of it with `-J` and no editing it when you move
+- **Why this way:** the check is the health check (a TCP connect and the SSH banner) before ssh starts, retrying after ssh fails would mean a second login prompt in the middle of a session, a saved password stays sealed for the gateway too, so a gateway written into the file by hand does not get it
+
 ### tmux and zellij sessions
 - **What:** connect attaches to a session on the server or creates it
 - **What for:** sleep, Wi-Fi switches and VPN drops kill an ssh shell and its jobs

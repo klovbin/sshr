@@ -107,6 +107,18 @@ sshr add 10.0.0.7 -u app -J gw,bastion     # a chain, gw first
 - plain hops go to ssh as `-J`, a saved hop makes ssh run sshr as `ProxyCommand`, so each hop logs in with its own saved key or password (`-J` would use only your ssh config)
 - a saved jump host may have its own jump, a loop stops after 8 hops, mosh is not used through a jump host
 
+### Gateway when the host does not answer
+
+```sh
+sshr add 10.0.0.7 -u app --gateway bastion   # direct when it answers, else through bastion
+sshr gateway db bastion                      # set it on a saved host
+sshr gateway db --off                        # connect directly again
+```
+
+- connect, run, send, get, tunnel and paste first check the host directly, a TCP connect and the SSH banner, up to 3 s each, and go through the gateway only when it does not answer, `connect` prints `via bastion (no answer directly)`
+- off by default: a host that is down directly costs that wait on every connect, a host with `-J` always goes through its jump hosts and cannot have a gateway
+- `sshr ping` says `connect goes through bastion` next to a host that is down directly, the ssh config export writes the direct way, plain ssh has no fallback
+
 ## Keeping the session on the server
 
 ```sh

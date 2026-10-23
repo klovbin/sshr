@@ -101,7 +101,7 @@ func (s *Store) resolveHop(part string) (h *Host, saved bool, err error) {
 // key or password
 func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	// the host file may come from another device or an older version
-	spec, err := normalizeJump(h.Jump)
+	spec, err := normalizeJump(h.Via())
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +141,7 @@ func (s *Store) ConnectArgs(h *Host) ([]string, error) {
 	if err := checkAddress(h.Host); err != nil {
 		return nil, err
 	}
+	pickRoute(h)
 	jump, err := s.JumpArgs(h)
 	if err != nil {
 		return nil, err
