@@ -205,6 +205,7 @@ macOS, run it again after an update
 Options:
   --remove   take it out of the menu`},
 	{name: "ext", usage: `sshr ext install <git url or folder> [--yes]
+sshr ext import <name> [args...]
 sshr ext list
 sshr ext remove <name>`, short: "install, list and remove extensions",
 		details: `An extension is a program in ~/.sshr/extensions/<name>/ that sshr runs
@@ -217,6 +218,10 @@ before it installs, an extension runs as you and can do anything you can,
 sshr gives it no password, key or secret reference, installing it again
 is how you trust files you changed
 
+import runs an extension that lists hosts (kind import), for example one
+that reads PuTTY sessions, and saves what it prints, a host imported
+before is left as it is, passwords and keys it prints are not read
+
 sshr runs an extension only while its files are the ones that were
 installed, a git pull in its folder stops it until you install it again
 
@@ -226,6 +231,7 @@ Options:
 Examples:
   sshr ext install https://github.com/someone/sshr-hello.git
   sshr ext install ./my-extension --yes
+  sshr ext import putty
   sshr ext list
   sshr ext remove hello`},
 	{name: "completion", usage: "sshr completion bash|zsh|fish", short: "Tab completion for your shell",

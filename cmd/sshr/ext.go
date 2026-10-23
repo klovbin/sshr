@@ -32,10 +32,10 @@ func isBuiltinCommand(name string) bool {
 	return false
 }
 
-// cmdExt installs, lists and removes extensions
-func cmdExt(args []string) {
+// cmdExt installs, imports with, lists and removes extensions
+func cmdExt(store *app.Store, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: sshr ext install <git url or folder> [--yes] | sshr ext list | sshr ext remove <name>")
+		fmt.Fprintln(os.Stderr, "Usage: sshr ext install <git url or folder> [--yes] | sshr ext import <name> [args...] | sshr ext list | sshr ext remove <name>")
 		os.Exit(1)
 	}
 	reg, err := ext.DefaultRegistry()
@@ -45,6 +45,8 @@ func cmdExt(args []string) {
 	switch args[0] {
 	case "install":
 		extInstall(reg, args[1:])
+	case "import":
+		extImport(store, reg, args[1:])
 	case "list", "ls":
 		if len(args) != 1 {
 			fmt.Fprintln(os.Stderr, "Usage: sshr ext list")
@@ -64,7 +66,7 @@ func cmdExt(args []string) {
 		}
 		fmt.Printf("Removed extension %s\n", args[1])
 	default:
-		fmt.Fprintf(os.Stderr, "sshr ext: unknown command %q, use install, list or remove\n", args[0])
+		fmt.Fprintf(os.Stderr, "sshr ext: unknown command %q, use install, import, list or remove\n", args[0])
 		os.Exit(1)
 	}
 }
@@ -140,6 +142,73 @@ func extInstall(reg *ext.Registry, args []string) {
 	fmt.Printf("Installed extension %s\n", st.Name)
 	if st.Has(ext.KindCommand) {
 		fmt.Printf("Run it with: sshr %s\n", st.Name)
+	}
+}
+
+// extImport runs an extension of kind import and saves the hosts it prints,
+// a host that was imported before is left as it is, so a second import does
+// not undo what was edited since
+func extImport(store *app.Store, reg *ext.Registry, args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "Usage: sshr ext import <name> [args for the extension...]")
+		os.Exit(1)
+	}
+	name := args[0]
+	inst, err := reg.Find(name)
+	if errors.Is(err, ext.ErrNotInstalled) {
+		fatal(fmt.Errorf("no extension %q is installed, sshr ext list shows them", name))
+	}
+	if err != nil {
+		fatal(err)
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		fatal(err)
+	}
+	cmd, err := inst.Command(ext.KindImport, args[1:], bin)
+	if err != nil {
+		fatal(err)
+	}
+	cmd.Stdin, cmd.Stderr = os.Stdin, os.Stderr
+	data, err := ext.Collect(cmd)
+	if err != nil {
+		fatal(err)
+	}
+	hosts, warnings, err := ext.ParseImport(data)
+	if err != nil {
+		fatal(err)
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "sshr: warning: %s\n", w)
+	}
+	have := map[string]bool{}
+	if saved, err := store.List(); err == nil {
+		for _, h := range saved {
+			have[h.ID] = true
+		}
+	}
+	added, skipped, failed := 0, 0, 0
+	for _, e := range hosts {
+		h, err := e.ToHost(name)
+		if err == nil && have[h.ID] {
+			fmt.Printf("= %s  already imported\n", h.Name)
+			skipped++
+			continue
+		}
+		if err == nil {
+			var saved *app.Host
+			if saved, err = store.Import(h); err == nil {
+				fmt.Printf("+ %s  %s@%s:%d\n", saved.Name, saved.User, saved.Host, saved.Port)
+				added++
+				continue
+			}
+		}
+		fmt.Fprintf(os.Stderr, "! %s: %v\n", e.Key, err)
+		failed++
+	}
+	fmt.Printf("%d added, %d already there, %d failed\n", added, skipped, failed)
+	if failed > 0 {
+		os.Exit(1)
 	}
 }
 

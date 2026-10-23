@@ -53,7 +53,7 @@ Features
 3. Drag and drop files onto a host in the app ([#32](https://github.com/klovbin/sshr/issues/32))
 4. Fall back to a gateway when the direct connection fails ([#28](https://github.com/klovbin/sshr/issues/28))
 5. Local commands before and after connect, their fields go on the #30 list ([#29](https://github.com/klovbin/sshr/issues/29))
-6. Import from PuTTY, MobaXterm, Remmina, Termius, Royal TS, through the #30 list ([#34](https://github.com/klovbin/sshr/issues/34))
+6. Import from PuTTY, MobaXterm, Remmina, Termius, Royal TS as extensions of kind import, `sshr ext import` is there, the importers are not written ([#34](https://github.com/klovbin/sshr/issues/34))
 
 Later
 

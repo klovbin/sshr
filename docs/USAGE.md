@@ -249,6 +249,7 @@ TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-25
 sshr ext install https://github.com/someone/sshr-hello.git   # shows what it is and asks
 sshr ext install ./my-extension --yes                        # a folder, no question, for scripts
 sshr hello a b                                               # runs the extension called hello
+sshr ext import putty                                        # an extension that reads another tool's hosts
 sshr ext list
 sshr ext remove hello
 ```
@@ -272,6 +273,15 @@ A working one to copy from is `examples/extensions/hello` (`sshr ext install ./e
 - sshr passes `SSHR_EXT_PROTOCOL` (1), `SSHR_EXT_KIND` (`command`), `SSHR_EXT_DIR` (its folder), `SSHR_EXT_DATA` (a folder it may write to, `~/.sshr/extension-data/<name>`, it stays when the extension is removed) and `SSHR_BIN` (the sshr binary), `"$SSHR_BIN" list --json` gives it the hosts
 - the files of the folder are pinned, so write state, caches and logs to `SSHR_EXT_DATA` and never into the folder, a file that appears there stops the extension, `PYTHONDONTWRITEBYTECODE=1` is set for Python ones
 - passwords, keys, secret references and the variables of ssh askpass, Bitwarden and 1Password are never in its environment
+- `"kinds": ["import"]` makes an importer, `sshr ext import <name> [args]` runs it with `SSHR_EXT_KIND=import` and the terminal for input and messages, reads what it prints on stdout (8 MiB at most, 5000 hosts) and saves the hosts:
+
+  ```json
+  {"hosts": [{"key": "putty:web", "name": "web", "host": "10.0.0.5", "port": 22, "user": "deploy",
+              "key_file": "/home/me/.ssh/id_ed25519", "jump": "gw", "session": "tmux",
+              "tags": ["prod"], "forwards": ["db -L 5432:localhost:5432"]}]}
+  ```
+
+  `key` names the host in its source and is required, the same key gives the same host on the next import, which is then skipped as already imported, so nothing you edited since is overwritten, only these fields are read, a password, a key or a secret reference an importer prints is dropped with a warning, a host that fails the checks of sshr is reported and the others are saved
 - `sshr ext install` pins every file of the folder, changing one (a `git pull` in the folder, an edit) stops the extension until you install it again, how that is checked and what it does not cover is in [SECURITY.md](SECURITY.md#extensions)
 
 ## AI assistants (MCP)

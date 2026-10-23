@@ -253,3 +253,66 @@ func TestExampleExtensionGreetsTheHosts(t *testing.T) {
 		t.Errorf("sshr hello printed %q", got)
 	}
 }
+
+func TestExtImportSavesHostsOnceAndNeverTakesSecrets(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the importer is a shell script")
+	}
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("no go tool to build sshr")
+	}
+	bin := filepath.Join(t.TempDir(), "sshr")
+	if out, err := exec.Command(goTool, "build", "-tags", "nocgo", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("building sshr: %v\n%s", err, out)
+	}
+	home := t.TempDir()
+	src := t.TempDir()
+	os.WriteFile(filepath.Join(src, ext.ManifestFile), []byte(`{"protocol":1,"name":"fake","version":"1","description":"x","command":{"default":["./run.sh"]},"kinds":["import"]}`), 0o600)
+	script := `#!/bin/sh
+echo "args=$*" >&2
+cat <<'JSON'
+{"hosts":[
+ {"key":"a","name":"alpha","host":"10.0.0.5","port":2222,"user":"deploy","tags":["prod"],"password":"hunter2"},
+ {"key":"b","name":"bad","host":"not a host!","user":"u"}
+]}
+JSON
+`
+	os.WriteFile(filepath.Join(src, "run.sh"), []byte(script), 0o700)
+	run := func(args ...string) (string, string, int) {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
+		var out, errOut bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errOut
+		err := cmd.Run()
+		code := 0
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		}
+		return out.String(), errOut.String(), code
+	}
+	if _, errOut, code := run("ext", "install", src, "--yes"); code != 0 {
+		t.Fatalf("install: %d %s", code, errOut)
+	}
+	out, errOut, code := run("ext", "import", "fake", "--source", "x")
+	if code != 1 || !strings.Contains(out, "+ alpha  deploy@10.0.0.5:2222") || !strings.Contains(out, "1 added, 0 already there, 1 failed") ||
+		!strings.Contains(errOut, "args=--source x") || !strings.Contains(errOut, `the field "password" is not read`) || !strings.Contains(errOut, "! b:") {
+		t.Fatalf("first import: code %d\nout %q\nerr %q", code, out, errOut)
+	}
+	list, _, _ := run("list", "--json")
+	if !strings.Contains(list, `"alpha"`) || strings.Contains(list, "hunter2") {
+		t.Errorf("list after import: %s", list)
+	}
+	show, _, _ := run("show", "alpha")
+	if !strings.Contains(show, "tags") || strings.Contains(show, "hunter2") || strings.Contains(show, "saved") {
+		t.Errorf("show: %s", show)
+	}
+	out, _, _ = run("ext", "import", "fake")
+	if !strings.Contains(out, "= alpha  already imported") || !strings.Contains(out, "0 added, 1 already there, 1 failed") {
+		t.Errorf("second import: %q", out)
+	}
+	if _, errOut, code := run("ext", "import", "missing"); code != 1 || !strings.Contains(errOut, "no extension") {
+		t.Errorf("an extension that is not installed: %d %q", code, errOut)
+	}
+}

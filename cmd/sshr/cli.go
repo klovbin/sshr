@@ -115,7 +115,7 @@ func runCLI(args []string) {
 	case completeCommand:
 		cmdComplete(store, args[1:])
 	case "ext":
-		cmdExt(args[1:])
+		cmdExt(store, args[1:])
 	case "help", "--help", "-h":
 		cmdHelp(args[1:])
 	default:
