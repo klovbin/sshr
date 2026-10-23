@@ -186,3 +186,49 @@ func TestStoredKeyBoundToDestination(t *testing.T) {
 		t.Fatalf("the upgraded key does not open: %v", err)
 	}
 }
+
+// a host moved by another device does not take the key stored here to its
+// new address, the key is dropped and a note says so (#177)
+func TestImportedMoveDoesNotTakeTheStoredKey(t *testing.T) {
+	useMockKeychain(t)
+	s := &Store{Dir: t.TempDir()}
+	data, _ := testKey(t, "")
+	h, err := s.Add(Host{Name: "k", Host: "10.0.0.1", User: "u", KeyData: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := *h
+	in.KeySealed, in.Host = "", "203.0.113.66"
+	_, notes := FromOtherDevice(in, h)
+	got, err := s.Import(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KeySealed != "" {
+		t.Fatalf("the stored key went with the host: %q", got.KeySealed)
+	}
+	if _, err := loadKey(got); err == nil {
+		t.Fatal("the key opens for the address the other device chose")
+	}
+	found := false
+	for _, n := range notes {
+		found = found || strings.Contains(n, "key stored here is not used")
+	}
+	if !found {
+		t.Errorf("no note: %q", notes)
+	}
+	// the same host from another device without a move keeps the key
+	h2, err := s.Add(Host{Name: "k2", Host: "10.0.0.2", User: "u", KeyData: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := *h2
+	same.KeySealed, same.Tags = "", []string{"x"}
+	kept, err := s.Import(same)
+	if err != nil || kept.KeySealed == "" {
+		t.Fatalf("an import without a move lost the key: %v", err)
+	}
+	if _, err := loadKey(kept); err != nil {
+		t.Fatalf("the kept key does not open: %v", err)
+	}
+}

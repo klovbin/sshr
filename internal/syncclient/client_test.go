@@ -201,14 +201,25 @@ func TestSyncVaultKeyStaysLocal(t *testing.T) {
 	if hb.KeySealed != "" || hb.KeyPub != h.KeyPub {
 		t.Errorf("b got %+v", hb)
 	}
+	// an edit on b that keeps the destination keeps the key on a
+	hb.Tags = []string{"prod"}
+	hb, err = w.b.Store.Update(h.ID, *hb)
+	must(t, err)
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	ha, _ := w.a.Store.Find(h.ID)
+	if len(ha.Tags) != 1 || ha.KeySealed == "" {
+		t.Errorf("a lost its key or the edit: tags %v sealed %q", ha.Tags, ha.KeySealed)
+	}
+	// a move on b does not take the key of a to the new place (#177)
 	hb.Port = 2200
 	_, err = w.b.Store.Update(h.ID, *hb)
 	must(t, err)
 	must(t, w.b.Push())
 	must(t, w.a.Pull())
-	ha, _ := w.a.Store.Find(h.ID)
-	if ha.Port != 2200 || ha.KeySealed == "" {
-		t.Errorf("a lost its key or the edit: port %d sealed %q", ha.Port, ha.KeySealed)
+	ha, _ = w.a.Store.Find(h.ID)
+	if ha.Port != 2200 || ha.KeySealed != "" || !strings.Contains(w.log.String(), "key stored here is not used") {
+		t.Errorf("the key of a followed a move made on b: port %d sealed %q\n%s", ha.Port, ha.KeySealed, w.log.String())
 	}
 }
 

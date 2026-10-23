@@ -640,14 +640,11 @@ func (s *Store) importHost(in Host) (*Host, error) {
 		in.KeySealed = ""
 		if cur != nil && cur.KeyMode == KeyVault && cur.KeyPub == in.KeyPub {
 			in.KeySealed = cur.KeySealed
-			if cur.KeySealed != "" && destination(in) != destination(*cur) {
-				// the host moved on the other device, the key here goes with
-				// it, sealed again for the new place
-				plain, err := reopenKey(cur, in)
-				if err != nil {
-					return nil, err
-				}
-				in.KeyData, in.KeySealed = plain, ""
+			if destination(in) != destination(*cur) {
+				// another device moved the host, the key stored here does
+				// not follow an address it chose, it is not used until the
+				// user pastes it again here (FromOtherDevice says so)
+				in.KeySealed = ""
 			}
 		}
 	}
@@ -697,6 +694,9 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 	same := local != nil && sameDestination(in, *local)
 	if local != nil && !same && (local.PasswordRef != "" || local.KeyRef != "") {
 		notes = append(notes, "the host now points elsewhere ("+in.Dest()+"), the password manager reference set here is dropped, set it again if that is right")
+	}
+	if local != nil && !same && local.KeyMode == KeyVault && local.KeySealed != "" {
+		notes = append(notes, "the host now points elsewhere ("+in.Dest()+"), the key stored here is not used for it, paste it again here if that is right")
 	}
 	if name := managerName(in.PasswordMode); name != "" {
 		if same && local.PasswordMode == in.PasswordMode && local.PasswordRef != "" {
