@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -75,6 +76,15 @@ func (i *Installed) Command(kind string, args []string, sshrBin string) (*exec.C
 	}
 	if err := i.Verify(); err != nil {
 		return nil, err
+	}
+	// the manifest in i was read before the files were checked, what runs
+	// must be the one that was checked
+	data, err := os.ReadFile(filepath.Join(i.Dir, ManifestFile))
+	if err != nil {
+		return nil, fmt.Errorf("extension %s: %v", i.Name, err)
+	}
+	if checked, err := ParseManifest(data); err != nil || !reflect.DeepEqual(checked, i.Manifest) {
+		return nil, fmt.Errorf("%w: the manifest of extension %s is not the one that was checked, install it again to trust it", ErrChanged, i.Name)
 	}
 	argv, err := i.Argv(runtime.GOOS)
 	if err != nil {

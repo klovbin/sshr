@@ -108,3 +108,21 @@ func TestEnvGivesTheUsersAgentNotTheVaultAgent(t *testing.T) {
 		t.Errorf("SSH_AUTH_SOCK in the environment: %v, want only the user's own agent", socks)
 	}
 }
+
+func TestCommandUsesTheManifestThatWasChecked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the extension is a shell script")
+	}
+	r := &Registry{Root: t.TempDir()}
+	install(t, r, "hello", map[string]string{ManifestFile: manifestOf("hello"), "run.sh": "#!/bin/sh\n", "other.sh": "#!/bin/sh\n"})
+	inst, err := r.Find("hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the manifest read earlier names another pinned file, the files on disk
+	// are untouched, so the hash still passes
+	inst.Manifest.Command = map[string][]string{"default": {"./other.sh", "--wipe"}}
+	if _, err := inst.Command(KindCommand, nil, "sshr"); !errors.Is(err, ErrChanged) {
+		t.Errorf("a manifest that differs from the checked one ran: %v", err)
+	}
+}
