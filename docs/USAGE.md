@@ -272,6 +272,8 @@ TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-25
 
 `GET /v1/health` answers 200 while the data folder can be written and 503 when it cannot, for a monitor, it needs no token and tells nothing about accounts
 
+Backups: everything is in the data folder, `accounts/<id>/devices.json` (devices and token hashes), `blobs/` (encrypted hosts), `manifests/` (the signed history) and `envelopes/` (the vault key for each device), plus the TLS cache of `--autocert`. It holds no plaintext and no key that opens the hosts, a copy can sit anywhere. Stop sshr-sync or take a filesystem snapshot for the copy, a copy made file by file while devices push can hold a manifest whose blobs are missing. Restore only the newest copy: a device refuses a history older than the one it already saw, so after an old copy is restored the devices stop syncing until the account is set up again, the hosts themselves stay on every device
+
 ## Extensions
 
 ```sh
