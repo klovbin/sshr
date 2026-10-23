@@ -33,9 +33,11 @@ func unixRaw(c net.Conn) (syscall.RawConn, error) {
 // peerContext records the uid of a client of the unix socket, ConnContext
 // of the http.Server
 func peerContext(ctx context.Context, c net.Conn) context.Context {
-	if _, ok := c.(*net.UnixConn); !ok {
+	if c.LocalAddr().Network() != "unix" {
 		return ctx
 	}
+	// a wrapped unix connection cannot be asked, it is refused rather than
+	// let through unchecked
 	uid, err := peerUID(c)
 	return context.WithValue(ctx, peerKey{}, peer{uid, err})
 }

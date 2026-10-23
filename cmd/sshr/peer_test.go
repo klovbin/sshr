@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,3 +36,24 @@ func TestPeerGuard(t *testing.T) {
 		}
 	}
 }
+
+// wrappedConn hides the unix connection under it
+type wrappedConn struct{ net.Conn }
+
+// a unix connection behind a wrapper is refused, not let through
+// unchecked (#210)
+func TestPeerContextWrappedConn(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	ctx := peerContext(context.Background(), wrappedConn{unixAddrConn{a}})
+	p, ok := ctx.Value(peerKey{}).(peer)
+	if !ok || p.err == nil {
+		t.Fatalf("a wrapped unix connection passed: %+v %v", p, ok)
+	}
+}
+
+// unixAddrConn says it is on a unix socket
+type unixAddrConn struct{ net.Conn }
+
+func (unixAddrConn) LocalAddr() net.Addr { return &net.UnixAddr{Name: "/x.sock", Net: "unix"} }
