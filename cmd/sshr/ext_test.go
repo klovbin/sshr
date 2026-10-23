@@ -160,7 +160,8 @@ func TestBuiltinNamesCoverTheSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := string(src)
+	// git on Windows checks the file out with CRLF
+	body := strings.ReplaceAll(string(src), "\r", "")
 	start := strings.Index(body, "func runCLI(")
 	if start < 0 {
 		t.Fatal("runCLI is not in cli.go")
