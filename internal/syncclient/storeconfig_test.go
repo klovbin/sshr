@@ -131,3 +131,35 @@ func TestStoreSecretOnlyForSavedAccount(t *testing.T) {
 		t.Errorf("state %s", b)
 	}
 }
+
+// a device whose store secret is gone can still leave, a key change it
+// could not deliver asks for --force instead of a leave that never works
+// (#236)
+func TestLeaveWithoutStoreSecret(t *testing.T) {
+	useMemKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	ref := BackendRef{Kind: "mem", Config: json.RawMessage(`{}`)}
+	a := &Client{Store: &hosts.Store{Dir: t.TempDir()}, Dir: t.TempDir(), KeyPrefix: "a-", Log: &strings.Builder{},
+		Backend: ObjectBackend{Store: newMemStore()}, BackendRef: &ref, StoreSecret: "s3cret"}
+	must(t, a.Init("memory", "laptop"))
+	vault.SecretDelete("a-store-secret")
+	path := filepath.Join(a.Dir, "state.json")
+	b, err := os.ReadFile(path)
+	must(t, err)
+	var st map[string]any
+	must(t, json.Unmarshal(b, &st))
+	st["rotation"] = map[string]any{}
+	b, _ = json.Marshal(st)
+	must(t, os.WriteFile(path, b, 0o600))
+
+	again := &Client{Store: a.Store, Dir: a.Dir, KeyPrefix: "a-", Log: &strings.Builder{},
+		OpenBackend: func(BackendRef, string) (Backend, error) { return nil, errors.New("not reached") }}
+	if err := again.Leave(false); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("leave with an undelivered key: %v", err)
+	}
+	must(t, again.Leave(true))
+	if _, err := os.Stat(path); err == nil {
+		t.Error("leave --force kept the sync state")
+	}
+}

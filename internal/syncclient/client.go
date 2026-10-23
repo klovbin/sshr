@@ -1598,7 +1598,7 @@ func (c *Client) leave(force bool) error {
 			// lives only here, leaving would strand the other devices
 			if st.Rotation != nil && !force {
 				if err := c.load(); err != nil {
-					return err
+					return fmt.Errorf("the other devices still wait for the vault key this device changed and the sync does not open to deliver it, leave with --force and pair them again: %v", err)
 				}
 				if err := c.finishRotation(); err != nil {
 					return fmt.Errorf("the other devices still wait for the vault key this device changed and it cannot be delivered now, run sshr sync again, or leave with --force and pair them again: %v", err)
