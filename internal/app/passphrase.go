@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -220,6 +221,14 @@ func UseKeychainVault() error {
 		return err
 	}
 	if err := SecretSet(keyringUser, key); err != nil {
+		return err
+	}
+	// a keychain may take a write and keep nothing (a session collection,
+	// a locked one), the file is the only copy until the key reads back
+	if kept, ok, err := getVaultKey(); err != nil || !ok || !bytes.Equal(kept, key) {
+		if err == nil {
+			err = errors.New("the keychain did not keep the vault key, the passphrase vault stays")
+		}
 		return err
 	}
 	st, _ := LoadSettings()

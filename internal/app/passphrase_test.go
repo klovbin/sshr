@@ -173,3 +173,32 @@ func TestPassphraseVaultWithoutKeychain(t *testing.T) {
 		t.Fatalf("a key check of a lost key: %v", err)
 	}
 }
+
+// a keychain that takes the write and keeps nothing leaves the passphrase
+// vault and its file as they are (#181)
+func TestUseKeychainVerifiesTheKey(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetVaultPassphrase(pass); err != nil {
+		t.Fatal(err)
+	}
+	old := keychain
+	keychain = forgetfulKeychain{}
+	t.Cleanup(func() { keychain = old })
+	if err := UseKeychainVault(); err == nil {
+		t.Fatal("the mode changed though the keychain kept nothing")
+	}
+	if path, _ := passphraseFilePath(); !fileExists(path) || VaultMode() != VaultPassphrase {
+		t.Fatal("the passphrase file or the mode went")
+	}
+}
+
+// forgetfulKeychain takes every write and keeps nothing
+type forgetfulKeychain struct{}
+
+func (forgetfulKeychain) Get(string) (string, error) { return "", keyring.ErrNotFound }
+func (forgetfulKeychain) Set(string, string) error   { return nil }
+func (forgetfulKeychain) Delete(string) error        { return nil }
