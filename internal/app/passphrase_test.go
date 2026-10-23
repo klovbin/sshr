@@ -3,7 +3,9 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -237,5 +239,23 @@ func TestPassphraseFileTighterLimits(t *testing.T) {
 	os.WriteFile(path, make([]byte, 5000), 0o600)
 	if _, err := readWrappedKey(); err == nil || !strings.Contains(err.Error(), "larger") {
 		t.Errorf("a big file: %v", err)
+	}
+}
+
+// a locked keychain may hold the real key, no new key is made then (#184)
+func TestPassphraseVaultLockedKeychainMakesNoKey(t *testing.T) {
+	keyring.MockInitWithError(fmt.Errorf("failed to unlock correct collection '%v'", "/org/freedesktop/secrets/aliases/default"))
+	resetVault(t)
+	t.Cleanup(keyring.MockInit)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	err := SetVaultPassphrase(pass)
+	if runtime.GOOS == "linux" && !errors.Is(err, ErrKeychainLocked) {
+		t.Fatalf("a locked keychain: %v", err)
+	}
+	if path, _ := passphraseFilePath(); runtime.GOOS == "linux" && fileExists(path) {
+		t.Error("a vault key file was written")
 	}
 }

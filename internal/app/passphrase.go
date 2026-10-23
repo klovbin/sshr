@@ -208,7 +208,9 @@ func SetVaultPassphrase(pass string) error {
 		return fmt.Errorf("the passphrase is shorter than %d characters, the file it guards can be attacked offline", passphraseMin)
 	}
 	key, err := VaultKey()
-	if errors.Is(err, ErrNoKeychain) {
+	// a locked keychain or one that did not answer may hold the real key,
+	// only a keychain that is not there starts with a new one
+	if errors.Is(err, ErrNoKeychain) && !errors.Is(err, ErrKeychainLocked) && !errors.Is(err, ErrKeychainTimeout) {
 		// a machine without a keychain, the case the passphrase vault is
 		// for, starts with a new key, unless a key check says secrets were
 		// sealed here with a key that is now out of reach
