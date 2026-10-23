@@ -511,11 +511,16 @@ func cmdConnect(store *app.Store, args []string) {
 	}
 	dest := h.Dest()
 	if plan.Tool == "mosh" {
+		if _, err := plan.ToolPath(); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
+		// the secrets are fetched after the line, a password manager prompt
+		// belongs to this connect
 		cmd, cleanup, err := plan.Command()
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
 		started := time.Now()
 		code := runAttached(cmd, cleanup)
 		if !app.MoshStartFailed(code, time.Since(started)) {
@@ -526,8 +531,7 @@ func cmdConnect(store *app.Store, args []string) {
 		plan = plan.Fallback
 	}
 
-	cmd, cleanup, err := plan.Command()
-	if err != nil {
+	if _, err := plan.ToolPath(); err != nil {
 		fatal(err)
 	}
 	via := ""
@@ -541,6 +545,10 @@ func cmdConnect(store *app.Store, args []string) {
 		via += ", " + plan.Session + " session " + app.SessionName
 	}
 	fmt.Printf("Connecting to %s (%s:%d)%s...\n", h.Name, dest, h.Port, via)
+	cmd, cleanup, err := plan.Command()
+	if err != nil {
+		fatal(err)
+	}
 	code := runAttached(cmd, cleanup)
 	markConnected(store, h, code)
 	os.Exit(code)

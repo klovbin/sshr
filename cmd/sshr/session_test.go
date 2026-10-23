@@ -165,3 +165,21 @@ func TestConnectThroughGateway(t *testing.T) {
 		t.Errorf("%d %q %q\nssh %q", code, out, errOut, got)
 	}
 }
+
+// the secrets of a host are fetched after "Connecting to", a password
+// manager prompt or an error that comes from them belongs to the connect
+func TestConnectFetchesSecretsAfterTheLine(t *testing.T) {
+	fakeTools(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".sshr", "vault", "hosts")
+	os.MkdirAll(dir, 0o700)
+	id := "0123456789abcdef0123456789abcdef"
+	host := `{"id":"` + id + `","name":"k","host":"10.0.0.5","port":22,"user":"u","key_mode":"vault","created_at":"2026-10-23T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(host), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := sshrIn(t, home, "connect", "k")
+	if code != 1 || out != "Connecting to k (u@10.0.0.5:22)...\n" || !strings.Contains(errOut, "has no saved key") {
+		t.Errorf("%d %q %q", code, out, errOut)
+	}
+}
