@@ -1598,7 +1598,13 @@ func (c *Client) leave(force bool) error {
 			// lives only here, leaving would strand the other devices
 			if st.Rotation != nil && !force {
 				if err := c.load(); err != nil {
-					return fmt.Errorf("the other devices still wait for the vault key this device changed and the sync does not open to deliver it, leave with --force and pair them again: %v", err)
+					// only a store that will not open again asks for
+					// --force, a keychain that fails for now does not
+					var se storeOpenError
+					if errors.As(err, &se) {
+						return fmt.Errorf("the other devices still wait for the vault key this device changed and the sync store does not open to deliver it, leave with --force and pair them again: %v", err)
+					}
+					return err
 				}
 				if err := c.finishRotation(); err != nil {
 					return fmt.Errorf("the other devices still wait for the vault key this device changed and it cannot be delivered now, run sshr sync again, or leave with --force and pair them again: %v", err)

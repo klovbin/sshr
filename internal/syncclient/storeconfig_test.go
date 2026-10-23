@@ -158,8 +158,23 @@ func TestLeaveWithoutStoreSecret(t *testing.T) {
 	if err := again.Leave(false); err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Errorf("leave with an undelivered key: %v", err)
 	}
+	// a keychain that fails for now is not a reason for --force (#241)
+	failing := &Client{Store: a.Store, Dir: a.Dir, KeyPrefix: "a-", Log: &strings.Builder{}, OpenBackend: again.OpenBackend}
+	vault.SetKeychain(brokenKeychain{})
+	err = failing.Leave(false)
+	useMemKeychain(t)
+	if err == nil || strings.Contains(err.Error(), "--force") {
+		t.Errorf("leave with a failing keychain: %v", err)
+	}
 	must(t, again.Leave(true))
 	if _, err := os.Stat(path); err == nil {
 		t.Error("leave --force kept the sync state")
 	}
 }
+
+// brokenKeychain fails every call, a locked or unreachable keychain
+type brokenKeychain struct{}
+
+func (brokenKeychain) Get(string) (string, error) { return "", errors.New("keychain locked") }
+func (brokenKeychain) Set(string, string) error   { return errors.New("keychain locked") }
+func (brokenKeychain) Delete(string) error        { return errors.New("keychain locked") }

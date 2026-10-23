@@ -21,24 +21,31 @@ type BackendRef struct {
 // storeSecretName is the keychain item of the secret of the store
 func (c *Client) storeSecretName() string { return c.prefix() + "store-secret" }
 
+// storeOpenError is a store this machine cannot open from its state, a
+// missing secret, a kind it does not know or settings the store refuses,
+// unlike a keychain that fails for now
+type storeOpenError struct{ error }
+
+func (e storeOpenError) Unwrap() error { return e.error }
+
 // openBackend opens the store a loaded state names, sshr-sync needs none
 func (c *Client) openBackend() error {
 	if c.Backend != nil || c.st.Backend == nil {
 		return nil
 	}
 	if c.OpenBackend == nil {
-		return fmt.Errorf("this sshr cannot open a sync store of kind %q", c.st.Backend.Kind)
+		return storeOpenError{fmt.Errorf("this sshr cannot open a sync store of kind %q", c.st.Backend.Kind)}
 	}
 	secret, ok, err := vault.SecretGet(c.storeSecretName())
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return errors.New("the secret of the sync store is gone from the keychain, run sshr sync leave and join again")
+		return storeOpenError{errors.New("the secret of the sync store is gone from the keychain, run sshr sync leave and join again")}
 	}
 	b, err := c.OpenBackend(*c.st.Backend, string(secret))
 	if err != nil {
-		return err
+		return storeOpenError{err}
 	}
 	c.Backend = b
 	return nil
