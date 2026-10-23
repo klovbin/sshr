@@ -216,7 +216,9 @@ func (s *Store) upgradeSealsLocked() {
 	}
 	for i := range hosts {
 		h := &hosts[i]
-		if h.PasswordMode != PasswordSaved || !strings.HasPrefix(h.PasswordSealed, sealPrefix) {
+		// a host of a newer format is not written by this build, opening
+		// its seal would only reach the keychain on every start
+		if h.format > hostFormat || h.PasswordMode != PasswordSaved || !strings.HasPrefix(h.PasswordSealed, sealPrefix) {
 			continue
 		}
 		plain, err := unseal(h.PasswordSealed, h.ID, "password")
