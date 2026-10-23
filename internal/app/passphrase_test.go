@@ -499,3 +499,32 @@ func TestUseKeychainKeepsKeyThatDoesNotRead(t *testing.T) {
 		t.Error("the keychain item was written over")
 	}
 }
+
+// a passphrase changed again with settings.json that does not save leaves
+// the sync keys in the file the mode reads, they were never moved (#193)
+func TestPassphraseChangeKeepsKeysInFile(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetVaultPassphrase(pass, nil); err != nil {
+		t.Fatal(err)
+	}
+	// the mode stays readable once settings.json breaks
+	t.Setenv("SSHR_VAULT", "passphrase")
+	if err := SecretSet("sync-device", []byte("seed")); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := settingsPath()
+	os.WriteFile(path, []byte("{broken"), 0o600)
+	if err := SetVaultPassphrase("another long passphrase", []string{"sync-device"}); err == nil {
+		t.Fatal("the change went through a settings file that does not read")
+	}
+	if _, err := (fileKeychain{}).Get("sync-device"); err != nil {
+		t.Fatalf("the key left the secrets file: %v", err)
+	}
+	if _, err := keyring.Get(keyringService, "sync-device"); err == nil {
+		t.Error("the key went to the keychain the mode does not read")
+	}
+}

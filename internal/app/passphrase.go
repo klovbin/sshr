@@ -251,12 +251,13 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 	}
 	// the named secrets move before the mode changes, the mode never points
 	// at a file that does not hold them
-	if err := MoveSecrets(secretNames, true); err != nil {
+	moved, err := moveSecretsBack(secretNames, true)
+	if err != nil {
 		undo()
 		return fmt.Errorf("the sync keys did not move, nothing is changed: %v", err)
 	}
 	// a settings file that does not read is not replaced with defaults, the
-	// keys go back to the keychain the mode still reads
+	// keys this call moved go back to the keychain the mode still reads
 	st, err := LoadSettings()
 	if err == nil {
 		st.Vault = VaultPassphrase
@@ -264,7 +265,7 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 			return nil
 		}
 	}
-	if berr := MoveSecrets(secretNames, false); berr != nil {
+	if berr := MoveSecrets(moved, false); berr != nil {
 		return fmt.Errorf("settings.json was not saved and the sync keys did not go back to the keychain, fix settings.json and run the same command again: %v, %v", err, berr)
 	}
 	return fmt.Errorf("the vault key is wrapped in %s but settings.json was not saved, the mode is not changed: %v", path, err)
@@ -308,7 +309,8 @@ func UseKeychainVault(secretNames []string) error {
 	if err != nil {
 		return err
 	}
-	if err := MoveSecrets(secretNames, false); err != nil {
+	moved, err := moveSecretsBack(secretNames, false)
+	if err != nil {
 		return fmt.Errorf("the sync keys did not move to the keychain, the passphrase vault stays: %v", err)
 	}
 	st, err := LoadSettings()
@@ -317,8 +319,8 @@ func UseKeychainVault(secretNames []string) error {
 		err = SaveSettings(st)
 	}
 	if err != nil {
-		// the mode still reads the file, the keys go back to it
-		if berr := MoveSecrets(secretNames, true); berr != nil {
+		// the mode still reads the file, the keys this call moved go back
+		if berr := MoveSecrets(moved, true); berr != nil {
 			return fmt.Errorf("settings.json was not saved and the sync keys did not go back to the secrets file, fix settings.json and run the same command again: %v, %v", err, berr)
 		}
 		return fmt.Errorf("the vault key is in the keychain but settings.json was not saved, the mode is not changed: %v", err)

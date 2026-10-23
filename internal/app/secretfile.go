@@ -136,14 +136,21 @@ func secretStore(name string) Keychain {
 // move, a move that fails halfway takes back what it moved, the mode
 // reads one place and a key left in the other looks lost
 func MoveSecrets(names []string, toFile bool) error {
+	_, err := moveSecretsBack(names, toFile)
+	return err
+}
+
+// moveSecretsBack is MoveSecrets that also says which names it moved, a
+// caller that fails later takes back only those
+func moveSecretsBack(names []string, toFile bool) ([]string, error) {
 	moved, err := moveSecrets(names, toFile)
 	if err == nil {
-		return nil
+		return moved, nil
 	}
 	if _, berr := moveSecrets(moved, !toFile); berr != nil {
-		return fmt.Errorf("%v, %d of the keys stayed in the new place, run the same command again: %v", err, len(moved), berr)
+		return nil, fmt.Errorf("%v, %d of the keys stayed in the new place, run the same command again: %v", err, len(moved), berr)
 	}
-	return err
+	return nil, err
 }
 
 func moveSecrets(names []string, toFile bool) ([]string, error) {
