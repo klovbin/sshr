@@ -312,15 +312,6 @@ func opEnv(args []string) []string {
 	return out
 }
 
-// checkOPRef refuses anything that is not an op:// secret reference
-func checkOPRef(ref string) error {
-	rest, ok := strings.CutPrefix(ref, "op://")
-	if !ok || strings.Count(rest, "/") < 2 {
-		return fmt.Errorf("%q is not a 1Password secret reference, expected op://vault/item/field", ref)
-	}
-	return nil
-}
-
 // opRead reads one field by its secret reference
 func opRead(ref string) ([]byte, error) {
 	return opRun(nil, "read", "--no-newline", ref)

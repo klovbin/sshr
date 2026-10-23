@@ -33,14 +33,6 @@ var bwCLI = managerCLI{name: "Bitwarden", bin: &bwBin, missing: ErrNoBW,
 // bwRun runs bw without prompts
 func bwRun(args ...string) ([]byte, error) { return bwCLI.run(nil, append(args, "--nointeraction")...) }
 
-// checkBWRef refuses what bw would read as an option or cannot be an item
-func checkBWRef(ref string) error {
-	if ref == "" || strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, "\r\n") {
-		return fmt.Errorf("%q is not a Bitwarden item, give its ID (bw list items) or a name that finds one item", ref)
-	}
-	return nil
-}
-
 // bwPassword reads the password of a Login item
 func bwPassword(ref string) ([]byte, error) {
 	out, err := bwRun("get", "password", ref)

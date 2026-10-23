@@ -101,9 +101,8 @@ func pickAgentKey(keys []*agent.Key, want string) (*agent.Key, error) {
 
 // prepareAgentKey turns AgentKey into the public key ssh is told to use
 func prepareAgentKey(h *Host) error {
-	h.Agent = strings.TrimSpace(h.Agent)
-	if h.Agent != "" && h.Agent != "system" && h.Agent != AgentOnePassword && !filepath.IsAbs(ExpandHome(h.Agent)) && !strings.HasPrefix(h.Agent, `\\.\pipe\`) {
-		return fmt.Errorf("agent %q: use system, 1password or the full path of the agent socket", h.Agent)
+	if err := checkAgent(h); err != nil {
+		return err
 	}
 	if h.AgentKey == "" {
 		return nil
