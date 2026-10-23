@@ -818,7 +818,17 @@ func (s *Store) duplicate(id, name string) (*Host, error) {
 		return nil, err
 	}
 	h := *cur
-	h.extra = maps.Clone(cur.extra)
+	// a copy carries the unknown keys but not the local ones, a newer sshr
+	// may bind those to this host's ID
+	h.extra = nil
+	for k, v := range cur.extra {
+		if !strings.HasPrefix(k, localPrefix) {
+			if h.extra == nil {
+				h.extra = map[string]json.RawMessage{}
+			}
+			h.extra[k] = v
+		}
+	}
 	// only a password sealed by sshr has to be opened and sealed again, a
 	// password manager entry keeps its reference and is not read at all
 	if h.PasswordMode == PasswordSaved {

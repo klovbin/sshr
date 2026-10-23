@@ -163,3 +163,31 @@ func TestNewerHostWithChangedFieldReads(t *testing.T) {
 		t.Error("a damaged file of today's format read")
 	}
 }
+
+// a copy of a host keeps its unknown keys but not the local_ ones (#163)
+func TestDuplicateDropsLocalKeys(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "web", Host: "10.0.0.5", User: "u", PasswordMode: PasswordAsk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addFutureField(t, s, h.ID)
+	path := filepath.Join(s.Dir, h.ID+".json")
+	b, _ := os.ReadFile(path)
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	m["local_bound"] = "x"
+	b, _ = json.Marshal(m)
+	os.WriteFile(path, b, 0o600)
+	cp, err := s.Duplicate(h.ID, "web copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasFutureField(t, s, cp.ID) {
+		t.Error("the copy lost the unknown key")
+	}
+	b, _ = os.ReadFile(filepath.Join(s.Dir, cp.ID+".json"))
+	if strings.Contains(string(b), "local_bound") {
+		t.Errorf("the copy has the local key: %s", b)
+	}
+}
