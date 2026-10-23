@@ -107,7 +107,12 @@ func LoadSettings() (Settings, error) {
 func cloneSettings(s Settings) Settings {
 	c := s
 	c.base = nil
-	c.OPAccounts = append([]OPLinkedAccount(nil), s.OPAccounts...)
+	// nil stays nil and an empty list stays empty, DeepEqual tells them
+	// apart and would see a change nobody made
+	if s.OPAccounts != nil {
+		c.OPAccounts = make([]OPLinkedAccount, len(s.OPAccounts))
+		copy(c.OPAccounts, s.OPAccounts)
+	}
 	return c
 }
 

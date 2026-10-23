@@ -107,3 +107,30 @@ func TestCloneSettingsCoversEveryList(t *testing.T) {
 		}
 	}
 }
+
+func TestAnEmptyAccountListIsNoChange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path := filepath.Join(home, ".sshr", "settings.json")
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	os.WriteFile(path, []byte(`{"lang":"en","op_accounts":[]}`), 0o600)
+	app, err := LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// another process links an account meanwhile
+	other, _ := LoadSettings()
+	other.AddOPAccount("acc1", "me@example.com")
+	other.AddOPAccount("acc2", "work@example.com")
+	if err := SaveSettings(other); err != nil {
+		t.Fatal(err)
+	}
+	app.Mosh = true
+	if err := SaveSettings(app); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := LoadSettings(); len(got.OPAccounts) != 2 || !got.Mosh {
+		t.Fatalf("accounts %+v mosh %v, want both accounts kept and mosh on", got.OPAccounts, got.Mosh)
+	}
+}
