@@ -371,7 +371,7 @@ func TestObjectBackendTrimNeedsRealHistory(t *testing.T) {
 }
 
 // a device whose next change is no longer kept is told it fell behind,
-// not that the history does not add up (#248)
+// a short history with a hole is still a server that skips changes (#248)
 func TestFellBehindKeptHistory(t *testing.T) {
 	store, a, b := objWorld(t)
 	seen := b.st.Counter
@@ -381,7 +381,18 @@ func TestFellBehindKeptHistory(t *testing.T) {
 		must(t, a.Push())
 	}
 	must(t, store.Delete(manifestName(seen+1)))
-	err := b.Pull()
+	if err := b.Pull(); err == nil || !strings.Contains(err.Error(), "skipped changes") {
+		t.Errorf("a hole in a short history: %v", err)
+	}
+	// a history as long as the store keeps, starting past this device
+	head, _, err := a.backend().Head()
+	must(t, err)
+	for n := head + 1; n <= seen+keepHistory+1; n++ {
+		body, _ := json.Marshal(syncproto.Manifest{Counter: n})
+		signed, _ := json.Marshal(syncproto.Signed{Body: body})
+		must(t, store.Create(manifestName(n), signed))
+	}
+	err = b.Pull()
 	if err == nil || !strings.Contains(err.Error(), "keeps only the last") {
 		t.Errorf("pull behind the kept history: %v", err)
 	}

@@ -749,6 +749,9 @@ func newer(a, b syncproto.Entry) bool {
 func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 	var out []syncproto.Signed
 	after := c.st.Counter
+	// cut is the first change the sync no longer has when the history it
+	// sends starts past what this device saw
+	var cut uint64
 	for {
 		b, err := c.backend().ManifestsAfter(after)
 		if errors.Is(err, ErrPending) {
@@ -777,14 +780,25 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 			case m.Counter <= after:
 				return nil, fmt.Errorf("the server sent change %d again after %d, the history does not add up", m.Counter, after)
 			case m.Counter != after+1 && !joining && len(out) == 0 && after == c.st.Counter:
-				// the kept history starts past what this device saw
-				return nil, fmt.Errorf("the sync keeps only the last %d changes and no longer has changes %d to %d, this device fell behind or the history was cut, run sshr sync leave and join again", keepHistory, after+1, m.Counter-1)
+				// trimmed history or a gap, told apart once the length of
+				// what follows is known
+				cut = after + 1
 			case m.Counter != after+1 && !joining:
 				return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", after+1, m.Counter-1)
 			}
 			after = m.Counter
 			out = append(out, sm)
 		}
+	}
+	if cut > 0 {
+		var m syncproto.Manifest
+		json.Unmarshal(out[0].Body, &m)
+		// a trim keeps keepHistory changes, a shorter history with a hole
+		// is a server that hides changes
+		if len(out) >= keepHistory {
+			return nil, fmt.Errorf("the sync keeps only the last %d changes and no longer has changes %d to %d, this device fell behind, run sshr sync leave and join again", keepHistory, cut, m.Counter-1)
+		}
+		return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", cut, m.Counter-1)
 	}
 	if len(out) == 0 && c.st.Counter > 0 {
 		cur, _, err := c.backend().Head()
