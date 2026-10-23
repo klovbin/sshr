@@ -40,8 +40,8 @@ func TestPayloadBytesStayTheSame(t *testing.T) {
 func TestHostFieldsAreClassified(t *testing.T) {
 	classes := map[string]string{
 		"ID": "synced", "Name": "synced", "Host": "synced", "Port": "synced", "User": "synced",
-		// a key file path and an agent socket of this machine travel as they
-		// are, FromOtherDevice does not reset them yet, see #100
+		// a key file path and an agent travel, FromOtherDevice keeps the local
+		// ones while the destination stays and drops them when it moved (#195)
 		"Key": "synced", "Agent": "synced",
 		"KeyMode": "synced", "KeyPub": "synced", "PasswordMode": "synced",
 		"Jump": "synced", "Gateway": "synced", "Session": "synced", "Forwards": "synced", "Tags": "synced", "CreatedAt": "synced",

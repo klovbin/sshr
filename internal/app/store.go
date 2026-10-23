@@ -709,6 +709,24 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 	if local != nil && !same && local.KeyMode == KeyVault && local.KeySealed != "" {
 		notes = append(notes, "the host now points elsewhere ("+in.Dest()+"), the key stored here is not used for it, paste it again here if that is right")
 	}
+	// a key file and an agent name places on this machine, like a reference
+	// they stay only for the destination they were set for, a host that
+	// points elsewhere falls back to the default ssh keys
+	if local != nil && !same && (in.Key != "" || in.Agent != "" || in.KeyMode == KeyAgent) {
+		if in.KeyMode == KeyAgent {
+			in.KeyMode, in.KeyPub = "", ""
+		}
+		in.Key, in.Agent = "", ""
+		notes = append(notes, "the host now points elsewhere ("+in.Dest()+"), its key file and agent are not used for it, ssh uses its default keys, set them again here if that is right")
+	}
+	if same && local.KeyMode == in.KeyMode {
+		if local.Key != "" {
+			in.Key = local.Key
+		}
+		if local.Agent != "" {
+			in.Agent = local.Agent
+		}
+	}
 	if name := managerName(in.PasswordMode); name != "" {
 		if same && local.PasswordMode == in.PasswordMode && local.PasswordRef != "" {
 			in.PasswordRef = local.PasswordRef

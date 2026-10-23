@@ -283,3 +283,31 @@ func TestUpdateKeepsLastConnected(t *testing.T) {
 		t.Fatal("an edit dropped the last connect time")
 	}
 }
+
+// a key file and an agent stay on this machine while the destination
+// does, a host that moved falls back to the default keys, a new host
+// keeps what it brings (#195)
+func TestFromOtherDeviceKeyFileAndAgent(t *testing.T) {
+	local := &Host{Host: "10.0.0.5", User: "deploy", Port: 22, Key: "~/.ssh/mine"}
+	out, _ := FromOtherDevice(Host{Host: "10.0.0.5", User: "deploy", Port: 22, Key: "~/.ssh/theirs"}, local)
+	if out.Key != "~/.ssh/mine" {
+		t.Errorf("the local key file was replaced: %q", out.Key)
+	}
+	out, notes := FromOtherDevice(Host{Host: "evil.example", User: "deploy", Port: 22, Key: "~/.ssh/work"}, local)
+	if out.Key != "" || len(notes) == 0 {
+		t.Errorf("a moved host kept a key file: %q %v", out.Key, notes)
+	}
+	agentLocal := &Host{Host: "10.0.0.5", User: "deploy", Port: 22, KeyMode: KeyAgent, Agent: "/run/mine.sock", KeyPub: "ssh-ed25519 AAA"}
+	out, _ = FromOtherDevice(Host{Host: "10.0.0.5", User: "deploy", Port: 22, KeyMode: KeyAgent, Agent: "/tmp/theirs.sock"}, agentLocal)
+	if out.Agent != "/run/mine.sock" {
+		t.Errorf("the local agent was replaced: %q", out.Agent)
+	}
+	out, _ = FromOtherDevice(Host{Host: "evil.example", User: "deploy", Port: 22, KeyMode: KeyAgent, Agent: "/tmp/theirs.sock", KeyPub: "ssh-ed25519 BBB"}, agentLocal)
+	if out.Agent != "" || out.KeyMode != "" || out.KeyPub != "" {
+		t.Errorf("a moved host kept its agent: %+v", out)
+	}
+	out, _ = FromOtherDevice(Host{Host: "10.0.0.9", User: "deploy", Port: 22, Key: "~/.ssh/id_ed25519"}, nil)
+	if out.Key != "~/.ssh/id_ed25519" {
+		t.Errorf("a new host lost its key file: %q", out.Key)
+	}
+}
