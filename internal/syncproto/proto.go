@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 )
 
-// FormatVersion is the version of Manifest
+// FormatVersion is the version of Manifest, a new optional field keeps
+// it, a client reads its own version and older ones and tells the user to
+// update on a newer one
 const FormatVersion = 1
 
 // Limits the server enforces

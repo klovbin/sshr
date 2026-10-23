@@ -182,6 +182,10 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 		}
 		line("ProxyJump", strings.Join(hops, ","))
 	}
+	if h.Gateway != "" {
+		// ssh_config has no fallback, plain ssh gets the direct way
+		fmt.Fprintf(&b, "  # sshr goes through %s when this host does not answer directly, plain ssh does not\n", h.Gateway)
+	}
 	if note != "" {
 		fmt.Fprintf(&b, "  # %s\n", note)
 	}

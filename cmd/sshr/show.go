@@ -31,9 +31,10 @@ func cmdShow(store *app.Store, args []string) {
 }
 
 // connectCommand is the plain ssh command of sshr connect for h, without
-// forwards and mosh
+// forwards and mosh, the direct way of a host with a gateway, the gateway
+// row says when it is used
 func connectCommand(store *app.Store, h *app.Host) ([]string, error) {
-	opts, err := store.ConnectArgs(h)
+	opts, err := store.DirectArgs(h)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +58,7 @@ func writeShow(w io.Writer, h *app.Host, argv []string, now time.Time) {
 	row("key file", h.Key)
 	row("agent", h.Agent)
 	row("jump hosts", h.Jump)
+	row("gateway", h.Gateway)
 	row("session", h.Session)
 	for _, f := range h.Forwards {
 		row("forward", f.Name+" -"+f.Kind+" "+f.Spec)

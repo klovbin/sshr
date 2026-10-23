@@ -3,6 +3,7 @@ package ext
 import (
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -38,12 +39,10 @@ func TestParseImportReadsOnlyTheListedFields(t *testing.T) {
 
 func TestParseImportRefuses(t *testing.T) {
 	for name, in := range map[string]string{
-		"not an object":  `[1,2]`,
-		"no key":         `{"hosts":[{"host":"h","user":"u"}]}`,
-		"a blank key":    `{"hosts":[{"key":"  ","host":"h","user":"u"}]}`,
-		"a bad port":     `{"hosts":[{"key":"k","port":"x"}]}`,
-		"not JSON":       `hosts: []`,
-		"a host as text": `{"hosts":["web"]}`,
+		"not an object": `[1,2]`,
+		"no key":        `{"hosts":[{"host":"h","user":"u"}]}`,
+		"a blank key":   `{"hosts":[{"key":"  ","host":"h","user":"u"}]}`,
+		"not JSON":      `hosts: []`,
 	} {
 		if _, _, err := ParseImport([]byte(in)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -60,6 +59,24 @@ func TestParseImportRefuses(t *testing.T) {
 	b.WriteString(`]}`)
 	if _, _, err := ParseImport([]byte(b.String())); err == nil {
 		t.Error("more hosts than the limit were taken")
+	}
+}
+
+// one host that does not decode is skipped with a warning, the others
+// are still taken
+func TestParseImportSkipsABadHost(t *testing.T) {
+	in := `{"hosts":[{"key":"a","host":"h1","port":100000000000000000000},{"key":"b","host":"h2","port":22.5},"web",{"key":"c","host":"h3","port":22}]}`
+	hosts, warnings, err := ParseImport([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 || hosts[0].Key != "c" || len(warnings) != 3 {
+		t.Fatalf("hosts %+v warnings %q", hosts, warnings)
+	}
+	for i, w := range warnings {
+		if !strings.Contains(w, "host "+strconv.Itoa(i+1)+" is skipped") {
+			t.Errorf("warning %q", w)
+		}
 	}
 }
 

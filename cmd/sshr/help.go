@@ -54,6 +54,8 @@ Other options:
   -n, --name <name>            the name in the list, the address by default
   -p, --port <port>            22 by default
   -J, --jump <a,b>             jump hosts: saved names or [user@]host[:port]
+  --gateway <a,b>              go through these only when the host does not
+                               answer directly, checked on each connect
   --session tmux|zellij        attach to that session on connect
   -t, --tag <tags>             tags, comma separated
 
@@ -64,7 +66,8 @@ Examples:
 	{name: "show", usage: "sshr show <name or id>", short: "show a host and the ssh command it runs",
 		details: `Prints the fields of the host and the exact ssh command sshr connect runs,
 quoted so it can be copied, passwords never show, they reach ssh through
-a socket and not the command line
+a socket and not the command line, a host with a gateway shows the direct
+way, connect goes through the gateway when the host does not answer
 
 Examples:
   sshr show web`},
@@ -118,6 +121,17 @@ Options:
   sshr tag web               show the tags
   sshr tag web +prod eu      add prod and eu
   sshr tag web -eu           remove eu`},
+	{name: "gateway", usage: "sshr gateway <name or id> [<gateway>|--off]", short: "fall back to a jump host when a host does not answer",
+		details: `With a gateway, connect, run, send, get and tunnel check the host
+directly first (a TCP connect and the SSH banner, up to 3 s each) and go
+through the gateway only when it does not answer, off by default: a host
+that is down directly costs that wait on every connect, a host with jump
+hosts always goes through them and has no gateway
+
+Examples:
+  sshr gateway db                show it
+  sshr gateway db bastion        through the saved host bastion
+  sshr gateway db --off          connect directly again`},
 	{name: "run", usage: "sshr run [options] [name...] -- <command>", short: "run a command on many hosts",
 		details: `Runs on the named hosts and on the hosts that have all the -t tags,
 prints each host's output as a block, exits 1 when one fails

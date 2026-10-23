@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,7 +62,13 @@ type state struct {
 	// not reached every kept device yet, the next sync delivers it
 	Rotation *rotation `json:"rotation,omitempty"`
 	LastSync time.Time `json:"last_sync"`
+	// extra are the keys a newer sshr wrote, kept through every save
+	extra map[string]json.RawMessage
 }
+
+// stateFormat is the format of state.json this build writes, a file
+// without "version" is format 1, a newer one stops the sync
+const stateFormat = 1
 
 // rotation is a committed vault key change still to deliver, the key waits
 // in the keychain under key-pending until every envelope is written
@@ -104,6 +111,17 @@ type Client struct {
 	// running is set while this Client holds the run lock, calls inside
 	// the run do not take it again
 	running bool
+	// LeftOut names the hosts the last run did not sync and why, a run
+	// that left hosts out still succeeds, the caller says so
+	LeftOut map[string]string
+}
+
+// leaveOut notes a host the run did not sync
+func (c *Client) leaveOut(id, why string) {
+	if c.LeftOut == nil {
+		c.LeftOut = map[string]string{}
+	}
+	c.LeftOut[id] = why
 }
 
 // run holds the lock of the sync folder for fn, two sync runs at once
@@ -122,7 +140,7 @@ func (c *Client) run(fn func() error) error {
 		return err
 	}
 	defer unlock()
-	c.running, c.st = true, nil
+	c.running, c.st, c.LeftOut = true, nil, nil
 	defer func() { c.running = false }()
 	return fn()
 }
@@ -178,7 +196,19 @@ func (c *Client) load() error {
 	}
 	var st state
 	if err := json.Unmarshal(b, &st); err != nil {
+		if _, format, ferr := app.RecordExtra(b, reflect.TypeOf(state{})); ferr == nil && format > stateFormat {
+			return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", app.ErrNewerFormat, format)
+		}
 		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
+	}
+	var format int
+	if st.extra, format, err = app.RecordExtra(b, reflect.TypeOf(state{})); err != nil {
+		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
+	}
+	if format > stateFormat {
+		// the state holds the counter and the head of the chain, a sync
+		// that does not understand it all would break the history
+		return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", app.ErrNewerFormat, format)
 	}
 	if st.Entries == nil {
 		st.Entries = map[string]entryState{}
@@ -201,6 +231,9 @@ func (c *Client) load() error {
 // applied, a crash before it repeats the sync instead of skipping one
 func (c *Client) save() error {
 	b, err := json.MarshalIndent(c.st, "", "  ")
+	if err == nil {
+		b, err = app.AppendRecordKeys(b, c.st.extra)
+	}
 	if err != nil {
 		return err
 	}
@@ -613,15 +646,15 @@ type payload struct {
 	Password string   `json:"password,omitempty"`
 }
 
+// payloadJSON is the payload on the wire, the host is written and read by
+// app, which carries the fields of a newer sshr
+type payloadJSON struct {
+	Host     json.RawMessage `json:"host"`
+	Password string          `json:"password,omitempty"`
+}
+
 func payloadOf(h app.Host) ([]byte, error) {
 	p := payload{Host: h}
-	// only a password saved in sshr is read, one in 1Password stays there
-	if h.PasswordMode == app.PasswordSaved {
-		if err := app.Unlock(&h); err != nil {
-			return nil, err
-		}
-		p.Password = h.Password
-	}
 	p.Host.PasswordSealed, p.Host.PlainPassword, p.Host.KeySealed = "", "", ""
 	// when this machine last connected stays here, it would make every
 	// connect a change to push
@@ -631,7 +664,20 @@ func payloadOf(h app.Host) ([]byte, error) {
 	// references to secrets of this machine stay here, the other devices
 	// do not take them anyway (app.FromOtherDevice)
 	p.Host.PasswordRef, p.Host.KeyRef = "", ""
-	return json.Marshal(p)
+	// the host part first, a host this build does not send (a newer
+	// format) is refused before its password is opened
+	host, err := app.HostPayloadJSON(p.Host)
+	if err != nil {
+		return nil, err
+	}
+	// only a password saved in sshr is read, one in 1Password stays there
+	if h.PasswordMode == app.PasswordSaved {
+		if err := app.Unlock(&h); err != nil {
+			return nil, err
+		}
+		p.Password = h.Password
+	}
+	return json.Marshal(payloadJSON{Host: host, Password: p.Password})
 }
 
 // localHash is keyed with the device key, the state file holds it and must
@@ -710,8 +756,11 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 	if err := json.Unmarshal(sm.Body, &m); err != nil {
 		return nil, err
 	}
-	if m.Version != syncproto.FormatVersion || m.Account != c.st.Account {
-		return nil, errors.New("manifest of another account or format")
+	if m.Account != c.st.Account {
+		return nil, errors.New("manifest of another account")
+	}
+	if err := checkFormat(m.Version); err != nil {
+		return nil, err
 	}
 	if c.st.Counter > 0 || c.st.Approver == "" {
 		if m.Counter != c.st.Counter+1 {
@@ -781,6 +830,20 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 	c.st.Trusted, c.st.Head, c.st.Counter, c.st.Epoch = m.Devices, syncproto.BodyHash(sm.Body), m.Counter, m.Epoch
 	c.st.Approver = ""
 	return &m, nil
+}
+
+// checkFormat takes a manifest of this format or an older one, a field
+// added to the manifest keeps the format, only a change older devices
+// cannot read raises it, and then they are told to update instead of
+// failing on a mismatch they cannot explain
+func checkFormat(v int) error {
+	switch {
+	case v < 1:
+		return fmt.Errorf("manifest of format %d, no sshr writes that", v)
+	case v > syncproto.FormatVersion:
+		return fmt.Errorf("the account was written by a newer sshr (format %d, this one reads up to %d), update sshr on this device", v, syncproto.FormatVersion)
+	}
+	return nil
 }
 
 // Pull applies the changes other devices pushed
@@ -869,8 +932,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := m.Entries[id]
-		if broken[id] {
-			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
+		if why, ok := broken[id]; ok {
+			c.logf("skipped %s, %s", short(id, 8), why)
+			c.leaveOut(id, why)
 			continue
 		}
 		delete(c.st.Skipped, id)
@@ -893,7 +957,15 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		// CLI is seen and a failed download leaves nothing behind
 		var p *payload
 		if !e.Deleted {
-			if p, err = c.fetchPayload(id, e, key, m.Epoch); err != nil {
+			if p, err = c.fetchPayload(id, e, key, m.Epoch); errors.Is(err, errBadPayload) {
+				// a payload this sshr cannot read (a newer field type) is
+				// carried on and tried again on every pull, as a host Import
+				// refuses is, the other hosts go on
+				c.st.Skipped[id] = e
+				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", short(id, 8), err)
+				c.leaveOut(id, err.Error())
+				continue
+			} else if err != nil {
 				return err
 			}
 		}
@@ -934,6 +1006,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 						if err != nil {
 							c.st.Skipped[id] = e
 							c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+							c.leaveOut(id, err.Error())
 							return nil
 						}
 						c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", short(id, 8), short(e.Device, 8), cp.Name)
@@ -990,6 +1063,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				}
 				c.st.Skipped[id] = e
 				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+				c.leaveOut(id, err.Error())
 				return nil
 			}
 			if dup != nil {
@@ -1047,17 +1121,26 @@ func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string
 }
 
 // fetchPayload downloads and opens the blob of entry id
+// errBadPayload is a payload that opens but does not read as a host, a
+// download that fails or a blob that does not open is another error
+var errBadPayload = errors.New("bad payload")
+
 func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch int) (*payload, error) {
 	plain, err := c.fetchBlob(id, e.Hash, key, epoch)
 	if err != nil {
 		return nil, err
 	}
-	var p payload
-	if err := json.Unmarshal(plain, &p); err != nil {
-		return nil, fmt.Errorf("entry %s: %v", short(id, 8), err)
+	var wire payloadJSON
+	if err := json.Unmarshal(plain, &wire); err != nil {
+		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
 	}
+	host, err := app.HostFromPayloadJSON(wire.Host)
+	if err != nil {
+		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
+	}
+	p := payload{Host: host, Password: wire.Password}
 	if p.Host.ID != id {
-		return nil, fmt.Errorf("entry %s holds host %s", short(id, 8), p.Host.ID)
+		return nil, fmt.Errorf("%w: entry %s holds host %q", errBadPayload, short(id, 8), short(p.Host.ID, 40))
 	}
 	return &p, nil
 }
@@ -1078,22 +1161,30 @@ func conflictName(name, device string) string {
 
 // localHosts returns the payload of every host here and the IDs of host
 // files that do not load, those are neither deleted nor overwritten
-func (c *Client) localHosts() (map[string][]byte, map[string]bool, error) {
+func (c *Client) localHosts() (map[string][]byte, map[string]string, error) {
 	hosts, unreadable, err := c.Store.ListAll()
 	if err != nil {
 		return nil, nil, err
 	}
+	// broken names the hosts that cannot sync from here and why, one host
+	// whose file does not load or whose password does not open must not
+	// stop the others, and must not be taken for a deleted one
+	broken := map[string]string{}
+	for _, id := range unreadable {
+		broken[id] = "its host file " + id + ".json here does not load, fix it, removing it deletes the host on every device"
+	}
 	out := map[string][]byte{}
 	for _, h := range hosts {
 		p, err := payloadOf(h)
+		if errors.Is(err, app.ErrNewerFormat) {
+			broken[h.ID] = err.Error()
+			continue
+		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("host %s: %v", h.Name, err)
+			broken[h.ID] = err.Error() + ", it does not sync from here until then"
+			continue
 		}
 		out[h.ID] = p
-	}
-	broken := map[string]bool{}
-	for _, id := range unreadable {
-		broken[id] = true
 	}
 	return out, broken, nil
 }
@@ -1201,8 +1292,9 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		if _, ok := c.st.Skipped[id]; ok {
 			continue
 		}
-		if broken[id] {
-			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
+		if why, ok := broken[id]; ok {
+			c.logf("kept %s on other devices, %s", short(id, 8), why)
+			c.leaveOut(id, why)
 			continue
 		}
 		if _, ok := local[id]; !ok && !known.Deleted {

@@ -60,6 +60,8 @@ func runCLI(args []string) {
 		cmdKey(store, args[1:])
 	case "tag":
 		cmdTag(store, args[1:])
+	case "gateway":
+		cmdGateway(store, args[1:])
 	case "run":
 		cmdRun(store, args[1:])
 	case "send":
@@ -212,7 +214,7 @@ func cmdList(store *app.Store, args []string) {
 }
 
 func cmdAdd(store *app.Store, args []string) {
-	var host, name, user, key, jump, session string
+	var host, name, user, key, jump, gateway, session string
 	noKey, askPassword, keyStdin := false, false, false
 	// 1Password: --op-password / --op-key link existing items,
 	// --store 1password creates an item from the password typed now
@@ -242,6 +244,11 @@ func cmdAdd(store *app.Store, args []string) {
 		} else if (a == "-J" || a == "--jump") && i+1 < len(args) {
 			i++
 			jump = args[i]
+		} else if strings.HasPrefix(a, "--gateway=") {
+			gateway = strings.SplitN(a, "=", 2)[1]
+		} else if a == "--gateway" && i+1 < len(args) {
+			i++
+			gateway = args[i]
 		} else if strings.HasPrefix(a, "--session=") {
 			session = strings.SplitN(a, "=", 2)[1]
 		} else if a == "--session" && i+1 < len(args) {
@@ -385,7 +392,7 @@ func cmdAdd(store *app.Store, args []string) {
 		Key: key, KeyData: keyData, KeyMode: keyMode, KeyRef: keyRef,
 		Agent: agentName, AgentKey: agentKey,
 		PasswordMode: passwordMode, Password: password, PasswordRef: passwordRef,
-		Jump: jump, Session: session, Tags: tags,
+		Jump: jump, Gateway: gateway, Session: session, Tags: tags,
 	}
 	h, err := store.Add(in)
 	if errors.Is(err, app.ErrKeyPassphrase) {
@@ -408,6 +415,9 @@ func cmdAdd(store *app.Store, args []string) {
 	}
 	if h.Jump != "" {
 		msg += " via " + h.Jump
+	}
+	if h.Gateway != "" {
+		msg += " gateway=" + h.Gateway
 	}
 	if h.Session != "" {
 		msg += " session=" + h.Session
@@ -486,63 +496,60 @@ func cmdConnect(store *app.Store, args []string) {
 	if unsaved {
 		fmt.Fprintf(os.Stderr, "sshr: %s is not saved, connecting once\n", query)
 	}
-	sshOpts, err := store.ConnectArgs(h)
+	var fwds []app.Forward
+	if len(fwdNames) > 0 {
+		if fwds, err = app.FindForwards(h.Forwards, fwdNames); err != nil {
+			fatal(err)
+		}
+	}
+	plan, err := store.PlanSession(h, app.LaunchOptions{Forwards: fwds, Mosh: useMosh, Plain: plain})
 	if err != nil {
 		fatal(err)
 	}
+	for _, note := range plan.Notes {
+		fmt.Fprintln(os.Stderr, "sshr: "+note)
+	}
 	dest := h.Dest()
-	if len(fwdNames) > 0 {
-		fs, err := app.FindForwards(h.Forwards, fwdNames)
+	if plan.Tool == "mosh" {
+		if _, err := plan.ToolPath(); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
+		// the secrets are fetched after the line, a password manager prompt
+		// belongs to this connect
+		cmd, cleanup, err := plan.Command()
 		if err != nil {
 			fatal(err)
 		}
-		// mosh carries no port forwards at all
-		if useMosh {
-			fmt.Fprintln(os.Stderr, "sshr: mosh cannot forward ports, using ssh")
-			useMosh = false
-		}
-		for _, f := range fs {
-			sshOpts = append(sshOpts, f.Args()...)
-		}
-	}
-	session := h.Session
-	if plain {
-		session = ""
-	}
-
-	// mosh needs a direct UDP path to the server, which a bastion does not
-	// give, and its --ssh cannot carry a quoted ProxyCommand
-	if useMosh && h.Jump != "" {
-		fmt.Fprintln(os.Stderr, "sshr: mosh does not work through jump hosts, using ssh")
-		useMosh = false
-	}
-	if useMosh {
-		if code, ok := runMosh(h, sshOpts, dest, session); ok {
+		started := time.Now()
+		code := runAttached(cmd, cleanup)
+		if !app.MoshStartFailed(code, time.Since(started)) {
 			markConnected(store, h, code)
 			os.Exit(code)
 		}
+		fmt.Fprintln(os.Stderr, "sshr: mosh did not start, falling back to ssh")
+		plan = plan.Fallback
 	}
 
-	sshBin, err := exec.LookPath("ssh")
-	if err != nil {
-		fatal(fmt.Errorf("ssh not found in PATH"))
+	if _, err := plan.ToolPath(); err != nil {
+		fatal(err)
 	}
 	via := ""
-	if h.Jump != "" {
-		via = " via " + h.Jump
+	if plan.Via != "" {
+		via = " via " + plan.Via
 	}
-	if session != "" {
-		via += ", " + session + " session " + app.SessionName
+	if h.Jump == "" && plan.Via != "" {
+		via += " (no answer directly)"
+	}
+	if plan.Session != "" {
+		via += ", " + plan.Session + " session " + app.SessionName
 	}
 	fmt.Printf("Connecting to %s (%s:%d)%s...\n", h.Name, dest, h.Port, via)
-	if session != "" {
-		// A remote command gets no terminal unless asked, and tmux or
-		// zellij need one
-		sshOpts = append(sshOpts, "-t", "--", dest, app.SessionCommand(session))
-	} else {
-		sshOpts = append(sshOpts, "--", dest)
+	cmd, cleanup, err := plan.Command()
+	if err != nil {
+		fatal(err)
 	}
-	code := run(h, sshBin, sshOpts...)
+	code := runAttached(cmd, cleanup)
 	markConnected(store, h, code)
 	os.Exit(code)
 }
@@ -622,51 +629,22 @@ func cmdProxy(store *app.Store, args []string) {
 	}
 }
 
-// moshStartup is how long a failing mosh run still counts as "could not
-// start" (no mosh-server, UDP blocked) rather than a session that ended.
-const moshStartup = 20 * time.Second
-
-// runMosh connects with mosh. ok=false means mosh is unusable here or did not
-// start, and the caller should fall back to plain ssh.
-func runMosh(h *app.Host, sshOpts []string, dest, session string) (code int, ok bool) {
-	moshBin, err := exec.LookPath("mosh")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sshr: mosh is not installed, using ssh")
-		return 0, false
-	}
-	// mosh splits --ssh on whitespace, any option with a space (a key or
-	// agent path, the sshr path in ProxyCommand) would be cut in two
-	for _, o := range sshOpts {
-		if strings.ContainsAny(o, " \t") {
-			fmt.Fprintf(os.Stderr, "sshr: the ssh option %q has spaces, mosh cannot pass it, using ssh\n", o)
-			return 0, false
-		}
-	}
-	fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
-	started := time.Now()
-	moshArgs := []string{"--ssh=ssh " + strings.Join(sshOpts, " "), "--", dest}
-	if script := app.SessionScript(session); script != "" {
-		// mosh-server runs the command itself, without a shell in between
-		moshArgs = append(moshArgs, "sh", "-c", script)
-	}
-	code = run(h, moshBin, moshArgs...)
-	if code != 0 && time.Since(started) < moshStartup {
-		fmt.Fprintln(os.Stderr, "sshr: mosh did not start, falling back to ssh")
-		return 0, false
-	}
-	return code, true
-}
-
 // run starts a terminal program attached to ours and returns its exit code.
 func run(h *app.Host, bin string, args ...string) int {
 	cmd := exec.Command(bin, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cleanup, err := app.AttachAuth(cmd, h)
 	if err != nil {
 		fatal(err)
 	}
+	return runAttached(cmd, cleanup)
+}
+
+// runAttached runs cmd on our terminal and returns its exit code, cleanup
+// runs after it ends
+func runAttached(cmd *exec.Cmd, cleanup func()) int {
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	defer cleanup()
 	if err := cmd.Start(); err != nil {
 		fatal(err)
@@ -675,7 +653,7 @@ func run(h *app.Host, bin string, args ...string) int {
 	// leave ssh running, a tunnel would keep its port, it goes to the child
 	// and sshr waits for it, Ctrl+C reaches both through the process group
 	stop := forwardSignals(cmd.Process)
-	err = cmd.Wait()
+	err := cmd.Wait()
 	stop()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -1097,16 +1075,25 @@ func cmdPing(store *app.Store, args []string) {
 					key += " THE SERVER KEY CHANGED, check before connecting"
 				}
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, r.Label(), r.Reason, key)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, r.Label(), gatewayReason(h, r), key)
 			continue
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), r.Reason)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), gatewayReason(h, r))
 	}
 	if asJSON {
 		printJSON(out)
 	}
 	w.Flush()
 	os.Exit(code)
+}
+
+// gatewayReason is the reason of a ping result, a host down directly that
+// has a gateway says connect goes through it
+func gatewayReason(h app.Host, r app.Health) string {
+	if r.State != app.HealthDown || h.Gateway == "" {
+		return r.Reason
+	}
+	return r.Reason + ", connect goes through " + h.Gateway
 }
 
 // cmdDesktopEntry adds sshr to the application menu or removes it
@@ -1133,6 +1120,37 @@ func cmdDesktopEntry(args []string) {
 }
 
 // cmdTag shows a host's tags or changes them: +x or x adds, -x removes
+// cmdGateway shows, sets or removes the host connect falls back to when
+// a host does not answer directly
+func cmdGateway(store *app.Store, args []string) {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: sshr gateway <name or id> [<gateway>|--off]")
+		os.Exit(1)
+	}
+	h := findHost(store, "gateway", args[0])
+	if len(args) == 1 {
+		if h.Gateway == "" {
+			fmt.Printf("%s: no gateway, connects directly\n", h.Name)
+			return
+		}
+		fmt.Printf("%s: through %s when it does not answer directly\n", h.Name, h.Gateway)
+		return
+	}
+	gateway := args[1]
+	if gateway == "--off" {
+		gateway = ""
+	}
+	saved, err := store.SetGateway(h.ID, gateway)
+	if err != nil {
+		fatal(err)
+	}
+	if saved.Gateway == "" {
+		fmt.Printf("%s: no gateway, connects directly\n", saved.Name)
+		return
+	}
+	fmt.Printf("%s: through %s when it does not answer directly\n", saved.Name, saved.Gateway)
+}
+
 func cmdTag(store *app.Store, args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "Usage: sshr tag <name or id> [+tag|-tag|tag...]")

@@ -107,6 +107,19 @@ sshr add 10.0.0.7 -u app -J gw,bastion     # a chain, gw first
 - plain hops go to ssh as `-J`, a saved hop makes ssh run sshr as `ProxyCommand`, so each hop logs in with its own saved key or password (`-J` would use only your ssh config)
 - a saved jump host may have its own jump, a loop stops after 8 hops, mosh is not used through a jump host
 
+### Gateway when the host does not answer
+
+```sh
+sshr add 10.0.0.7 -u app --gateway bastion   # direct when it answers, else through bastion
+sshr gateway db bastion                      # set it on a saved host
+sshr gateway db --off                        # connect directly again
+```
+
+- connect, run, send, get, tunnel and paste first check the host directly, a TCP connect and the SSH banner, up to 3 s each, and go through the gateway only when it does not answer, `connect` prints `via bastion (no answer directly)`
+- off by default: a host that is down directly costs that wait on every connect, a host with `-J` always goes through its jump hosts and cannot have a gateway
+- `sshr ping` says `connect goes through bastion` next to a host that is down directly, the ssh config export writes the direct way, plain ssh has no fallback
+- the gateway syncs like jump hosts, a device with an older sshr drops it when it saves that host until versioned records land ([#97](https://github.com/klovbin/sshr/issues/97))
+
 ## Keeping the session on the server
 
 ```sh
@@ -228,6 +241,7 @@ sshr sync leave                                                  # stop syncing 
 - end to end encrypted: per-device keys in the keychain (Ed25519, ML-KEM-768 + X25519), hosts encrypted with a shared vault key, signed and chained manifests, the server stores only ciphertext and cannot add a device or forge history
 - saved passwords sync inside the encryption, keys kept in sshr and password manager references do not, key file paths sync, the files do not
 - a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`, a host removed on one device and changed on another comes back with the change, the log says so
+- a host whose saved password does not open here, or one this sshr cannot read, is left out and named, the other hosts still sync, `sshr sync` then ends with "N hosts left out" and exit code 1
 - `leave` first delivers a vault key this device changed and has not handed to the others yet, `--force` leaves without it, then the others pair again
 - limits: sync runs when you call it, the server sees the host count, push times, addresses and device names and can hold back changes, a new device trusts the first state it sees (`--accept-reset` after a real server restore), compare the `sshr sync status` fingerprints to be sure two devices see the same history, a removed device keeps what it downloaded
 
@@ -249,12 +263,12 @@ TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-25
 sshr ext install https://github.com/someone/sshr-hello.git   # shows what it is and asks
 sshr ext install ./my-extension --yes                        # a folder, no question, for scripts
 sshr hello a b                                               # runs the extension called hello
-sshr ext import putty                                        # an extension that reads another tool's hosts
+sshr ext import remmina                                      # an extension that reads another tool's hosts
 sshr ext list
 sshr ext remove hello
 ```
 
-A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. `extensions/putty` reads the saved sessions of PuTTY on Linux and macOS where PuTTY keeps them (`~/.config/putty/sessions` or `~/.putty/sessions`, `$PUTTYSESSIONS` and `$PUTTYDIR` count), an SSH proxy of a session becomes a jump host, a `.ppk` key is left out with the `puttygen` command that converts it, PuTTY saves no passwords. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
 
 ```json
 {

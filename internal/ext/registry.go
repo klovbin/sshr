@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"time"
@@ -116,6 +117,9 @@ func (r *Registry) pins() (map[string]Lock, error) {
 		Extensions map[string]Lock `json:"extensions"`
 	}
 	if err := json.Unmarshal(b, &file); err != nil {
+		if _, format, ferr := app.RecordExtra(b, reflect.TypeOf(pinsFile{})); ferr == nil && format > pinsFormat {
+			return nil, fmt.Errorf("%w: %s was written by a newer sshr (format %d), update sshr to use the extensions", app.ErrNewerFormat, path, format)
+		}
 		return nil, fmt.Errorf("%s is damaged, remove it and install the extensions again: %v", path, err)
 	}
 	if file.Extensions == nil {
@@ -124,14 +128,76 @@ func (r *Registry) pins() (map[string]Lock, error) {
 	return file.Extensions, nil
 }
 
-func (r *Registry) writePins(pins map[string]Lock) error {
-	b, err := json.MarshalIndent(struct {
-		Extensions map[string]Lock `json:"extensions"`
-	}{pins}, "", "  ")
+// pinsFormat is the format of .pins.json this build writes, a file without
+// "version" is format 1
+const pinsFormat = 1
+
+// pinsFile is .pins.json as it is on disk, a pin is kept as raw JSON so a
+// pin this build did not change keeps the fields a newer sshr wrote in it
+type pinsFile struct {
+	Extensions map[string]json.RawMessage `json:"extensions"`
+}
+
+// pinsWritable fails when .pins.json was written by a newer sshr, an
+// install or a removal checks it before it touches any folder
+func (r *Registry) pinsWritable() error {
+	// read the way the install and the removal read them later: a link, an
+	// oversized or damaged file fails here, before a folder changes
+	if _, err := r.pins(); err != nil {
+		return err
+	}
+	path := filepath.Join(r.Root, PinsFile)
+	b, err := app.ReadFileShared(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	return app.WriteFileAtomic(filepath.Join(r.Root, PinsFile), append(b, '\n'), 0o600)
+	_, format, err := app.RecordExtra(b, reflect.TypeOf(pinsFile{}))
+	if err != nil {
+		return fmt.Errorf("%s is damaged, remove it and install the extensions again: %v", path, err)
+	}
+	if format > pinsFormat {
+		return fmt.Errorf("%w: %s was written by a newer sshr (format %d), update sshr to install or remove extensions", app.ErrNewerFormat, path, format)
+	}
+	return nil
+}
+
+// writePins writes the pins, the keys and pins of a newer sshr that this
+// write does not change are kept, a file of a newer format is not written
+func (r *Registry) writePins(pins map[string]Lock) error {
+	path := filepath.Join(r.Root, PinsFile)
+	var old pinsFile
+	var extra map[string]json.RawMessage
+	if b, err := app.ReadFileShared(path); err == nil {
+		var format int
+		if extra, format, err = app.RecordExtra(b, reflect.TypeOf(pinsFile{})); err == nil && format > pinsFormat {
+			return fmt.Errorf("%w: %s was written by a newer sshr (format %d), update sshr to install or remove extensions", app.ErrNewerFormat, path, format)
+		}
+		json.Unmarshal(b, &old)
+	}
+	out := pinsFile{Extensions: map[string]json.RawMessage{}}
+	for name, l := range pins {
+		var was Lock
+		if raw, ok := old.Extensions[name]; ok && json.Unmarshal(raw, &was) == nil && was == l {
+			out.Extensions[name] = raw
+			continue
+		}
+		b, err := json.Marshal(l)
+		if err != nil {
+			return err
+		}
+		out.Extensions[name] = b
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	if b, err = app.AppendRecordKeys(b, extra); err != nil {
+		return err
+	}
+	return app.WriteFileAtomic(path, append(b, '\n'), 0o600)
 }
 
 // Pin records the install of the extension called name, one at a time with
@@ -252,6 +318,9 @@ func (r *Registry) Remove(name string) error {
 		return ErrNotInstalled
 	}
 	return r.locked(func() error {
+		if err := r.pinsWritable(); err != nil {
+			return err
+		}
 		dir := filepath.Join(r.Root, name)
 		info, err := os.Lstat(dir)
 		if errors.Is(err, fs.ErrNotExist) {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -107,6 +108,10 @@ type Host struct {
 	// Jump lists hosts to go through, "a,b": saved host names/IDs or
 	// [user@]host[:port], empty means a direct connection
 	Jump string `json:"jump,omitempty"`
+	// Gateway is a jump spec tried only when the host does not answer
+	// directly, for a server reachable at the office and through a bastion
+	// from home, empty means no fallback, a host with Jump cannot have one
+	Gateway string `json:"gateway,omitempty"`
 	// Session is "tmux" or "zellij" to attach to a remote session named
 	// SessionName on connect, empty means a plain shell
 	Session string `json:"session,omitempty"`
@@ -123,6 +128,16 @@ type Host struct {
 	// Import raise it, Update refuses a copy with another Rev, 0 skips the
 	// check, it stays on this machine and does not sync
 	Rev int `json:"rev,omitempty"`
+
+	// route is the Gateway when the last ConnectArgs found the host down
+	// directly
+	route string
+	// extra are the keys of the host file this build does not know, a
+	// field a newer sshr wrote, kept through every save (record.go)
+	extra map[string]json.RawMessage
+	// format is the "version" of the host file, 0 and 1 are today's, a
+	// newer one is read and never written (record.go)
+	format int
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -201,7 +216,9 @@ func (s *Store) upgradeSealsLocked() {
 	}
 	for i := range hosts {
 		h := &hosts[i]
-		if h.PasswordMode != PasswordSaved || !strings.HasPrefix(h.PasswordSealed, sealPrefix) {
+		// a host of a newer format is not written by this build, opening
+		// its seal would only reach the keychain on every start
+		if h.format > hostFormat || h.PasswordMode != PasswordSaved || !strings.HasPrefix(h.PasswordSealed, sealPrefix) {
 			continue
 		}
 		plain, err := unseal(h.PasswordSealed, h.ID, "password")
@@ -366,6 +383,12 @@ func cleanHost(h Host) (Host, error) {
 	if h.Jump, err = checkJump(h.Jump, h.Name); err != nil {
 		return h, err
 	}
+	if h.Gateway, err = checkJump(h.Gateway, h.Name); err != nil {
+		return h, fmt.Errorf("gateway: %w", err)
+	}
+	if h.Gateway != "" && h.Jump != "" {
+		return h, fmt.Errorf("host %q always goes through %s, a gateway is only for a host reached directly", h.Name, h.Jump)
+	}
 	h.Session = strings.TrimSpace(h.Session)
 	if err := checkSession(h.Session); err != nil {
 		return h, err
@@ -405,8 +428,8 @@ func (s *Store) ListAll() ([]Host, []string, error) {
 			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
-		var h Host
-		if err := json.Unmarshal(b, &h); err != nil {
+		h, err := decodeHost(b)
+		if err != nil {
 			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
@@ -481,19 +504,36 @@ func (s *Store) delete(id string) error {
 	return nil
 }
 
-// Update rewrites an existing host with the fields of in, ID, CreatedAt
-// and LastConnected are kept, a Rev in in that is not the saved one returns
-// ErrChanged and saves nothing, a copy read before a sync or another save
-// would undo it, in.Rev 0 overwrites without the check
+// Update rewrites an existing host with the fields of in, ID, CreatedAt,
+// LastConnected and Gateway are kept, jump hosts in in drop the gateway, a
+// Rev in in that is not the saved one returns ErrChanged and saves nothing,
+// a copy read before a sync or another save would undo it, in.Rev 0
+// overwrites without the check
 func (s *Store) Update(id string, in Host) (out *Host, err error) {
 	err = s.locked(func(tx *Store) error {
-		out, err = tx.update(id, in)
+		out, err = tx.update(id, in, false)
 		return err
 	})
 	return out, err
 }
 
-func (s *Store) update(id string, in Host) (*Host, error) {
+// SetGateway sets the gateway of host id, empty removes it, Update keeps
+// the gateway because a form without that field would erase it
+func (s *Store) SetGateway(id, gateway string) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		cur, err := tx.Find(id)
+		if err != nil {
+			return err
+		}
+		in := *cur
+		in.Gateway, in.Rev = gateway, 0
+		out, err = tx.update(id, in, true)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, ErrNotFound
@@ -504,6 +544,12 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 	}
 	if in.Rev != 0 && in.Rev != cur.Rev {
 		return nil, ErrChanged
+	}
+	if !setGateway {
+		in.Gateway = cur.Gateway
+		if strings.TrimSpace(in.Jump) != "" {
+			in.Gateway = ""
+		}
 	}
 	h, err := cleanHost(in)
 	if err != nil {
@@ -516,6 +562,12 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 	}
 	if h.PasswordMode == PasswordSaved && h.Password == "" && h.PasswordSealed != "" && h.PasswordSealed == cur.PasswordSealed && destination(h) != destination(*cur) {
 		plain, err := unsealFor(cur.PasswordSealed, cur.ID, "password", destination(*cur))
+		if errors.Is(err, ErrSealBroken) {
+			// a field edited in the file by hand breaks the seal, an edit
+			// that puts the host back where the password was sealed for
+			// (sshr gateway --off after a gateway added by hand) opens it
+			plain, err = unsealFor(cur.PasswordSealed, cur.ID, "password", destination(h))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("the saved password of %s does not open, type it again: %v", cur.Name, err)
 		}
@@ -536,6 +588,9 @@ func (s *Store) update(id string, in Host) (*Host, error) {
 	h.ID, h.CreatedAt, h.Rev = cur.ID, cur.CreatedAt, cur.Rev+1
 	// only MarkConnected sets it, a host built from form fields has none
 	h.LastConnected = cur.LastConnected
+	// the fields of a newer sshr are not in a form this build drew, and a
+	// file of a newer format stays unwritten
+	h.extra, h.format = maps.Clone(cur.extra), cur.format
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -573,6 +628,19 @@ func (s *Store) importHost(in Host) (*Host, error) {
 		}
 	}
 	in.PlainPassword, in.PasswordSealed = "", ""
+	// the unknown keys the payload carried, and the local ones of the
+	// host here
+	if cur != nil {
+		in.extra = mergeExtra(in.extra, cur.extra)
+	}
+	if cur != nil && in.format < cur.format {
+		in.format = cur.format
+	}
+	// jump hosts win over a gateway, as in Update, refusing the host would
+	// repeat the same sync error on every run
+	if strings.TrimSpace(in.Jump) != "" {
+		in.Gateway = ""
+	}
 	h, err := cleanHost(in)
 	if err != nil {
 		return nil, err
@@ -700,14 +768,20 @@ func sameDestination(a, b Host) bool {
 	return strings.EqualFold(strings.TrimSpace(a.Host), strings.TrimSpace(b.Host)) &&
 		strings.TrimSpace(a.User) == strings.TrimSpace(b.User) &&
 		effectivePort(a.Port) == effectivePort(b.Port) &&
-		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "")
+		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "") &&
+		strings.ReplaceAll(a.Gateway, " ", "") == strings.ReplaceAll(b.Gateway, " ", "")
 }
 
 // destination is what a saved password is sealed for, the server it may
-// be sent to
+// be sent to, the gateway is added only when set, so passwords sealed
+// before gateways existed still open
 func destination(h Host) string {
-	return strings.ToLower(strings.TrimSpace(h.Host)) + "\x00" + strings.TrimSpace(h.User) + "\x00" +
+	d := strings.ToLower(strings.TrimSpace(h.Host)) + "\x00" + strings.TrimSpace(h.User) + "\x00" +
 		strconv.Itoa(effectivePort(h.Port)) + "\x00" + strings.ReplaceAll(h.Jump, " ", "")
+	if gw := strings.ReplaceAll(h.Gateway, " ", ""); gw != "" {
+		d += "\x00gateway\x00" + gw
+	}
+	return d
 }
 
 func effectivePort(p int) int {
@@ -746,6 +820,17 @@ func (s *Store) duplicate(id, name string) (*Host, error) {
 		return nil, err
 	}
 	h := *cur
+	// a copy carries the unknown keys but not the local ones, a newer sshr
+	// may bind those to this host's ID
+	h.extra = nil
+	for k, v := range cur.extra {
+		if !strings.HasPrefix(k, localPrefix) {
+			if h.extra == nil {
+				h.extra = map[string]json.RawMessage{}
+			}
+			h.extra[k] = v
+		}
+	}
 	// only a password sealed by sshr has to be opened and sealed again, a
 	// password manager entry keeps its reference and is not read at all
 	if h.PasswordMode == PasswordSaved {
@@ -898,6 +983,12 @@ func Unlock(h *Host) error {
 }
 
 func (s *Store) save(h *Host) error {
+	// a host of a newer format is refused before anything leaves the
+	// process, a 1Password item made for a file that is then not written
+	// would be left behind
+	if h.format > hostFormat {
+		return newerHostError(h)
+	}
 	if err := sealPassword(h); err != nil {
 		return err
 	}
@@ -907,7 +998,7 @@ func (s *Store) save(h *Host) error {
 	if err := s.opStorePassword(h); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(h, "", "  ")
+	b, err := encodeHost(h)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"sshr.dev/internal/app"
 )
 
 // source makes a folder with an extension in it
@@ -303,6 +306,94 @@ func TestInstallsOfOneNameDoNotClobberEachOther(t *testing.T) {
 	for _, left := range []string{".busy.new", ".busy.old"} {
 		if _, err := os.Stat(filepath.Join(r.Root, left)); err == nil {
 			t.Errorf("%s was left behind", left)
+		}
+	}
+}
+
+// .pins.json keeps the keys and the pin fields a newer sshr wrote, a pins
+// file of a newer format is not written (#97)
+func TestPinsKeepWhatANewerSshrWrote(t *testing.T) {
+	reg := &Registry{Root: t.TempDir()}
+	path := filepath.Join(reg.Root, PinsFile)
+	os.WriteFile(path, []byte(`{"extensions":{"a":{"source":"s","tree":"t","signed_by":"k"}},"future":1}`), 0o600)
+	if err := reg.Pin("b", Lock{Source: "s2", Tree: "t2"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	var file struct {
+		Extensions map[string]map[string]any `json:"extensions"`
+		Future     int                       `json:"future"`
+	}
+	if err := json.Unmarshal(b, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Future != 1 || file.Extensions["a"]["signed_by"] != "k" || file.Extensions["b"]["tree"] != "t2" {
+		t.Fatalf("pins: %s", b)
+	}
+	os.WriteFile(path, []byte(`{"extensions":{},"version":3}`), 0o600)
+	if err := reg.Pin("c", Lock{Source: "s", Tree: "t"}); !errors.Is(err, app.ErrNewerFormat) {
+		t.Errorf("a newer pins file was written: %v", err)
+	}
+}
+
+// a pins file of a newer format stops a removal and an install before any
+// folder changes (#161)
+func TestNewerPinsTouchNoFolder(t *testing.T) {
+	r := &Registry{Root: t.TempDir()}
+	st, err := Prepare(source(t, "hello", "#!/bin/sh\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Discard()
+	if err := r.Install(st); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(r.Root, PinsFile)
+	b, _ := os.ReadFile(path)
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	m["version"] = 3
+	b, _ = json.Marshal(m)
+	os.WriteFile(path, b, 0o600)
+	if err := r.Remove("hello"); !errors.Is(err, app.ErrNewerFormat) {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(r.Root, "hello")); err != nil {
+		t.Fatalf("the folder went: %v", err)
+	}
+	if err := r.Install(st); !errors.Is(err, app.ErrNewerFormat) {
+		t.Fatalf("install: %v", err)
+	}
+}
+
+// a pins file of a newer format whose pins changed shape says to update
+// sshr, not to remove the file (#162)
+func TestNewerPinsAreNotCalledDamaged(t *testing.T) {
+	r := &Registry{Root: t.TempDir()}
+	os.WriteFile(filepath.Join(r.Root, PinsFile), []byte(`{"version":2,"extensions":["a"]}`), 0o600)
+	if _, err := r.Find("hello"); !errors.Is(err, app.ErrNewerFormat) || strings.Contains(err.Error(), "damaged") {
+		t.Errorf("%v", err)
+	}
+}
+
+// a damaged pins file stops a removal before the folder goes (#167)
+func TestDamagedPinsTouchNoFolder(t *testing.T) {
+	r := &Registry{Root: t.TempDir()}
+	st, err := Prepare(source(t, "hello", "#!/bin/sh\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Discard()
+	if err := r.Install(st); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"not json", `{"extensions":{},"version":"two"}`} {
+		os.WriteFile(filepath.Join(r.Root, PinsFile), []byte(bad), 0o600)
+		if err := r.Remove("hello"); err == nil {
+			t.Fatalf("%s: removed", bad)
+		}
+		if _, err := os.Stat(filepath.Join(r.Root, "hello")); err != nil {
+			t.Fatalf("%s: the folder went: %v", bad, err)
 		}
 	}
 }

@@ -1,12 +1,15 @@
 package app
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -25,6 +28,58 @@ func resetVault(t *testing.T) {
 	vaultMu.Unlock()
 	dir := t.TempDir()
 	vaultLockPath = func() (string, error) { return filepath.Join(dir, ".lock"), nil }
+}
+
+// a keychain that lost the vault key, or holds another one, is reported,
+// a second key is not made over secrets sealed with the first (#145)
+func TestVaultKeyLostIsNotReplaced(t *testing.T) {
+	useMockKeychain(t)
+	first, err := VaultKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vaultMu.Lock()
+	vaultKey = nil
+	vaultMu.Unlock()
+	keyring.Delete(keyringService, keyringUser)
+	if _, err := VaultKey(); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("a lost key: %v", err)
+	}
+	if _, ok, _ := getVaultKey(); ok {
+		t.Fatal("a second key was stored")
+	}
+	other := make([]byte, len(first))
+	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(other))
+	if _, err := VaultKey(); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("another key: %v", err)
+	}
+	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(first))
+	if got, err := VaultKey(); err != nil || string(got) != string(first) {
+		t.Fatalf("the key brought back: %v", err)
+	}
+}
+
+// a check that cannot be written does not keep an existing key from
+// working
+func TestVaultKeyCheckWriteIsBestEffort(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only folder works differently on Windows")
+	}
+	useMockKeychain(t)
+	if _, err := VaultKey(); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := keyCheckPath()
+	os.Remove(path)
+	dir := filepath.Dir(path)
+	os.Chmod(dir, 0o500)
+	defer os.Chmod(dir, 0o700)
+	vaultMu.Lock()
+	vaultKey = nil
+	vaultMu.Unlock()
+	if _, err := VaultKey(); err != nil {
+		t.Fatalf("a folder that takes no write stopped the key: %v", err)
+	}
 }
 
 func TestSealBindsHostAndField(t *testing.T) {
@@ -180,5 +235,111 @@ func TestOlderSealsAreUpgraded(t *testing.T) {
 	}
 	if err := Unlock(got); err != nil || got.Password != "pw" {
 		t.Fatalf("after the upgrade: %v %q", err, got.Password)
+	}
+}
+
+// after a keychain call timed out the next ones fail at once instead of
+// waiting the full timeout each, the error names the state (#169)
+func TestKeychainQuietAfterATimeout(t *testing.T) {
+	useMockKeychain(t)
+	keyringMu.Lock()
+	keyringDownUntil = time.Now().Add(time.Minute)
+	keyringMu.Unlock()
+	t.Cleanup(func() {
+		keyringMu.Lock()
+		keyringDownUntil = time.Time{}
+		keyringMu.Unlock()
+	})
+	start := time.Now()
+	_, err := VaultKey()
+	if !errors.Is(err, ErrKeychainTimeout) || !errors.Is(err, ErrNoKeychain) || time.Since(start) > time.Second {
+		t.Fatalf("%v after %v", err, time.Since(start))
+	}
+	if !strings.Contains(err.Error(), "did not answer") {
+		t.Errorf("message %q", err)
+	}
+}
+
+// mapKeychain is a Keychain in memory
+type mapKeychain map[string]string
+
+func (m mapKeychain) Get(name string) (string, error) {
+	v, ok := m[name]
+	if !ok {
+		return "", keyring.ErrNotFound
+	}
+	return v, nil
+}
+func (m mapKeychain) Set(name, value string) error { m[name] = value; return nil }
+func (m mapKeychain) Delete(name string) error     { delete(m, name); return nil }
+
+// every secret of sshr goes through the Keychain, another implementation
+// takes the vault key and the named secrets without the system keychain
+func TestKeychainCanBeReplaced(t *testing.T) {
+	resetVault(t)
+	m := mapKeychain{}
+	old := keychain
+	keychain = m
+	t.Cleanup(func() { keychain = old })
+	key, err := VaultKey()
+	if err != nil || len(key) != 32 || m["vault-key"] == "" {
+		t.Fatalf("vault key %v, keychain %v", err, m)
+	}
+	if err := SecretSet("x", []byte("v")); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := SecretGet("x"); err != nil || !ok || string(v) != "v" {
+		t.Fatalf("%q %v %v", v, ok, err)
+	}
+	SecretDelete("x")
+	if _, ok, _ := SecretGet("x"); ok {
+		t.Error("the secret stayed")
+	}
+}
+
+// a keychain call that answers after the time limit ends the quiet
+// period, an unlock typed late does not keep the keychain refused (#173)
+func TestLateKeychainAnswerEndsTheQuiet(t *testing.T) {
+	old := keyringTimeout
+	keyringTimeout = 50 * time.Millisecond
+	t.Cleanup(func() {
+		keyringTimeout = old
+		keyringMu.Lock()
+		keyringDownUntil = time.Time{}
+		keyringMu.Unlock()
+	})
+	release, answered := make(chan struct{}), make(chan struct{})
+	_, err := keyringCall(func() (string, error) {
+		<-release
+		defer close(answered)
+		return "v", nil
+	})
+	if !errors.Is(err, errKeyringTimeout) {
+		t.Fatalf("no timeout: %v", err)
+	}
+	if _, err := keyringCall(func() (string, error) { return "", nil }); !errors.Is(err, errKeyringTimeout) {
+		t.Fatalf("the quiet period is off right after a timeout: %v", err)
+	}
+	close(release)
+	<-answered
+	time.Sleep(10 * time.Millisecond)
+	if _, err := keyringCall(func() (string, error) { return "ok", nil }); err != nil {
+		t.Fatalf("the late answer did not end the quiet period: %v", err)
+	}
+}
+
+// after storing a new vault key ran out of time no other key is made in
+// this process (#173)
+func TestNoSecondKeyAfterATimedOutStore(t *testing.T) {
+	resetVault(t)
+	old := keychain
+	keychain = mapKeychain{}
+	t.Cleanup(func() { keychain = old; keySetPending = false })
+	keySetPending = true
+	if _, err := VaultKey(); err == nil || !errors.Is(err, ErrNoKeychain) {
+		t.Fatalf("a key was made: %v", err)
+	}
+	if len(keychain.(mapKeychain)) != 0 {
+		t.Fatal("a key reached the keychain")
 	}
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,7 +67,17 @@ type Settings struct {
 	// base is the file as LoadSettings read it, SaveSettings writes only
 	// the fields that differ from it, copies of the value share it
 	base *Settings
+	// extra are the keys of the file this build does not know, format is
+	// its "version", see record.go
+	extra  map[string]json.RawMessage
+	format int
 }
+
+// settingsFormat is the format of settings.json this build writes, a file
+// without "version" is format 1
+const settingsFormat = 1
+
+var settingsKeys = jsonKeys(reflect.TypeOf(Settings{}))
 
 // HealthEvery is the interval between checks of the hosts
 func (s Settings) HealthEvery() time.Duration {
@@ -129,15 +140,26 @@ func readSettings() (Settings, error) {
 		}
 		return s, err
 	}
-	if err := json.Unmarshal(b, &s); err != nil {
+	// the format first: a newer sshr may have changed the type of a known
+	// field, the file must then read as newer and not as damaged, or a save
+	// would replace it with defaults
+	format, ferr := formatOf(b)
+	if err := json.Unmarshal(b, &s); err != nil && (ferr != nil || format <= settingsFormat) {
 		return Settings{Lang: "ru"}, err
 	}
-		if s.Lang == "" {
-			s.Lang = "ru"
-		}
-		s.NormalizeOPAccounts()
-		return s, nil
+	if ferr != nil {
+		return Settings{Lang: "ru"}, ferr
 	}
+	s.format = format
+	if s.extra, err = unknownKeys(b, settingsKeys); err != nil {
+		return Settings{Lang: "ru"}, err
+	}
+	if s.Lang == "" {
+		s.Lang = "ru"
+	}
+	s.NormalizeOPAccounts()
+	return s, nil
+}
 
 // NormalizeOPAccounts migrates legacy OPAccount/OPEmail into OPAccounts.
 func (s *Settings) NormalizeOPAccounts() {
@@ -219,16 +241,26 @@ func SaveSettings(s Settings) error {
 	}
 	defer unlock()
 	out := s
-	if s.base != nil {
+	cur, curErr := readSettings()
+	if curErr == nil && cur.format > settingsFormat {
+		return fmt.Errorf("%w: settings.json was saved by a newer sshr (format %d), this one reads it but does not change it, update sshr to change settings", ErrNewerFormat, cur.format)
+	}
+	if s.base != nil && curErr == nil {
 		// a damaged file is replaced by what the holder has
-		if cur, err := readSettings(); err == nil {
-			out = cur
-			mergeChanged(&out, s, *s.base)
-		}
+		out = cur
+		mergeChanged(&out, s, *s.base)
+	}
+	// the keys a newer sshr wrote are kept as the file has them, whatever
+	// the holder read
+	if curErr == nil {
+		out.extra = cur.extra
 	}
 	out.base = nil
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
+		return err
+	}
+	if b, err = appendKeys(b, out.extra); err != nil {
 		return err
 	}
 	// through a temp file, the app and the CLI may save at once and a torn

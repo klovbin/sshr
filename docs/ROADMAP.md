@@ -12,6 +12,7 @@ Connecting
 - tags and search in the CLI and the app ([#31](https://github.com/klovbin/sshr/issues/31))
 - one command on many hosts by tag or name, `sshr run` ([#33](https://github.com/klovbin/sshr/issues/33))
 - copying files and folders, `sshr send` and `sshr get` ([#32](https://github.com/klovbin/sshr/issues/32))
+- a gateway per host, used only when the host does not answer directly, `sshr gateway` ([#28](https://github.com/klovbin/sshr/issues/28))
 
 Passwords and keys
 
@@ -46,19 +47,19 @@ Fixed bugs: [#14](https://github.com/klovbin/sshr/issues/14), [#15](https://gith
 Needed before a release
 
 1. Check the GUI on real Windows and macOS: window, icon, askpass, Keychain prompt ([#26](https://github.com/klovbin/sshr/issues/26))
-2. Packages for AUR, Homebrew, Scoop and nixpkgs, release binaries with `sha256sums.txt` for `install.sh` ([#17](https://github.com/klovbin/sshr/issues/17))
+2. Packages for AUR, Homebrew, Scoop and nixpkgs from the release files, the steps and files for each are in [PACKAGING.md](PACKAGING.md) ([#17](https://github.com/klovbin/sshr/issues/17))
 
 Features
 
 3. Drag and drop files onto a host in the app ([#32](https://github.com/klovbin/sshr/issues/32))
-4. Fall back to a gateway when the direct connection fails ([#28](https://github.com/klovbin/sshr/issues/28))
 5. Local commands before and after connect, their fields go on the #30 list ([#29](https://github.com/klovbin/sshr/issues/29))
-6. Import from PuTTY, MobaXterm, Remmina, Termius, Royal TS as extensions of kind import, `sshr ext import` is there, the importers are not written ([#34](https://github.com/klovbin/sshr/issues/34))
+6. Import from PuTTY on Windows (registry), MobaXterm, Termius, Royal TS as extensions of kind import, Remmina and PuTTY on Linux and macOS are done in `extensions/` ([#34](https://github.com/klovbin/sshr/issues/34))
 
 Later
 
 7. sshr on iOS and Android, ssh in process, keys in the phone's keystore, joins sync like any device ([#25](https://github.com/klovbin/sshr/issues/25))
 9. Sync: automatic background sync, a paper recovery key, pairing by QR code
+12. Sync through a store you already have, Supabase, a 1Password vault or a folder Syncthing or Dropbox syncs, still end to end encrypted, the store sees only ciphertext ([#128](https://github.com/klovbin/sshr/issues/128))
 10. Sync without a server: device to device over the local network or the user's own WireGuard tunnel, TLS 1.3 with device keys pinned at pairing
 11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required
 

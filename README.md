@@ -19,7 +19,7 @@ Anything that costs something (an extra connection, editing your files, commands
 curl -fsSL https://raw.githubusercontent.com/klovbin/sshr/main/install.sh | sh
 ```
 
-Linux and macOS, into `~/.local/bin` without root, [install options](docs/USAGE.md#install), Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are [planned](https://github.com/klovbin/sshr/issues/17)
+Linux and macOS, into `~/.local/bin` without root, [install options](docs/USAGE.md#install), Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are [planned](docs/PACKAGING.md)
 
 ## Quick start
 
@@ -37,6 +37,7 @@ sshr                                   # the desktop app
 - [Features](docs/FEATURES.md): what each feature is for
 - [Security](docs/SECURITY.md): how passwords, keys and sync data are protected
 - [Architecture](docs/ARCHITECTURE.md): packages, data on disk, flows, decisions
+- [Packaging](docs/PACKAGING.md): how sshr gets into AUR, Homebrew, Scoop and nixpkgs
 - [Roadmap](docs/ROADMAP.md) and the [project board](https://github.com/users/klovbin/projects/3)
 - [Why it is built this way](docs/WHY.md) (Russian)
 
@@ -54,4 +55,6 @@ Bugs and ideas go to [issues](https://github.com/klovbin/sshr/issues), build wit
 
 ## License
 
-[MIT](LICENSE)
+Copyright (c) 2026 klovbin
+
+sshr is released under the [MIT License](LICENSE). You are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software, provided the copyright notice and permission notice are included in all copies or substantial portions of the software. The software is provided "as is", without warranty of any kind.

@@ -49,7 +49,9 @@ var extHostFields = map[string]bool{
 
 // ParseImport reads what an importer printed: {"hosts": [...]}, the fields
 // outside ExtHost, a password or a key among them, are not read and come
-// back as warnings
+// back as warnings, a host whose fields do not decode (a port that is no
+// number) is skipped with a warning, one bad record of the source must
+// not block the others
 func ParseImport(data []byte) (hosts []ExtHost, warnings []string, err error) {
 	var doc struct {
 		Hosts []json.RawMessage `json:"hosts"`
@@ -61,19 +63,22 @@ func ParseImport(data []byte) (hosts []ExtHost, warnings []string, err error) {
 		return nil, nil, fmt.Errorf("the importer printed %d hosts, at most %d are taken", len(doc.Hosts), importMaxHosts)
 	}
 	dropped := map[string]bool{}
+	var skipped []string
 	for i, raw := range doc.Hosts {
 		var fields map[string]json.RawMessage
+		var h ExtHost
 		if err := json.Unmarshal(raw, &fields); err != nil {
-			return nil, nil, fmt.Errorf("host %d: %v", i+1, err)
+			skipped = append(skipped, fmt.Sprintf("host %d is skipped: %v", i+1, err))
+			continue
+		}
+		if err := json.Unmarshal(raw, &h); err != nil {
+			skipped = append(skipped, fmt.Sprintf("host %d is skipped: %v", i+1, err))
+			continue
 		}
 		for name := range fields {
 			if !extHostFields[name] {
 				dropped[name] = true
 			}
-		}
-		var h ExtHost
-		if err := json.Unmarshal(raw, &h); err != nil {
-			return nil, nil, fmt.Errorf("host %d: %v", i+1, err)
 		}
 		if strings.TrimSpace(h.Key) == "" {
 			return nil, nil, fmt.Errorf("host %d has no key, the importer must name each host so a second import finds it again", i+1)
@@ -84,7 +89,7 @@ func ParseImport(data []byte) (hosts []ExtHost, warnings []string, err error) {
 		warnings = append(warnings, fmt.Sprintf("the field %q is not read, sshr takes no secrets and nothing outside the list from an importer", name))
 	}
 	sort.Strings(warnings)
-	return hosts, warnings, nil
+	return hosts, append(warnings, skipped...), nil
 }
 
 // HostID is the ID of the host with key from the importer called ext, the

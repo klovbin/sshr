@@ -101,7 +101,7 @@ func (s *Store) resolveHop(part string) (h *Host, saved bool, err error) {
 // key or password
 func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	// the host file may come from another device or an older version
-	spec, err := normalizeJump(h.Jump)
+	spec, err := normalizeJump(h.Via())
 	if err != nil {
 		return nil, err
 	}
@@ -117,10 +117,11 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 		}
 		anySaved = anySaved || saved
 	}
-	// with -J the ssh for each hop inherits the askpass of this host, a
-	// bastion that asks for a password would get this host's saved one,
-	// sshr as ProxyCommand starts each hop with that environment removed
-	if !anySaved && !h.PasswordFromSshr() {
+	// with -J the ssh for each hop inherits the askpass and the agent of
+	// this host, a bastion that asks for a password would get this host's
+	// saved one, and every hop would be offered a key kept in sshr, sshr as
+	// ProxyCommand starts each hop with that environment removed
+	if !anySaved && !h.PasswordFromSshr() && !h.agentKey() {
 		return []string{"-J", strings.Join(parts, ",")}, nil
 	}
 	exe, err := os.Executable()
@@ -135,11 +136,27 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	return []string{"-o", "ProxyCommand=" + cmd}, nil
 }
 
-// ConnectArgs is SSHArgs plus the jump options for h
+// ConnectArgs is SSHArgs plus the jump options for h, a host with a
+// Gateway is checked first and goes through it when down directly
 func (s *Store) ConnectArgs(h *Host) ([]string, error) {
+	return s.connectArgs(h, true)
+}
+
+// DirectArgs is ConnectArgs without the check of a host with a Gateway,
+// the options of the direct way, for showing a command without waiting
+// on the network
+func (s *Store) DirectArgs(h *Host) ([]string, error) {
+	return s.connectArgs(h, false)
+}
+
+func (s *Store) connectArgs(h *Host, check bool) ([]string, error) {
 	// the host file may come from another device or an older version
 	if err := checkAddress(h.Host); err != nil {
 		return nil, err
+	}
+	h.route = ""
+	if check {
+		pickRoute(h)
 	}
 	jump, err := s.JumpArgs(h)
 	if err != nil {

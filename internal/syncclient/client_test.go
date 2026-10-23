@@ -31,6 +31,10 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	keyring.MockInit()
+	// the vault keeps a check of its key in the home folder, the mock
+	// keychain must not leave one in the real home
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	data := t.TempDir()
 	s, err := syncserver.New(data)
 	if err != nil {
@@ -437,6 +441,37 @@ func TestSyncUnreadableHostIsNotDeleted(t *testing.T) {
 	}
 	if !strings.Contains(w.log.String(), "does not load") {
 		t.Errorf("no word about the broken file:\n%s", w.log.String())
+	}
+}
+
+// a host whose saved password does not open here (an address changed in
+// its file by hand, a keychain reset) is left out of the sync, the other
+// hosts still go both ways and the host is not deleted elsewhere (#144)
+func TestSyncUnsealableHostDoesNotStopTheOthers(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	writeRaw(t, w.b.Store, web.ID, func(m map[string]any) { m["host"] = "203.0.113.66" })
+	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, w.b.Pull())
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if _, err := w.a.Store.Find("other"); err != nil {
+		t.Fatalf("the other host did not sync: %v\n%s", err, w.log.String())
+	}
+	if h, err := w.a.Store.Find(web.ID); err != nil || h.Host != "10.0.0.1" {
+		t.Fatalf("the host that does not open on b changed or went on a: %+v %v", h, err)
+	}
+	if !strings.Contains(w.log.String(), "does not open here") {
+		t.Errorf("no word about the host:\n%s", w.log.String())
+	}
+	must(t, w.b.Push())
+	if _, ok := w.b.LeftOut[web.ID]; !ok || len(w.b.LeftOut) != 1 {
+		t.Errorf("the run does not name the host it left out: %v", w.b.LeftOut)
+	}
+	must(t, w.a.Push())
+	if len(w.a.LeftOut) != 0 {
+		t.Errorf("a full run names hosts: %v", w.a.LeftOut)
 	}
 }
 

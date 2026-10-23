@@ -132,7 +132,13 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What:** a host goes through saved bastions or `user@host:port` hops, chains included
 - **What for:** servers in private networks reachable only through a bastion
 - **Why it helps:** one command instead of two logins, keys stay on your machine, forwards, copies, `run` and paste follow the same path
-- **Why this way:** saved hops run through sshr as `ProxyCommand` so each logs in with its own key or password, a host with a saved password never uses `-J`, so a plain hop cannot see that password
+- **Why this way:** saved hops run through sshr as `ProxyCommand` so each logs in with its own key or password, a host with a saved password or a key kept in sshr never uses `-J`, so a plain hop cannot see that password or be offered that key
+
+### Gateway when the host does not answer
+- **What:** a host can name a gateway, sshr connects directly and goes through the gateway only when the host does not answer, off by default per host, `sshr add --gateway` or `sshr gateway <host> <gateway>`
+- **What for:** a server reachable directly at the office or on the VPN and only through a bastion from home
+- **Why it helps:** one saved host works from both places, no second copy of it with `-J` and no editing it when you move
+- **Why this way:** the check is the health check (a TCP connect and the SSH banner) before ssh starts, retrying after ssh fails would mean a second login prompt in the middle of a session, a saved password stays sealed for the gateway too, so a gateway written into the file by hand does not get it
 
 ### tmux and zellij sessions
 - **What:** connect attaches to a session on the server or creates it
@@ -234,7 +240,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What:** `sshr ext install <git url or folder>` shows what an extension is and asks, then `sshr <name>` runs it, `sshr ext list` and `sshr ext remove` manage them, an extension is a program in `~/.sshr/extensions/<name>/` with a manifest `sshr-ext.json`, written in any language
 - **What for:** your own commands under the same word `sshr` without a fork or a change of sshr, a deploy helper, a report of your hosts, a wrapper for your cloud
 - **Why it helps:** the tools around your hosts live in one place, a built-in command never changes whatever you install, and the extension can read your hosts back with `sshr list --json`
-- **Import sources:** an extension of kind `import` prints hosts as JSON and `sshr ext import <name>` saves them, for PuTTY, Termius or a company inventory, only a fixed list of fields is read and never a password or key, a second import skips hosts that are already there
+- **Import sources:** an extension of kind `import` prints hosts as JSON and `sshr ext import <name>` saves them, for Remmina (`extensions/remmina`), PuTTY on Linux and macOS (`extensions/putty`), Termius or a company inventory, only a fixed list of fields is read and never a password or key, a second import skips hosts that are already there
 - **Why this way:** an executable with a fixed protocol, not a Go plugin or WASM, so any language works and a crash stays in its own process, sshr asks before it installs and shows the manifest, the command, the commit and a hash, every file of the folder is pinned and a changed file stops the run until you install it again, the extension never gets a password, key or secret reference or the askpass and password manager variables of sshr, it is still a program that runs as you, which is said in `sshr ext install` and in [SECURITY.md](SECURITY.md)
 
 ### MCP server for AI assistants
