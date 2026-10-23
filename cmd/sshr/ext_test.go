@@ -57,7 +57,8 @@ func installExt(t *testing.T, home, name, script string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ext.WriteLock(dir, ext.Lock{Source: "test", Tree: tree}); err != nil {
+	reg := &ext.Registry{Root: filepath.Join(home, ".sshr", "extensions")}
+	if err := reg.Pin(name, ext.Lock{Source: "test", Tree: tree}); err != nil {
 		t.Fatal(err)
 	}
 	return dir

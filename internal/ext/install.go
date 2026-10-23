@@ -177,11 +177,6 @@ func copyTree(from, to string) (int, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("%s is not a plain file, links and special files are not allowed in an extension", rel)
 		}
-		// the lock is written by sshr at install, one that comes along, as in
-		// the folder of an installed extension, is left behind
-		if rel == LockFile && filepath.Dir(rel) == "." {
-			return nil
-		}
 		files++
 		if total += info.Size(); total > treeMaxBytes {
 			return fmt.Errorf("more than %d MiB of files", treeMaxBytes>>20)
@@ -212,49 +207,50 @@ func copyFile(from, to string, mode os.FileMode) error {
 	return out.Close()
 }
 
-// Install puts a staged extension into the registry and records the lock,
-// an extension of the same name is replaced, which is also how the files of
-// a changed one are trusted again, the new folder is built beside the old
-// one and swapped in so a failure leaves the old one working
+// Install puts a staged extension into the registry and pins it, an
+// extension of the same name is replaced, which is also how the files of a
+// changed one are trusted again, the new folder is built beside the old one
+// and swapped in, then pinned, a failure before the pin leaves a folder that
+// is not trusted and never one that runs unchecked
 func (r *Registry) Install(s *Staged) error {
 	if err := CheckName(s.Name); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(r.Root, 0o700); err != nil {
-		return err
-	}
-	fresh := filepath.Join(r.Root, "."+s.Name+".new")
-	old := filepath.Join(r.Root, "."+s.Name+".old")
-	dest := filepath.Join(r.Root, s.Name)
-	os.RemoveAll(fresh)
-	os.RemoveAll(old)
-	if _, err := copyTree(s.files, fresh); err != nil {
+	return r.locked(func() error {
+		fresh := filepath.Join(r.Root, "."+s.Name+".new")
+		old := filepath.Join(r.Root, "."+s.Name+".old")
+		dest := filepath.Join(r.Root, s.Name)
 		os.RemoveAll(fresh)
-		return err
-	}
-	if got, err := HashTree(fresh); err != nil || got != s.Lock.Tree {
-		os.RemoveAll(fresh)
-		return fmt.Errorf("the copy of %s does not match what was checked, nothing is installed", s.Name)
-	}
-	if err := WriteLock(fresh, s.Lock); err != nil {
-		os.RemoveAll(fresh)
-		return err
-	}
-	replaced := false
-	if _, err := os.Lstat(dest); err == nil {
-		if err := os.Rename(dest, old); err != nil {
+		os.RemoveAll(old)
+		if _, err := copyTree(s.files, fresh); err != nil {
 			os.RemoveAll(fresh)
 			return err
 		}
-		replaced = true
-	}
-	if err := os.Rename(fresh, dest); err != nil {
-		if replaced {
-			os.Rename(old, dest)
+		if got, err := HashTree(fresh); err != nil || got != s.Lock.Tree {
+			os.RemoveAll(fresh)
+			return fmt.Errorf("the copy of %s does not match what was checked, nothing is installed", s.Name)
 		}
-		os.RemoveAll(fresh)
-		return err
-	}
-	os.RemoveAll(old)
-	return nil
+		replaced := false
+		if _, err := os.Lstat(dest); err == nil {
+			if err := os.Rename(dest, old); err != nil {
+				os.RemoveAll(fresh)
+				return err
+			}
+			replaced = true
+		}
+		if err := os.Rename(fresh, dest); err != nil {
+			if replaced {
+				os.Rename(old, dest)
+			}
+			os.RemoveAll(fresh)
+			return err
+		}
+		os.RemoveAll(old)
+		pins, err := r.pins()
+		if err != nil {
+			return err
+		}
+		pins[s.Name] = s.Lock
+		return r.writePins(pins)
+	})
 }

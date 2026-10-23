@@ -88,7 +88,7 @@ func TestCommandRefusesAProgramThatIsNotExecutable(t *testing.T) {
 	dir := filepath.Join(r.Root, "hello")
 	os.Chmod(filepath.Join(dir, "run.sh"), 0o600)
 	tree, _ := HashTree(dir)
-	WriteLock(dir, Lock{Source: "test", Tree: tree})
+	r.Pin("hello", Lock{Source: "test", Tree: tree})
 	inst, _ := r.Find("hello")
 	if _, err := inst.Command(KindCommand, nil, "sshr"); err == nil || !strings.Contains(err.Error(), "not executable") {
 		t.Errorf("err = %v", err)

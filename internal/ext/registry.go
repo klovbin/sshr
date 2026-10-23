@@ -12,14 +12,22 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"time"
 
 	"sshr.dev/internal/app"
 )
 
-// LockFile sits next to the manifest and is written by sshr at install, not
-// by the author, it says where the extension came from and which files were
-// installed
-const LockFile = "sshr-ext.lock"
+// PinsFile sits in the extensions folder next to the folders of the
+// extensions, written by sshr at install, it says where each extension came
+// from and which files were installed, a pin inside the folder would be
+// supplied by whoever supplies the folder
+const PinsFile = ".pins.json"
+
+// pinsMaxBytes bounds the file that is read at every run
+const pinsMaxBytes = 1 << 20
+
+// lockWait is how long an install or a removal waits for another one
+const lockWait = 10 * time.Second
 
 // treeMaxFiles and treeMaxBytes keep an extension folder small enough to be
 // hashed at every run
@@ -28,7 +36,8 @@ const (
 	treeMaxBytes = 50 << 20
 )
 
-// Lock is what sshr recorded when it installed an extension
+// Lock is the pin of an installed extension, what sshr recorded when it
+// installed it
 type Lock struct {
 	// Source is the git URL or the folder it was installed from
 	Source string `json:"source"`
@@ -69,16 +78,86 @@ var ErrNotInstalled = errors.New("not_installed")
 // were installed
 var ErrChanged = errors.New("ext_changed")
 
+// pins reads the pin of every installed extension, none yet is an empty list
+func (r *Registry) pins() (map[string]Lock, error) {
+	path := filepath.Join(r.Root, PinsFile)
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]Lock{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > pinsMaxBytes {
+		return nil, fmt.Errorf("%s is not a plain file of a sensible size, remove it and install the extensions again", path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var file struct {
+		Extensions map[string]Lock `json:"extensions"`
+	}
+	if err := json.Unmarshal(b, &file); err != nil {
+		return nil, fmt.Errorf("%s is damaged, remove it and install the extensions again: %v", path, err)
+	}
+	if file.Extensions == nil {
+		file.Extensions = map[string]Lock{}
+	}
+	return file.Extensions, nil
+}
+
+func (r *Registry) writePins(pins map[string]Lock) error {
+	b, err := json.MarshalIndent(struct {
+		Extensions map[string]Lock `json:"extensions"`
+	}{pins}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return app.WriteFileAtomic(filepath.Join(r.Root, PinsFile), append(b, '\n'), 0o600)
+}
+
+// Pin records the install of the extension called name, one at a time with
+// other installs and removals
+func (r *Registry) Pin(name string, l Lock) error {
+	return r.locked(func() error {
+		pins, err := r.pins()
+		if err != nil {
+			return err
+		}
+		pins[name] = l
+		return r.writePins(pins)
+	})
+}
+
+// locked runs fn with the lock of the extensions folder, installs and
+// removals of different processes do not interleave
+func (r *Registry) locked(fn func() error) error {
+	if err := os.MkdirAll(r.Root, 0o700); err != nil {
+		return err
+	}
+	unlock, err := app.WaitLock(filepath.Join(r.Root, ".lock"), "changing extensions", lockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
+}
+
 // Find returns the installed extension called name, the name is checked
 // first so it cannot point out of the folder
 func (r *Registry) Find(name string) (*Installed, error) {
 	if CheckName(name) != nil {
 		return nil, ErrNotInstalled
 	}
-	return r.load(filepath.Join(r.Root, name), name)
+	pins, err := r.pins()
+	if err != nil {
+		return nil, err
+	}
+	return r.load(filepath.Join(r.Root, name), name, pins)
 }
 
-func (r *Registry) load(dir, name string) (*Installed, error) {
+func (r *Registry) load(dir, name string, pins map[string]Lock) (*Installed, error) {
 	info, err := os.Lstat(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNotInstalled
@@ -100,13 +179,9 @@ func (r *Registry) load(dir, name string) (*Installed, error) {
 	if m.Name != name {
 		return nil, fmt.Errorf("extension %s: the manifest says it is %s", name, m.Name)
 	}
-	var lock Lock
-	b, err := os.ReadFile(filepath.Join(dir, LockFile))
-	if err != nil {
-		return nil, fmt.Errorf("extension %s: no %s, install it with sshr ext install", name, LockFile)
-	}
-	if err := json.Unmarshal(b, &lock); err != nil || lock.Tree == "" {
-		return nil, fmt.Errorf("extension %s: %s is damaged, install it again", name, LockFile)
+	lock, ok := pins[name]
+	if !ok || lock.Tree == "" {
+		return nil, fmt.Errorf("extension %s: the folder was not installed by sshr ext install and is not trusted, install it from its source to use it", name)
 	}
 	return &Installed{Manifest: m, Dir: dir, Lock: lock}, nil
 }
@@ -121,11 +196,15 @@ func (r *Registry) List() (found []Installed, problems []error) {
 		}
 		return nil, []error{err}
 	}
+	pins, err := r.pins()
+	if err != nil {
+		return nil, []error{err}
+	}
 	for _, e := range entries {
 		if CheckName(e.Name()) != nil {
 			continue
 		}
-		inst, err := r.load(filepath.Join(r.Root, e.Name()), e.Name())
+		inst, err := r.load(filepath.Join(r.Root, e.Name()), e.Name(), pins)
 		if err != nil {
 			problems = append(problems, err)
 			continue
@@ -149,39 +228,45 @@ func (i *Installed) Verify() error {
 	return nil
 }
 
-// WriteLock records the install next to the manifest
-func WriteLock(dir string, l Lock) error {
-	b, err := json.MarshalIndent(l, "", "  ")
-	if err != nil {
-		return err
-	}
-	return app.WriteFileAtomic(filepath.Join(dir, LockFile), append(b, '\n'), 0o600)
-}
-
-// Remove deletes the installed extension called name
+// Remove deletes the installed extension called name and its pin, a folder
+// that was never installed is removed too
 func (r *Registry) Remove(name string) error {
 	if CheckName(name) != nil {
 		return ErrNotInstalled
 	}
-	dir := filepath.Join(r.Root, name)
-	info, err := os.Lstat(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return ErrNotInstalled
-	}
-	if err != nil {
-		return err
-	}
-	// a link in place of the folder would send RemoveAll to where it points
-	if !info.IsDir() {
-		return os.Remove(dir)
-	}
-	return os.RemoveAll(dir)
+	return r.locked(func() error {
+		dir := filepath.Join(r.Root, name)
+		info, err := os.Lstat(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrNotInstalled
+		}
+		if err != nil {
+			return err
+		}
+		// a link in place of the folder would send RemoveAll to where it points
+		if !info.IsDir() {
+			err = os.Remove(dir)
+		} else {
+			err = os.RemoveAll(dir)
+		}
+		if err != nil {
+			return err
+		}
+		pins, err := r.pins()
+		if err != nil {
+			return err
+		}
+		if _, ok := pins[name]; !ok {
+			return nil
+		}
+		delete(pins, name)
+		return r.writePins(pins)
+	})
 }
 
 // HashTree hashes the files of an extension folder, their paths, whether
-// they are executable and their content, only the lock file is left out, a
-// .git folder is hashed like any other, so nothing can be added there
-// unseen, a link, a device or any file that is not a plain one is refused
+// they are executable and their content, a .git folder is hashed like any
+// other, so nothing can be added there unseen, a link, a device or any file that is not a plain one is refused
 // because it could point to something installed nowhere, folders count
 // toward the limit too
 func HashTree(dir string) (string, error) {
@@ -201,9 +286,6 @@ func HashTree(dir string) (string, error) {
 			return fmt.Errorf("more than %d files and folders", treeMaxFiles)
 		}
 		if d.IsDir() {
-			return nil
-		}
-		if rel == LockFile {
 			return nil
 		}
 		info, err := d.Info()

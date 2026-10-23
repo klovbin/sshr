@@ -32,7 +32,7 @@ func install(t *testing.T, r *Registry, name string, files map[string]string) st
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteLock(dir, Lock{Source: "test", Tree: tree}); err != nil {
+	if err := r.Pin(name, Lock{Source: "test", Tree: tree}); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -93,16 +93,12 @@ func TestHashTreeSeesTheExecutableBit(t *testing.T) {
 	}
 }
 
-func TestHashTreeIgnoresTheLockButSeesGitAndLinks(t *testing.T) {
+func TestHashTreeSeesGitAndLinks(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "a"), []byte("x"), 0o600)
 	base, err := HashTree(dir)
 	if err != nil {
 		t.Fatal(err)
-	}
-	os.WriteFile(filepath.Join(dir, LockFile), []byte("{}"), 0o600)
-	if got, _ := HashTree(dir); got != base {
-		t.Error("the lock file changes the hash")
 	}
 	os.MkdirAll(filepath.Join(dir, "lib", ".git"), 0o700)
 	os.WriteFile(filepath.Join(dir, "lib", ".git", "payload"), []byte("x"), 0o700)
