@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -69,7 +70,7 @@ func TestNoGatewayNoCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.routeChecked || strings.Contains(strings.Join(args, " "), "-J") {
+	if h.Via() != "" || strings.Contains(strings.Join(args, " "), "-J") {
 		t.Errorf("a host without a gateway was checked or rerouted: %v", args)
 	}
 	// both set, as in a file edited by hand: the jump hosts win, no check
@@ -77,7 +78,7 @@ func TestNoGatewayNoCheck(t *testing.T) {
 	if _, err := s.ConnectArgs(&j); err != nil {
 		t.Fatal(err)
 	}
-	if j.routeChecked || j.Via() != "ops@gw" {
+	if j.Via() != "ops@gw" {
 		t.Errorf("a host with jump hosts was checked: via %q", j.Via())
 	}
 }
@@ -159,5 +160,39 @@ func TestUpdateKeepsGateway(t *testing.T) {
 	}
 	if got, err = s.SetGateway(h.ID, ""); err != nil || got.Gateway != "" {
 		t.Fatalf("remove: %+v, %v", got, err)
+	}
+}
+
+// one Host kept in memory, as the app does, follows the network: down
+// directly goes through the gateway, answering again goes direct
+func TestGatewayCheckedOnEveryConnect(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	h := Host{Name: "db", Host: "127.0.0.1", Port: port, User: "u", PasswordMode: PasswordAsk, Gateway: "ops@gw"}
+	if _, err := s.ConnectArgs(&h); err != nil || h.Via() != "ops@gw" {
+		t.Fatalf("down directly: via %q, %v", h.Via(), err)
+	}
+	l, err = net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+	if err != nil {
+		t.Skip("the port was taken meanwhile:", err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			c.Write([]byte("SSH-2.0-test\r\n"))
+			c.Close()
+		}
+	}()
+	if _, err := s.ConnectArgs(&h); err != nil || h.Via() != "" {
+		t.Fatalf("answering again: via %q, %v", h.Via(), err)
 	}
 }

@@ -4,12 +4,13 @@ package app
 // checks the direct way as the health check does (a TCP connect and the SSH
 // banner, at most HealthTimeout each) and goes through the gateway only
 // when the host is down directly, a host without a Gateway is not checked
-// and its command line stays the same
+// and its command line stays the same, every call checks again, a Host
+// kept in memory moves between networks with its user
 func pickRoute(h *Host) {
-	if h.Gateway == "" || h.Jump != "" || h.routeChecked {
+	h.route = ""
+	if h.Gateway == "" || h.Jump != "" {
 		return
 	}
-	h.routeChecked = true
 	if CheckHealth(h).State == HealthDown {
 		h.route = h.Gateway
 	}

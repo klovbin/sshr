@@ -128,10 +128,9 @@ type Host struct {
 	// check, it stays on this machine and does not sync
 	Rev int `json:"rev,omitempty"`
 
-	// route is the Gateway when ConnectArgs found the host down directly,
-	// routeChecked keeps it from checking twice for one connection
-	route        string
-	routeChecked bool
+	// route is the Gateway when the last ConnectArgs found the host down
+	// directly
+	route string
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
