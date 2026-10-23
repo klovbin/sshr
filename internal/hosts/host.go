@@ -1,4 +1,4 @@
-package app
+package hosts
 
 import "golang.org/x/crypto/ssh"
 
@@ -57,9 +57,9 @@ func (h *Host) KeyFingerprint() string {
 	return ssh.FingerprintSHA256(pub)
 }
 
-// agentKey tells whether the key of h is served by an agent of sshr, a
+// ServedByAgent tells whether the key of h is served by an agent of sshr, a
 // key sealed in sshr or one read from 1Password
-func (h *Host) agentKey() bool {
+func (h *Host) ServedByAgent() bool {
 	return h.KeyMode == KeyVault || h.KeyMode == KeyOnePassword || h.KeyMode == KeyBitwarden
 }
 

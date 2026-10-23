@@ -18,7 +18,7 @@ func TestPlanSessionLeavesTheHostAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Via != "ops@gw" || h.Via() != "" || h.route != "" {
+	if p.Via != "ops@gw" || h.Via() != "" {
 		t.Errorf("plan via %q, host via %q", p.Via, h.Via())
 	}
 	if !strings.Contains(strings.Join(p.Args, " "), "-J ops@gw -- u@127.0.0.1") {

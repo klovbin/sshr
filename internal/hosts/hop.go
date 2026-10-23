@@ -1,4 +1,4 @@
-package app
+package hosts
 
 import (
 	"fmt"
@@ -23,8 +23,8 @@ func SplitJump(spec string) []string {
 // which ssh runs with the shell, and in the ssh config export
 var hopRe = regexp.MustCompile(`^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9._][A-Za-z0-9._-]*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$`)
 
-// normalizeJump checks a jump spec and returns it in canonical "a,b" form
-func normalizeJump(spec string) (string, error) {
+// NormalizeJump checks a jump spec and returns it in canonical "a,b" form
+func NormalizeJump(spec string) (string, error) {
 	parts := SplitJump(spec)
 	for _, p := range parts {
 		if !hopRe.MatchString(p) {

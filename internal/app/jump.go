@@ -56,7 +56,7 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	// this host, a bastion that asks for a password would get this host's
 	// saved one, and every hop would be offered a key kept in sshr, sshr as
 	// ProxyCommand starts each hop with that environment removed
-	if !anySaved && !h.PasswordFromSshr() && !h.agentKey() {
+	if !anySaved && !h.PasswordFromSshr() && !h.ServedByAgent() {
 		return []string{"-J", strings.Join(parts, ",")}, nil
 	}
 	exe, err := os.Executable()

@@ -1,4 +1,4 @@
-package app
+package hosts
 
 import (
 	"bytes"
@@ -147,22 +147,4 @@ func mergeExtra(in, cur map[string]json.RawMessage) map[string]json.RawMessage {
 		}
 	}
 	return out
-}
-
-// RecordExtra reads the keys of the JSON object b that are no field of the
-// struct type typ and its "version", for a file of another package that
-// keeps what a newer sshr wrote
-func RecordExtra(b []byte, typ reflect.Type) (map[string]json.RawMessage, int, error) {
-	format, err := record.FormatOf(b)
-	if err != nil {
-		return nil, 0, err
-	}
-	extra, err := record.UnknownKeys(b, record.JSONKeys(typ))
-	return extra, format, err
-}
-
-// AppendRecordKeys writes the kept keys extra into the JSON object b,
-// written by json.MarshalIndent with two spaces
-func AppendRecordKeys(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
-	return record.AppendKeys(b, extra)
 }

@@ -198,7 +198,7 @@ func forwardFromG(kind, value string, n int) (Forward, bool) {
 			spec = bind + ":" + port
 		}
 		f := Forward{Name: name, Kind: "D", Spec: spec}
-		return f, f.check() == nil
+		return f, f.Check() == nil
 	}
 	if len(fields) != 2 || strings.HasPrefix(fields[0], "/") || strings.HasPrefix(fields[1], "/") {
 		return Forward{}, false
@@ -210,7 +210,7 @@ func forwardFromG(kind, value string, n int) (Forward, bool) {
 		spec = bind + ":" + spec
 	}
 	f := Forward{Name: name, Kind: kind, Spec: spec}
-	return f, f.check() == nil
+	return f, f.Check() == nil
 }
 
 // hostFromSSHConfig builds a sshr host for alias from what ssh -G says,

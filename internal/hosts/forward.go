@@ -1,4 +1,4 @@
-package app
+package hosts
 
 import (
 	"fmt"
@@ -37,7 +37,7 @@ func ParseForward(s string) (Forward, error) {
 		return Forward{}, fmt.Errorf("forward %q: expected \"name -L|-R|-D spec\"", s)
 	}
 	f := Forward{Name: fields[0], Kind: fields[1][1:], Spec: fields[2]}
-	return f, f.check()
+	return f, f.Check()
 }
 
 // ParseForwards reads one forward per line, skipping empty lines
@@ -65,7 +65,9 @@ func FormatForwards(fs []Forward) string {
 	return strings.Join(lines, "\n")
 }
 
-func (f Forward) check() error {
+// Check refuses a forward ssh would read wrongly, the spec reaches its
+// command line
+func (f Forward) Check() error {
 	if !forwardName.MatchString(f.Name) {
 		return fmt.Errorf("forward name %q: use letters, digits, '.', '_' or '-'", f.Name)
 	}
@@ -126,7 +128,7 @@ func splitSpec(spec string) []string {
 func checkForwards(fs []Forward) error {
 	seen := map[string]bool{}
 	for _, f := range fs {
-		if err := f.check(); err != nil {
+		if err := f.Check(); err != nil {
 			return err
 		}
 		if seen[f.Name] {

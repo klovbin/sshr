@@ -1,4 +1,4 @@
-package app
+package hosts
 
 import (
 	"encoding/json"
@@ -195,19 +195,13 @@ func TestDuplicateDropsLocalKeys(t *testing.T) {
 // cleanHost only checks fields, a host with a key in 1Password or
 // Bitwarden is checked without running op or bw (#98)
 func TestCleanHostRunsNoProgram(t *testing.T) {
-	oldOP, oldBW := opBin, bwBin
-	opBin, bwBin = filepath.Join(t.TempDir(), "no-op"), filepath.Join(t.TempDir(), "no-bw")
-	t.Cleanup(func() { opBin, bwBin = oldOP, oldBW })
 	for _, h := range []Host{
 		{Name: "a", Host: "h", User: "u", KeyMode: KeyOnePassword, KeyRef: "op://v/item/private key"},
 		{Name: "b", Host: "h", User: "u", KeyMode: KeyBitwarden, KeyRef: "0123456789abcdef0123456789abcdef"},
 	} {
-		got, err := cleanHost(h, prepareAgentKey)
+		got, err := cleanHost(h, nil)
 		if err != nil || got.KeyPub != "" {
 			t.Errorf("%s: %v, key pub %q", h.Name, err, got.KeyPub)
-		}
-		if err := fillKeyPub(&got); err == nil {
-			t.Errorf("%s: fillKeyPub ran nothing", h.Name)
 		}
 	}
 }

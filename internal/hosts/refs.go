@@ -1,4 +1,4 @@
-package app
+package hosts
 
 import (
 	"fmt"
@@ -23,9 +23,9 @@ func checkBWRef(ref string) error {
 	return nil
 }
 
-// checkAgent trims the agent of h and refuses one that is not system,
+// CheckAgent trims the agent of h and refuses one that is not system,
 // 1password or the full path of an agent socket
-func checkAgent(h *Host) error {
+func CheckAgent(h *Host) error {
 	h.Agent = strings.TrimSpace(h.Agent)
 	if h.Agent != "" && h.Agent != "system" && h.Agent != AgentOnePassword && !filepath.IsAbs(ExpandHome(h.Agent)) && !strings.HasPrefix(h.Agent, `\\.\pipe\`) {
 		return fmt.Errorf("agent %q: use system, 1password or the full path of the agent socket", h.Agent)

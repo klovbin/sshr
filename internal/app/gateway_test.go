@@ -210,7 +210,7 @@ func TestGatewayCheckedOnEveryConnect(t *testing.T) {
 func TestDirectArgsSkipsTheCheck(t *testing.T) {
 	s := &Store{Dir: t.TempDir()}
 	h := Host{Name: "db", Host: "127.0.0.1", Port: closedPort(t), User: "u", PasswordMode: PasswordAsk, Gateway: "ops@gw"}
-	h.route = "stale"
+	h.RouteViaGateway(true)
 	args, err := s.DirectArgs(&h)
 	if err != nil || h.Via() != "" || strings.Contains(strings.Join(args, " "), "-J") {
 		t.Fatalf("DirectArgs went through the gateway: %v, %v", args, err)

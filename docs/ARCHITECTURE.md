@@ -23,11 +23,12 @@ How sshr is built, which package may use which, where data lives and how the mai
 | Package | Does | May import (sshr packages) |
 |----|----|----|
 | `internal/audit` | the audit log of MCP and REST actions | `fileio` |
+| `internal/hosts` | hosts and their files: Host, the store with its lock, checks, records across versions, forwards, tags, summaries, runs no program, the steps that do come as hooks from `app` | `fileio`, `record`, `vault` |
 | `internal/vault` | the vault key in a keychain or under a passphrase, seals bound to a host and field, named secrets of the sync device, runs no program, the system keychain and the prompt are set by `app` | `fileio`, `settings` |
 | `internal/settings` | `~/.sshr/settings.json`: load, save of the changed fields only, the command list, never synced | `fileio`, `record` |
 | `internal/record` | keeps files readable across versions: unknown keys kept and written back, the `version` of a file | nothing |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
-| `internal/app` | the core: hosts and their store, secrets, ssh command lines, ssh config import and export, health | `fileio`, `record`, `settings`, `vault` |
+| `internal/app` | the core: the Store facade over package hosts, ssh command lines, password managers, ssh config import and export, health | `fileio`, `record`, `settings`, `vault`, `hosts` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation | `app`, `syncproto` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
@@ -47,7 +48,7 @@ Rules that follow:
 - `internal/syncserver` never imports the core or the client, it cannot decrypt what it stores by construction
 - `internal/ui` changes only through its owner (`.github/CODEOWNERS` asks for their review), a need of the app becomes a function in `app` and an issue for the GUI
 - the GUI, `mcp`, the sync packages, `fileio`, `i18n` and `assets` do not import `os/exec`, only the core, the CLI, `api`, `ext`, `desktop` and `clip` start programs
-- `syncproto`, `fileio`, `record`, `settings`, `vault`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, the core joins the list after #103
+- `syncproto`, `fileio`, `record`, `settings`, `vault`, `hosts`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, what runs ssh stays in `app`
 - Gio is imported only by `internal/ui`
 - `internal/archtest` checks all of these
 
@@ -57,7 +58,7 @@ Rules that follow:
 
 | Area | Files |
 |----|----|
-| hosts and their store | `store.go` (Host, Store, Add, Update, Import, FromOtherDevice, ListAll, Find), `host.go` (the methods of Host and the password and key modes), `tags.go`, `summary.go`, `version.go` |
+| hosts and their store | package `hosts` (`store.go`, `host.go`, `record.go`, `forward.go`, `tags.go`, `summary.go`, `redact.go`, `hop.go`, `refs.go`, `pub.go`), in app `storefacade.go` (Store, its hooks, DefaultStore, Unlock) and `hosts.go` (aliases), `version.go` |
 | secrets | `vault.go` (the system keychain and the passphrase prompt handed to package vault, wrappers), `keychain_system.go`, `prompt.go`, `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords), `onepassword.go`, `bitwarden.go`, `manager.go`, `agent.go`, `keyfile.go` |
 | ssh command lines | `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `forward.go`, `copy.go`, `remote.go` |
 | reachability | `health.go`, a TCP connect and the SSH banner in process, no ssh |
@@ -153,7 +154,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - every host from another device enters through `Store.Import`, which runs `FromOtherDevice` and `cleanHost`: a field that names a local secret (an item, a socket, a file) is reset in `FromOtherDevice`, a field that reaches a command line gets a validator in `cleanHost` and a check again where the line is built
 - `payloadOf` strips fields from what syncs, everything else syncs, a new field that must stay on this machine has to be added there, the unknown keys of a host travel too (`app.HostPayloadJSON`), except those named `local_...`, which a newer sshr uses for what stays on one machine, a payload with no unknown keys (from an older sshr) leaves the keys here as they are
 - files are written with `app.WriteFileAtomic`, never `os.WriteFile` over the target
-- a host file is read with `decodeHost` and written with `encodeHost` (`internal/app/record.go`): a key this build does not know, a field a newer sshr wrote, is kept in `Host.extra` and written back, `Update` carries it from the file, a form that never drew the field cannot erase it, a file whose `version` is newer than `hostFormat` is read and connected to, every write of it fails with `ErrNewerFormat`, removing it works
+- a host file is read with `decodeHost` and written with `encodeHost` (`internal/hosts/record.go`): a key this build does not know, a field a newer sshr wrote, is kept in `Host.extra` and written back, `Update` carries it from the file, a form that never drew the field cannot erase it, a file whose `version` is newer than `hostFormat` is read and connected to, every write of it fails with `ErrNewerFormat`, removing it works
 - secrets never reach logs, errors or output, `Host.String` and `GoString` (`redact.go`) replace passwords, keys, sealed values, secret references and unknown fields, so `%v`, `%+v`, `%#v` and `%s` of a host are safe, a test checks every verb
 - a feature with a cost is off by default, with a setting, a flag and a fallback
 - tests use fake `ssh`, `op` and `bw` on PATH and a local sync server, never real hosts, `.github/e2e.sh` checks against a real sshd

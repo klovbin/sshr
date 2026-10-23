@@ -32,7 +32,7 @@ func AttachAuth(cmd *exec.Cmd, h *Host) (func(), error) {
 	if cmd == nil || h == nil {
 		return func() {}, nil
 	}
-	if h.agentKey() {
+	if h.ServedByAgent() {
 		return attachAgentKey(cmd, h)
 	}
 	return attachPassword(cmd, h)

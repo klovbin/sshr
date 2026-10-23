@@ -105,17 +105,17 @@ func (s *Store) db() *hostStore {
 	if s.tx != nil {
 		return s.tx
 	}
-	return &hostStore{Dir: s.Dir, hooks: s.hooks()}
+	return &hostStore{Dir: s.Dir, Hooks: s.hooks()}
 }
 
 // hooks connect a change of hosts to the agent, the password managers and
 // the ssh config export of this Store
 func (s *Store) hooks() hostHooks {
 	return hostHooks{
-		agentKey:    prepareAgentKey,
-		keyPub:      fillKeyPub,
-		storeSecret: s.opStorePassword,
-		changed: func(tx *hostStore) {
+		AgentKey:    prepareAgentKey,
+		KeyPub:      fillKeyPub,
+		StoreSecret: s.opStorePassword,
+		Changed: func(tx *hostStore) {
 			c := *s
 			c.tx = tx
 			c.hostsChanged()
@@ -126,7 +126,7 @@ func (s *Store) hooks() hostHooks {
 // locked runs fn under the lock of the host folder, fn gets a Store whose
 // methods do not lock again
 func (s *Store) locked(fn func(tx *Store) error) error {
-	return s.db().locked(func(tx *hostStore) error {
+	return s.db().Locked(func(tx *hostStore) error {
 		c := *s
 		c.tx = tx
 		return fn(&c)
@@ -168,10 +168,10 @@ func (s *Store) MarkConnected(id string) error { return s.db().MarkConnected(id)
 func (s *Store) SetGateway(id, gateway string) (*Host, error) { return s.db().SetGateway(id, gateway) }
 
 // upgradeSeals seals passwords of an older sshr again, see hostStore
-func (s *Store) upgradeSeals() { s.db().upgradeSeals() }
+func (s *Store) upgradeSeals() { s.db().UpgradeSeals() }
 
 // pubPath is where the public half of a key kept in sshr is written
-func (s *Store) pubPath(h *Host) string { return s.db().pubPath(h) }
+func (s *Store) pubPath(h *Host) string { return s.db().PubPath(h) }
 
 // writePub writes or removes the public half of the key of h
-func (s *Store) writePub(h *Host) error { return s.db().writePub(h) }
+func (s *Store) writePub(h *Host) error { return s.db().WritePub(h) }

@@ -80,7 +80,7 @@ func TestBitwardenKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.KeyPub != pub || !h.agentKey() {
+	if h.KeyPub != pub || !h.ServedByAgent() {
 		t.Fatalf("KeyPub = %q, want %q", h.KeyPub, pub)
 	}
 	raw, err := loadKey(h)

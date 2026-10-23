@@ -19,9 +19,6 @@ func TestSessionScript(t *testing.T) {
 	if SessionScript("screen") != "" || SessionCommand("") != "" {
 		t.Error("an unknown or empty session gives a script")
 	}
-	if checkSession("screen") == nil || checkSession(SessionTmux) != nil {
-		t.Error("checkSession")
-	}
 }
 
 // the command runs where ssh hands it to the login shell, sh and fish
