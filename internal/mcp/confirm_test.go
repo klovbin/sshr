@@ -146,3 +146,21 @@ func TestConfirmRunsOnTheHostShown(t *testing.T) {
 		t.Fatalf("ssh ran with %q", b)
 	}
 }
+
+// a destination with control characters is cleaned in the question, a
+// command too long to show in full is refused without a question (#215)
+func TestConfirmQuestionText(t *testing.T) {
+	s := &server{elicit: true, pending: map[string]chan request{}, done: make(chan struct{}), w: io.Discard}
+	h := &app.Host{Name: "web", Host: "10.0.0.1", User: "u"}
+	if err := s.confirm(h, strings.Repeat("x", confirmMax+1)); err == nil || !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("a long command: %v", err)
+	}
+	var out strings.Builder
+	s.w = &out
+	h.User = "u‮\x1b[8m"
+	close(s.done)
+	s.confirm(h, "uptime")
+	if strings.Contains(out.String(), `‮`) || strings.Contains(out.String(), `\u001b`) {
+		t.Fatalf("question: %s", out.String())
+	}
+}

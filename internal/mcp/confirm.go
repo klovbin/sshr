@@ -13,6 +13,9 @@ import (
 // confirmWait is how long a question to the user waits for an answer
 var confirmWait = 5 * time.Minute
 
+// confirmMax is the longest command a question shows
+const confirmMax = 2048
+
 // elicitSince is the first protocol version with elicitation
 const elicitSince = "2025-06-18"
 
@@ -50,7 +53,13 @@ func (s *server) confirm(h *app.Host, command string) error {
 	if !can {
 		return fmt.Errorf("%w: sshr asks before every command and this client cannot show the question, run it in a terminal or start sshr mcp without --confirm-commands", ErrNotConfirmed)
 	}
+	// the whole command must fit in the question, a client that cuts a
+	// long message would hide its end
+	if len(command) > confirmMax {
+		return fmt.Errorf("%w: the command is %d bytes, more than %d, too long to show in a question in full", ErrNotConfirmed, len(command), confirmMax)
+	}
 	name, _ := dataText(h.Name)
+	dest, _ := dataText(fmt.Sprintf("%s:%d", h.Dest(), h.Port))
 	s.mu.Lock()
 	s.nextID++
 	id := fmt.Sprintf(`"sshr-%d"`, s.nextID)
@@ -65,7 +74,7 @@ func (s *server) confirm(h *app.Host, command string) error {
 	s.write(map[string]any{
 		"jsonrpc": "2.0", "id": json.RawMessage(id), "method": "elicitation/create",
 		"params": map[string]any{
-			"message": fmt.Sprintf("Run this command on %s (%s:%d)?\n%q", name, h.Dest(), h.Port, command),
+			"message": fmt.Sprintf("Run this command (%d bytes) on %s (%s)?\n%q", len(command), name, dest, command),
 			"requestedSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
