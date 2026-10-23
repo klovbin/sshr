@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
+	"sshr.dev/internal/record"
 )
 
 // OPLinkedAccount is one 1Password account the user authorized in settings.
@@ -106,7 +108,7 @@ type Settings struct {
 // without "version" is format 1
 const settingsFormat = 1
 
-var settingsKeys = jsonKeys(reflect.TypeOf(Settings{}))
+var settingsKeys = record.JSONKeys(reflect.TypeOf(Settings{}))
 
 // HealthEvery is the interval between checks of the hosts
 func (s Settings) HealthEvery() time.Duration {
@@ -178,7 +180,7 @@ func readSettings() (Settings, error) {
 	// the format first: a newer sshr may have changed the type of a known
 	// field, the file must then read as newer and not as damaged, or a save
 	// would replace it with defaults
-	format, ferr := formatOf(b)
+	format, ferr := record.FormatOf(b)
 	if err := json.Unmarshal(b, &s); err != nil && (ferr != nil || format <= settingsFormat) {
 		return Settings{Lang: "ru"}, err
 	}
@@ -186,7 +188,7 @@ func readSettings() (Settings, error) {
 		return Settings{Lang: "ru"}, ferr
 	}
 	s.format = format
-	if s.extra, err = unknownKeys(b, settingsKeys); err != nil {
+	if s.extra, err = record.UnknownKeys(b, settingsKeys); err != nil {
 		return Settings{Lang: "ru"}, err
 	}
 	if s.Lang == "" {
@@ -295,7 +297,7 @@ func SaveSettings(s Settings) error {
 	if err != nil {
 		return err
 	}
-	if b, err = appendKeys(b, out.extra); err != nil {
+	if b, err = record.AppendKeys(b, out.extra); err != nil {
 		return err
 	}
 	// through a temp file, the app and the CLI may save at once and a torn

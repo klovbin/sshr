@@ -3,12 +3,13 @@ package app
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
+
+	"sshr.dev/internal/record"
 )
 
 // hostFormat is the format of host files this build writes, a file
@@ -16,98 +17,19 @@ import (
 // raises it and adds a migration on load, a new optional field does not
 const hostFormat = 1
 
-// ErrNewerFormat means a file was written by a newer sshr in a format this
-// build reads but must not write, it would erase what it does not know
-var ErrNewerFormat = errors.New("newer_format")
-
 // newerHostError says that h is of a newer format and stays as it is
 func newerHostError(h *Host) error {
 	return fmt.Errorf("%w: %s was saved by a newer sshr (format %d), this one reads it but does not change it, update sshr to edit it", ErrNewerFormat, h.Name, h.format)
 }
 
+// ErrNewerFormat means a file was written by a newer sshr in a format this
+// build reads but must not write, it would erase what it does not know
+var ErrNewerFormat = record.ErrNewerFormat
+
 // hostKeys are the JSON names of the fields of Host in lower case,
 // encoding/json matches keys without regard to case, so "Key_Sealed" is
 // the key_sealed field and not a field of a newer sshr
-var hostKeys = jsonKeys(reflect.TypeOf(Host{}))
-
-// jsonKeys are the JSON names of the exported fields of typ in lower case
-func jsonKeys(typ reflect.Type) map[string]bool {
-	keys := map[string]bool{}
-	for i := 0; i < typ.NumField(); i++ {
-		f := typ.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if name == "-" {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		keys[strings.ToLower(name)] = true
-	}
-	return keys
-}
-
-// unknownKeys are the keys of the JSON object b that match none of known
-// and are not "version", nil when there are none
-func unknownKeys(b []byte, known map[string]bool) (map[string]json.RawMessage, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return nil, err
-	}
-	var out map[string]json.RawMessage
-	for k, v := range raw {
-		if known[strings.ToLower(k)] || k == "version" {
-			continue
-		}
-		if out == nil {
-			out = map[string]json.RawMessage{}
-		}
-		out[k] = v
-	}
-	return out, nil
-}
-
-// formatOf is the "version" of the JSON object b, 0 when it has none
-func formatOf(b []byte) (int, error) {
-	var v struct {
-		Version int `json:"version"`
-	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		return 0, fmt.Errorf("version: %v", err)
-	}
-	return v.Version, nil
-}
-
-// appendKeys writes the keys of extra in name order into the JSON object
-// b, indented as MarshalIndent with two spaces writes, b comes back as it
-// is when extra is empty
-func appendKeys(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
-	if len(extra) == 0 {
-		return b, nil
-	}
-	end := bytes.LastIndexByte(b, '}')
-	var out bytes.Buffer
-	out.Write(bytes.TrimRight(b[:end], " \n"))
-	for _, k := range slices.Sorted(maps.Keys(extra)) {
-		name, err := json.Marshal(k)
-		if err != nil {
-			return nil, err
-		}
-		var v bytes.Buffer
-		if err := json.Compact(&v, extra[k]); err != nil {
-			return nil, err
-		}
-		out.WriteString(",\n  ")
-		out.Write(name)
-		out.WriteString(": ")
-		out.Write(v.Bytes())
-	}
-	out.WriteString("\n}")
-	return out.Bytes(), nil
-}
+var hostKeys = record.JSONKeys(reflect.TypeOf(Host{}))
 
 // decodeHost reads a host file, the keys this build does not know (a
 // field a newer sshr wrote) are kept in h.extra and written back on save
@@ -116,7 +38,7 @@ func decodeHost(b []byte) (Host, error) {
 	// the format first: a newer sshr may have changed the type of a known
 	// field, such a host is read with what still decodes, read only,
 	// instead of showing as a broken file
-	format, err := formatOf(b)
+	format, err := record.FormatOf(b)
 	if err != nil {
 		return Host{}, err
 	}
@@ -124,7 +46,7 @@ func decodeHost(b []byte) (Host, error) {
 		return Host{}, err
 	}
 	h.format = format
-	if h.extra, err = unknownKeys(b, hostKeys); err != nil {
+	if h.extra, err = record.UnknownKeys(b, hostKeys); err != nil {
 		return Host{}, err
 	}
 	return h, nil
@@ -141,7 +63,7 @@ func encodeHost(h *Host) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return appendKeys(b, h.extra)
+	return record.AppendKeys(b, h.extra)
 }
 
 // localPrefix starts the keys a newer sshr keeps on its own machine, they
@@ -231,16 +153,16 @@ func mergeExtra(in, cur map[string]json.RawMessage) map[string]json.RawMessage {
 // struct type typ and its "version", for a file of another package that
 // keeps what a newer sshr wrote
 func RecordExtra(b []byte, typ reflect.Type) (map[string]json.RawMessage, int, error) {
-	format, err := formatOf(b)
+	format, err := record.FormatOf(b)
 	if err != nil {
 		return nil, 0, err
 	}
-	extra, err := unknownKeys(b, jsonKeys(typ))
+	extra, err := record.UnknownKeys(b, record.JSONKeys(typ))
 	return extra, format, err
 }
 
 // AppendRecordKeys writes the kept keys extra into the JSON object b,
 // written by json.MarshalIndent with two spaces
 func AppendRecordKeys(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
-	return appendKeys(b, extra)
+	return record.AppendKeys(b, extra)
 }
