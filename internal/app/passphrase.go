@@ -255,6 +255,10 @@ func UseKeychainVault() error {
 	if err != nil {
 		return err
 	}
+	// another key in the keychain sealed other secrets, it is not replaced
+	if other, ok, err := getVaultKey(); err == nil && ok && !bytes.Equal(other, key) {
+		return fmt.Errorf("%w: the keychain holds another vault key, it may have sealed secrets of its own, remove the keychain item sshr/vault-key first if it is not needed", ErrVaultKeyLost)
+	}
 	if err := SecretSet(keyringUser, key); err != nil {
 		return err
 	}
@@ -293,9 +297,15 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 	if vaultKey != nil {
 		return vaultKey, nil
 	}
+	if keySetPending {
+		return nil, keychainError(fmt.Errorf("%w: a vault key may still reach the keychain from a call that ran out of time, start sshr again", errKeyringTimeout))
+	}
 	want, err := readKeyCheck()
 	if err != nil {
 		return nil, err
+	}
+	if want == "" && sealedSecretsHere() {
+		return nil, fmt.Errorf("%w: host files here hold secrets sealed with a vault key the keychain does not give now, bring the keychain back before moving the key under a passphrase", ErrVaultKeyLost)
 	}
 	if want != "" {
 		path, _ := keyCheckPath()
@@ -320,4 +330,27 @@ func vaultModeLock() (func(), error) {
 		return nil, err
 	}
 	return waitLock(filepath.Join(filepath.Dir(lock), ".mode.lock"), "changing the vault mode", 10*time.Second)
+}
+
+// sealedSecretsHere tells whether any host file holds a sealed password
+// or key, a vault key made now could not open them
+func sealedSecretsHere() bool {
+	lock, err := vaultLockPath()
+	if err != nil {
+		return true
+	}
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(lock), "hosts", "*.json"))
+	if err != nil {
+		return true
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return true
+		}
+		if bytes.Contains(b, []byte(`"`+sealPrefix)) || bytes.Contains(b, []byte(`"`+sealPrefix2)) {
+			return true
+		}
+	}
+	return false
 }

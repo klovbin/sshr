@@ -1,10 +1,12 @@
 package app
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -257,5 +259,35 @@ func TestPassphraseVaultLockedKeychainMakesNoKey(t *testing.T) {
 	}
 	if path, _ := passphraseFilePath(); runtime.GOOS == "linux" && fileExists(path) {
 		t.Error("a vault key file was written")
+	}
+}
+
+// no new key over host files that hold sealed secrets, no keychain key
+// replaced by another one (#185)
+func TestVaultModeKeepsKeysThatSealed(t *testing.T) {
+	keyring.MockInitWithError(errors.New("no bus"))
+	resetVault(t)
+	t.Cleanup(keyring.MockInit)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	lock, _ := vaultLockPath()
+	hosts := filepath.Join(filepath.Dir(lock), "hosts")
+	os.MkdirAll(hosts, 0o700)
+	os.WriteFile(filepath.Join(hosts, "a.json"), []byte(`{"password_sealed": "v2:abc"}`), 0o600)
+	if err := SetVaultPassphrase(pass); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("a new key over sealed secrets: %v", err)
+	}
+	// another key in the keychain is not replaced
+	os.Remove(filepath.Join(hosts, "a.json"))
+	keyring.MockInit()
+	resetVault(t)
+	if err := SetVaultPassphrase(pass); err != nil {
+		t.Fatal(err)
+	}
+	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err := UseKeychainVault(); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("another keychain key was replaced: %v", err)
 	}
 }
