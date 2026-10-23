@@ -39,6 +39,9 @@ type Options struct {
 	// CommandsAllowed says whether a command may run on a host, nil allows
 	// every host
 	CommandsAllowed func(*app.Host) error
+	// ConfirmCommands refuses commands, the user wants to be asked before
+	// each and a REST client has no way to ask
+	ConfirmCommands bool
 }
 
 // begin writes the start of an action to the audit log and answers 503
@@ -375,6 +378,10 @@ func (a *api) upload(w http.ResponseWriter, r *http.Request) {
 func (a *api) run(w http.ResponseWriter, r *http.Request) {
 	if !a.opts.AllowCommands {
 		fail(w, http.StatusForbidden, errors.New("commands are off, start sshr serve with --allow-commands or set api_commands"))
+		return
+	}
+	if a.opts.ConfirmCommands {
+		fail(w, http.StatusForbidden, errors.New("commands ask for confirmation (confirm_commands) and the REST API cannot ask, run it in a terminal or through an MCP client that can"))
 		return
 	}
 	h := a.findHost(w, r)

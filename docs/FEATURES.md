@@ -261,6 +261,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** they integrate without parsing CLI output
 - **Why this way:** a 0600 unix socket by default, a loopback port only with a token, web pages and DNS rebinding are refused, no secrets in or out
 
+### Ask before every command
+- **What:** `sshr mcp --confirm-commands` (or `"confirm_commands": true`) asks you in the assistant's own window before each `run_command`, with the host and the command, it runs only after an explicit yes, off by default
+- **What for:** an assistant's client can be set to run tools without asking, then nothing stands between a model and your servers
+- **Why it helps:** the question comes from sshr itself, so it holds whatever the client's own setting is
+- **Why this way:** MCP elicitation, a form with one box to tick, anything else (no, closed, an error, no answer in 5 minutes, a client that cannot show forms) refuses the command, every command is asked about instead of guessing which ones are dangerous since a list of dangerous commands is easy to get around, the REST API refuses commands while this is on, it has nobody to ask
+
 ### Commands only on chosen hosts
 - **What:** `sshr commands only` limits commands from `sshr mcp` and `sshr serve` to the hosts of `sshr commands allow <host>`, `sshr commands all` goes back, `sshr commands list` shows them, `--listed-hosts-only` and `--all-hosts` for one run, off by default
 - **What for:** an assistant that may run commands on a test box should not reach production with the same switch

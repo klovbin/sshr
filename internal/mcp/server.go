@@ -37,6 +37,9 @@ type Options struct {
 	// CommandsAllowed says whether run_command may run on a host, nil
 	// allows every host
 	CommandsAllowed func(*app.Host) error
+	// ConfirmCommands asks the user through the client before every
+	// command, a client that cannot ask gets every command refused
+	ConfirmCommands bool
 }
 
 type request struct {
@@ -64,7 +67,8 @@ type response struct {
 
 // Serve answers requests from r on w until r ends
 func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
-	s := &server{store: store, opts: opts, w: w, slots: make(chan struct{}, maxRunning)}
+	s := &server{store: store, opts: opts, w: w, slots: make(chan struct{}, maxRunning),
+		pending: map[string]chan request{}, done: make(chan struct{})}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 8<<20)
 	var wg sync.WaitGroup
@@ -83,7 +87,9 @@ func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
 			continue
 		}
 		if req.Method == "" && (len(req.Result) > 0 || len(req.Error) > 0) {
-			// a response is never answered, an answer to it would loop
+			// a response is never answered, an answer to it would loop, it
+			// goes to the question that waits for it
+			s.deliver(req)
 			continue
 		}
 		if req.Method == "initialize" {
@@ -98,6 +104,8 @@ func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
 			s.handle(req)
 		}()
 	}
+	// questions still waiting are refused, the client is gone
+	close(s.done)
 	wg.Wait()
 	return sc.Err()
 }
@@ -114,6 +122,13 @@ type server struct {
 	slots chan struct{}
 	// client is what the client said it is in initialize
 	client string
+	// elicit is whether the client can show a question to the user,
+	// pending are the questions waiting for an answer by id, done closes
+	// when the client is gone
+	elicit  bool
+	nextID  int
+	pending map[string]chan request
+	done    chan struct{}
 }
 
 // begin writes the start of an action to the audit log, an action whose
@@ -133,8 +148,11 @@ func exitOf(err error) int {
 	return 0
 }
 
-func (s *server) send(resp response) {
-	b, err := json.Marshal(resp)
+func (s *server) send(resp response) { s.write(resp) }
+
+// write sends one message, a response or a request of the server
+func (s *server) write(v any) {
+	b, err := json.Marshal(v)
 	if err != nil {
 		return
 	}
@@ -148,7 +166,8 @@ func (s *server) handle(req request) {
 	switch req.Method {
 	case "initialize":
 		var p struct {
-			ProtocolVersion string `json:"protocolVersion"`
+			ProtocolVersion string          `json:"protocolVersion"`
+			Capabilities    json.RawMessage `json:"capabilities"`
 			ClientInfo      struct {
 				Name    string `json:"name"`
 				Version string `json:"version"`
@@ -165,6 +184,9 @@ func (s *server) handle(req request) {
 				version = v
 			}
 		}
+		s.mu.Lock()
+		s.elicit = canElicit(version, p.Capabilities)
+		s.mu.Unlock()
 		resp.Result = map[string]any{
 			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
@@ -290,6 +312,11 @@ func (s *server) call(name string, raw json.RawMessage) (toolResult, error) {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return toolResult{}, err
 		}
+		// the question comes before the slot, eight unanswered questions
+		// would hold every upload otherwise
+		if err := s.allowRun(a.Host, a.Command); err != nil {
+			return toolResult{}, err
+		}
 		s.slots <- struct{}{}
 		defer func() { <-s.slots }()
 		return s.runCommand(a.Host, a.Command, a.TimeoutSeconds)
@@ -379,6 +406,24 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 	}, nil
 }
 
+// allowRun checks a command before it waits for a slot: the host is
+// allowed and, when asked for, the user said yes
+func (s *server) allowRun(host, command string) error {
+	h, err := s.findHost(host)
+	if err != nil {
+		return err
+	}
+	if s.opts.CommandsAllowed != nil {
+		if err := s.opts.CommandsAllowed(h); err != nil {
+			return err
+		}
+	}
+	if s.opts.ConfirmCommands && strings.TrimSpace(command) != "" {
+		return s.confirm(h, command)
+	}
+	return nil
+}
+
 func (s *server) runCommand(host, command string, timeout int) (toolResult, error) {
 	h, err := s.findHost(host)
 	if err != nil {
@@ -387,11 +432,7 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 	if strings.TrimSpace(command) == "" {
 		return toolResult{}, errors.New("empty command")
 	}
-	if s.opts.CommandsAllowed != nil {
-		if err := s.opts.CommandsAllowed(h); err != nil {
-			return toolResult{}, err
-		}
-	}
+
 	if timeout <= 0 {
 		timeout = 60
 	}

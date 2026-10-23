@@ -24,7 +24,7 @@ const serveUsage = "Usage: sshr serve [--listen unix:<path>|127.0.0.1:<port>] [-
 // cmdServe runs the REST API until Ctrl+C or SIGTERM
 func cmdServe(store *app.Store, args []string) {
 	st, _ := app.LoadSettings()
-	opts := api.Options{AllowCommands: st.APICommands}
+	opts := api.Options{AllowCommands: st.APICommands, ConfirmCommands: st.ConfirmCommands}
 	listen := ""
 	auditOn := st.AuditLog
 	var listedOnly *bool

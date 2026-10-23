@@ -187,6 +187,9 @@ Options:
 Options:
   --allow-commands   allow run_command, off by default (mcp_commands setting)
   --no-commands      refuse it even when the setting is on
+  --confirm-commands   ask before every command through the client, a client
+                       that cannot ask gets them refused (confirm_commands)
+  --no-confirm         run without asking even when the setting is on
   --listed-hosts-only  run_command only on hosts of sshr commands allow
   --all-hosts          on every host even when commands_listed_only is set
   --audit            keep ~/.sshr/audit.jsonl, off by default (audit_log setting)

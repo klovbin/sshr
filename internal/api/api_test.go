@@ -262,3 +262,14 @@ func TestAPITunnelAuditEnd(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// with confirmation asked for, the REST API refuses commands, it cannot
+// ask (#101)
+func TestAPIRunConfirmRefused(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	srv := New(s, Options{AllowCommands: true, ConfirmCommands: true})
+	if code, out := do(t, srv, "POST", "/v1/hosts/web/run", `{"command":"id"}`, nil); code != 403 || !strings.Contains(out, "confirm") {
+		t.Fatalf("run = %d %s", code, out)
+	}
+}

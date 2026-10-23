@@ -324,6 +324,7 @@ Other clients: `{"mcpServers": {"sshr": {"command": "sshr", "args": ["mcp"]}}}`
 - `run_command` is off by default (`--allow-commands` or `"mcp_commands": true`), it is marked destructive so clients ask before each call
 - secrets never leave sshr, hosts that ask for a password cannot be used, nothing listens (stdin and stdout of a child process), every command is logged to stderr
 
+- `--confirm-commands` (or `"confirm_commands": true`) asks before each `run_command` through a question the client shows, it runs only after a yes, a client that cannot show questions gets commands refused, `sshr serve` refuses commands while it is set
 - `sshr commands only` limits `run_command` to the hosts of `sshr commands allow <host>` (`"commands_listed_only": true`, `--listed-hosts-only` for one run), a host that points elsewhere since it was allowed is refused until it is allowed again, `sshr commands all` and `--all-hosts` go back to every host
 - `--audit` (or `"audit_log": true`) keeps `~/.sshr/audit.jsonl`: a JSON line at the start and at the end of each upload and command, with the client, the host and the exit code, a command as its length, first word and a keyed hash (`"audit_commands": "full"` keeps it whole), the file moves to `audit.jsonl.1` at `audit_max_mb` (10) and five old files stay, an action whose start cannot be written is refused
 

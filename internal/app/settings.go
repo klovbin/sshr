@@ -87,6 +87,11 @@ type Settings struct {
 	// to a hash of where it pointed then, settings never sync so another
 	// device cannot add a host here
 	CommandHosts map[string]string `json:"command_hosts,omitempty"`
+	// ConfirmCommands asks the user before every command from an assistant,
+	// through a question the MCP client shows, off by default: a client
+	// that cannot ask gets every command refused and the REST API refuses
+	// commands, it has nobody to ask
+	ConfirmCommands bool `json:"confirm_commands,omitempty"`
 
 	// base is the file as LoadSettings read it, SaveSettings writes only
 	// the fields that differ from it, copies of the value share it
