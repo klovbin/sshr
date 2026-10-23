@@ -149,6 +149,12 @@ const localPrefix = "local_"
 // keys gives the bytes of a plain marshal, so the local change check of
 // the sync sees no change
 func HostPayloadJSON(h Host) ([]byte, error) {
+	// a host of a newer format may have fields this build did not decode,
+	// it is not sent from here, the devices that know the format keep the
+	// version its own device wrote
+	if h.format > hostFormat {
+		return nil, fmt.Errorf("%w: %s was saved by a newer sshr (format %d), this one does not sync it, update sshr here", ErrNewerFormat, h.Name, h.format)
+	}
 	b, err := json.Marshal(h)
 	if err != nil {
 		return nil, err
@@ -160,16 +166,6 @@ func HostPayloadJSON(h Host) ([]byte, error) {
 		}
 	}
 	extra := h.extra
-	if h.format > 1 {
-		// a host of a newer format says so on the wire too, a device that
-		// does not know it carries it as skipped instead of writing it
-		extra = maps.Clone(h.extra)
-		if extra == nil {
-			extra = map[string]json.RawMessage{}
-		}
-		extra["version"] = json.RawMessage(fmt.Sprint(h.format))
-		keys = append(keys, "version")
-	}
 	if len(keys) == 0 {
 		return b, nil
 	}

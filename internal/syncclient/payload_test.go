@@ -2,6 +2,7 @@ package syncclient
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -120,38 +121,29 @@ func readRaw(t *testing.T, s *app.Store, id string) map[string]json.RawMessage {
 	return m
 }
 
-// a host of a newer format comes as skipped to a device that cannot
-// write it, it is named as left out and its file here stays (#97)
-func TestSyncSkipsANewerHostFormat(t *testing.T) {
+// a host of a newer format is not pushed by a build that cannot write
+// it, it may hold fields this build did not decode, the other devices
+// keep the version its own device wrote (#164)
+func TestSyncDoesNotPushANewerHostFormat(t *testing.T) {
 	w := newWorld(t)
 	web, _ := w.pair()
-	host, err := app.HostPayloadJSON(app.Host{ID: web.ID, Name: "web", Host: "10.0.0.1", User: "u"})
-	must(t, err)
-	if strings.Contains(string(host), "version") {
-		t.Fatalf("a host of today's format carries a version: %s", host)
-	}
-	writeRaw(t, w.a.Store, web.ID, func(m map[string]any) { m["version"] = 7 })
 	before := readRaw(t, w.b.Store, web.ID)
-	// a reads the newer file and its next push carries it with its version
-	h, _ := w.a.Store.Find(web.ID)
-	p, err := payloadOf(*h)
+	writeRaw(t, w.a.Store, web.ID, func(m map[string]any) { m["version"] = 7; m["port"] = "not a number" })
+	h, err := w.a.Store.Find(web.ID)
 	must(t, err)
-	if !strings.Contains(string(p), `"version":7`) {
-		t.Fatalf("the payload lost the version: %s", p)
+	if _, err := payloadOf(*h); !errors.Is(err, app.ErrNewerFormat) {
+		t.Fatalf("payloadOf of a newer host: %v", err)
 	}
-	w.a.st = nil
-	must(t, w.a.load())
-	e := w.a.st.Entries[web.ID]
-	e.Local = "changed"
-	w.a.st.Entries[web.ID] = e
-	must(t, w.a.save())
 	must(t, w.a.Push())
-	must(t, w.b.Pull())
-	if _, ok := w.b.LeftOut[web.ID]; !ok {
-		t.Fatalf("b did not leave the newer host out: %v\n%s", w.b.LeftOut, w.log.String())
+	if _, ok := w.a.LeftOut[web.ID]; !ok {
+		t.Errorf("a did not leave the newer host out: %v", w.a.LeftOut)
 	}
-	if after := readRaw(t, w.b.Store, web.ID); string(after["host"]) != string(before["host"]) || after["version"] != nil {
-		t.Fatalf("b wrote the newer host: %v", after)
+	must(t, w.b.Pull())
+	if after := readRaw(t, w.b.Store, web.ID); string(after["port"]) != string(before["port"]) {
+		t.Fatalf("b got the host a could not read: %v", after)
+	}
+	if _, err := w.b.Store.Find(web.ID); err != nil {
+		t.Fatalf("b lost the host: %v", err)
 	}
 }
 
