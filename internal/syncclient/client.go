@@ -104,6 +104,17 @@ type Client struct {
 	// running is set while this Client holds the run lock, calls inside
 	// the run do not take it again
 	running bool
+	// LeftOut names the hosts the last run did not sync and why, a run
+	// that left hosts out still succeeds, the caller says so
+	LeftOut map[string]string
+}
+
+// leaveOut notes a host the run did not sync
+func (c *Client) leaveOut(id, why string) {
+	if c.LeftOut == nil {
+		c.LeftOut = map[string]string{}
+	}
+	c.LeftOut[id] = why
 }
 
 // run holds the lock of the sync folder for fn, two sync runs at once
@@ -122,7 +133,7 @@ func (c *Client) run(fn func() error) error {
 		return err
 	}
 	defer unlock()
-	c.running, c.st = true, nil
+	c.running, c.st, c.LeftOut = true, nil, nil
 	defer func() { c.running = false }()
 	return fn()
 }
@@ -871,6 +882,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		e := m.Entries[id]
 		if why, ok := broken[id]; ok {
 			c.logf("skipped %s, %s", short(id, 8), why)
+			c.leaveOut(id, why)
 			continue
 		}
 		delete(c.st.Skipped, id)
@@ -899,6 +911,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				// refuses is, the other hosts go on
 				c.st.Skipped[id] = e
 				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", short(id, 8), err)
+				c.leaveOut(id, err.Error())
 				continue
 			} else if err != nil {
 				return err
@@ -941,6 +954,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 						if err != nil {
 							c.st.Skipped[id] = e
 							c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+							c.leaveOut(id, err.Error())
 							return nil
 						}
 						c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", short(id, 8), short(e.Device, 8), cp.Name)
@@ -997,6 +1011,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				}
 				c.st.Skipped[id] = e
 				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+				c.leaveOut(id, err.Error())
 				return nil
 			}
 			if dup != nil {
@@ -1218,6 +1233,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		}
 		if why, ok := broken[id]; ok {
 			c.logf("kept %s on other devices, %s", short(id, 8), why)
+			c.leaveOut(id, why)
 			continue
 		}
 		if _, ok := local[id]; !ok && !known.Deleted {

@@ -465,6 +465,14 @@ func TestSyncUnsealableHostDoesNotStopTheOthers(t *testing.T) {
 	if !strings.Contains(w.log.String(), "does not open here") {
 		t.Errorf("no word about the host:\n%s", w.log.String())
 	}
+	must(t, w.b.Push())
+	if _, ok := w.b.LeftOut[web.ID]; !ok || len(w.b.LeftOut) != 1 {
+		t.Errorf("the run does not name the host it left out: %v", w.b.LeftOut)
+	}
+	must(t, w.a.Push())
+	if len(w.a.LeftOut) != 0 {
+		t.Errorf("a full run names hosts: %v", w.a.LeftOut)
+	}
 }
 
 // writeRaw edits a host file behind the Store, the way a newer sshr would

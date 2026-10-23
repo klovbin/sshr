@@ -107,11 +107,13 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Println("Up to date")
+		leftOut(c)
 	case "push", "now":
 		if err := c.Push(); err != nil {
 			fatal(err)
 		}
 		fmt.Println("Synced")
+		leftOut(c)
 	case "status":
 		st, err := c.Status()
 		if err != nil {
@@ -148,4 +150,14 @@ func cmdSync(store *app.Store, args []string) {
 		fmt.Fprintln(os.Stderr, syncUsage)
 		os.Exit(1)
 	}
+}
+
+// leftOut says which hosts the run did not sync and exits 1, a sync that
+// skipped hosts must not read as a full one
+func leftOut(c *syncclient.Client) {
+	if len(c.LeftOut) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "sshr: %s left out of this sync, the lines above say why\n", plural(len(c.LeftOut), "host"))
+	os.Exit(1)
 }
