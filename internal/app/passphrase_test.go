@@ -38,7 +38,7 @@ func TestPassphraseVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := SetVaultPassphrase("short"); err == nil {
+	if err := SetVaultPassphrase("short pass"); err == nil {
 		t.Error("a short passphrase was taken")
 	}
 	if err := SetVaultPassphrase(pass); err != nil {
@@ -218,5 +218,24 @@ func TestVaultModeKeepsDamagedSettings(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(path); string(b) != "{broken" {
 		t.Fatalf("settings.json was replaced: %s", b)
+	}
+}
+
+// the limits a vault key file may ask for, and its size (#183)
+func TestPassphraseFileTighterLimits(t *testing.T) {
+	for _, w := range []*wrappedKey{
+		{Version: 1, KDF: "argon2id", Time: 1, MemoryKiB: 512 * 1024, Threads: 1, Salt: make([]byte, 16), Sealed: make([]byte, 64)},
+		{Version: 1, KDF: "argon2id", Time: 7, MemoryKiB: 64, Threads: 1, Salt: make([]byte, 16), Sealed: make([]byte, 64)},
+		{Version: 1, KDF: "argon2id", Time: 1, MemoryKiB: 64, Threads: 32, Salt: make([]byte, 16), Sealed: make([]byte, 64)},
+	} {
+		if _, err := unwrapKey(w, "x"); err == nil || !strings.Contains(err.Error(), "out of range") {
+			t.Errorf("%+v: %v", w, err)
+		}
+	}
+	resetVault(t)
+	path, _ := passphraseFilePath()
+	os.WriteFile(path, make([]byte, 5000), 0o600)
+	if _, err := readWrappedKey(); err == nil || !strings.Contains(err.Error(), "larger") {
+		t.Errorf("a big file: %v", err)
 	}
 }

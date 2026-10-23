@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -41,8 +43,16 @@ var argonParams = struct {
 // limits a file may ask for, a crafted file must not make sshr spend
 // gigabytes or minutes before the passphrase is even checked
 const (
-	argonMaxTime   = 10
-	argonMaxMemory = 1024 * 1024
+	argonMaxTime    = 6
+	argonMaxMemory  = 256 * 1024
+	argonMaxThreads = 16
+	// passphraseFileMax is more than a wrapped key ever needs
+	passphraseFileMax = 4096
+	// askpassWait bounds a SSHR_ASKPASS helper that never answers
+	askpassWait = time.Minute
+	// passphraseMin is the shortest passphrase taken, the file can be
+	// attacked offline
+	passphraseMin = 12
 )
 
 // NoTerminalPrompts is set by front ends that own stdin and stdout (mcp),
@@ -103,7 +113,7 @@ func unwrapKey(w *wrappedKey, pass string) ([]byte, error) {
 	if w.Version != 1 || w.KDF != "argon2id" {
 		return nil, fmt.Errorf("the vault key file has format %d and kdf %q, this sshr reads format 1 with argon2id", w.Version, w.KDF)
 	}
-	if w.Time == 0 || w.Time > argonMaxTime || w.MemoryKiB < 8 || w.MemoryKiB > argonMaxMemory || w.Threads == 0 || len(w.Salt) < 16 {
+	if w.Time == 0 || w.Time > argonMaxTime || w.MemoryKiB < 8 || w.MemoryKiB > argonMaxMemory || w.Threads == 0 || w.Threads > argonMaxThreads || len(w.Salt) < 16 || len(w.Salt) > 64 {
 		return nil, errors.New("the vault key file asks for Argon2 parameters out of range")
 	}
 	aead, err := chacha20poly1305.NewX(argon2.IDKey([]byte(pass), w.Salt, w.Time, w.MemoryKiB, w.Threads, chacha20poly1305.KeySize))
@@ -129,6 +139,9 @@ func readWrappedKey() (*wrappedKey, error) {
 		return nil, err
 	}
 	b, err := ReadFileShared(path)
+	if err == nil && len(b) > passphraseFileMax {
+		return nil, fmt.Errorf("%s is larger than a vault key file can be", path)
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("the vault is set to a passphrase but %s is missing, run sshr vault passphrase on this machine or set SSHR_VAULT=keychain", path)
 	}
@@ -146,9 +159,14 @@ func readWrappedKey() (*wrappedKey, error) {
 // (the app or a script), else on the terminal, never on stdin
 var askPassphrase = func(prompt string) (string, error) {
 	if prog := os.Getenv("SSHR_ASKPASS"); prog != "" {
-		out, err := exec.Command(prog, prompt).Output()
+		ctx, cancel := context.WithTimeout(context.Background(), askpassWait)
+		defer cancel()
+		var stderr bytes.Buffer
+		cmd := exec.CommandContext(ctx, prog, prompt)
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err != nil {
-			return "", fmt.Errorf("%w: SSHR_ASKPASS failed: %v", ErrNoPassphrase, err)
+			return "", fmt.Errorf("%w: SSHR_ASKPASS failed: %v %s", ErrNoPassphrase, err, strings.TrimSpace(stderr.String()))
 		}
 		return strings.TrimRight(string(out), "\r\n"), nil
 	}
@@ -180,8 +198,14 @@ func passphraseVaultKey() ([]byte, error) {
 // every saved secret still opens, a key in the system keychain stays there,
 // the named secrets are moved by MoveSecrets
 func SetVaultPassphrase(pass string) error {
-	if len(pass) < 8 {
-		return errors.New("the passphrase is shorter than 8 characters")
+	// one mode change at a time, the setting and the files must agree
+	unlock, err := vaultModeLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if len(pass) < passphraseMin {
+		return fmt.Errorf("the passphrase is shorter than %d characters, the file it guards can be attacked offline", passphraseMin)
 	}
 	key, err := VaultKey()
 	if errors.Is(err, ErrNoKeychain) {
@@ -220,6 +244,11 @@ func SetVaultPassphrase(pass string) error {
 // UseKeychainVault stores the current vault key in the system keychain,
 // turns the passphrase vault off and removes the vault key file
 func UseKeychainVault() error {
+	unlock, err := vaultModeLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	key, err := VaultKey()
 	if err != nil {
 		return err
@@ -279,4 +308,14 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 	}
 	vaultKey = key
 	return key, nil
+}
+
+// vaultModeLock is held while the vault mode changes, it is not the lock
+// createVaultKey takes, VaultKey may create a key inside a mode change
+func vaultModeLock() (func(), error) {
+	lock, err := vaultLockPath()
+	if err != nil {
+		return nil, err
+	}
+	return waitLock(filepath.Join(filepath.Dir(lock), ".mode.lock"), "changing the vault mode", 10*time.Second)
 }

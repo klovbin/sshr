@@ -224,7 +224,9 @@ the system keychain, passphrase moves a copy into ~/.sshr/vault/vault-key.json
 wrapped with a passphrase (Argon2id) for a machine without a keychain, off by
 default: the passphrase is asked once per run, a forgotten one loses every
 saved secret, and the file can be attacked offline, keychain moves the key
-back and removes the file, the keys of the sync device move along
+back and removes the file, the keys of the sync device move along, a key
+already in the keychain stays there, so on such a machine the passphrase
+does not stop a switch back to the keychain
 
 Examples:
   sshr vault status
