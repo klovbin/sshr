@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,7 +62,13 @@ type state struct {
 	// not reached every kept device yet, the next sync delivers it
 	Rotation *rotation `json:"rotation,omitempty"`
 	LastSync time.Time `json:"last_sync"`
+	// extra are the keys a newer sshr wrote, kept through every save
+	extra map[string]json.RawMessage
 }
+
+// stateFormat is the format of state.json this build writes, a file
+// without "version" is format 1, a newer one stops the sync
+const stateFormat = 1
 
 // rotation is a committed vault key change still to deliver, the key waits
 // in the keychain under key-pending until every envelope is written
@@ -191,6 +198,15 @@ func (c *Client) load() error {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
 	}
+	var format int
+	if st.extra, format, err = app.RecordExtra(b, reflect.TypeOf(state{})); err != nil {
+		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
+	}
+	if format > stateFormat {
+		// the state holds the counter and the head of the chain, a sync
+		// that does not understand it all would break the history
+		return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", app.ErrNewerFormat, format)
+	}
 	if st.Entries == nil {
 		st.Entries = map[string]entryState{}
 	}
@@ -212,6 +228,9 @@ func (c *Client) load() error {
 // applied, a crash before it repeats the sync instead of skipping one
 func (c *Client) save() error {
 	b, err := json.MarshalIndent(c.st, "", "  ")
+	if err == nil {
+		b, err = app.AppendRecordKeys(b, c.st.extra)
+	}
 	if err != nil {
 		return err
 	}

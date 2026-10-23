@@ -168,3 +168,39 @@ func TestManifestFormats(t *testing.T) {
 		t.Errorf("a newer format does not ask to update: %v", err)
 	}
 }
+
+// the sync state keeps keys a newer sshr wrote, a state of a newer format
+// stops the sync and asks to update (#97)
+func TestSyncStateKeepsKeysItDoesNotKnow(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	path := w.a.statePath()
+	b, err := os.ReadFile(path)
+	must(t, err)
+	var m map[string]any
+	must(t, json.Unmarshal(b, &m))
+	m["future"] = "kept"
+	b, _ = json.Marshal(m)
+	must(t, os.WriteFile(path, b, 0o600))
+	w.a.st = nil
+	must(t, w.a.Push())
+	if raw := readFileKeys(t, path); string(raw["future"]) != `"kept"` {
+		t.Fatalf("state.json lost the key: %v", raw)
+	}
+	m["version"] = 4
+	b, _ = json.Marshal(m)
+	must(t, os.WriteFile(path, b, 0o600))
+	w.a.st = nil
+	if err := w.a.Push(); err == nil || !strings.Contains(err.Error(), "update sshr") {
+		t.Fatalf("a newer state was used: %v", err)
+	}
+}
+
+func readFileKeys(t *testing.T, path string) map[string]json.RawMessage {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	must(t, err)
+	var m map[string]json.RawMessage
+	must(t, json.Unmarshal(b, &m))
+	return m
+}
