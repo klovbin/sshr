@@ -276,3 +276,15 @@ func TestObjectBackendNames(t *testing.T) {
 		t.Error("a device named ../x was removed")
 	}
 }
+
+// a device record that does not parse or does not match its name and
+// key is skipped, approvals go on (#228)
+func TestObjectBackendBadDeviceRecords(t *testing.T) {
+	store, a, _ := objWorld(t)
+	store.Put(objDevices+strings.Repeat("b", 32), []byte("not json"))
+	store.Put(objDevices+strings.Repeat("c", 32), []byte(`{"id":"`+a.st.DeviceID+`","active":false}`))
+	pending, err := a.Pending()
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending %+v %v", pending, err)
+	}
+}

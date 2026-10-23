@@ -53,6 +53,7 @@ const (
 	maxSmall     = 64 << 10 // the account, a device, an envelope
 	maxNames     = 10000    // names one List may return
 	manifestPage = 100      // manifests one ManifestsAfter returns
+	maxPending   = 10       // devices waiting for approval
 )
 
 const (
@@ -134,6 +135,24 @@ func (o ObjectBackend) Join(dev []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkID(req.Device.ID); err != nil || syncproto.DeviceID(req.Device.SignPub) != req.Device.ID {
+		return nil, errors.New("bad device")
+	}
+	b, err := o.Devices()
+	if err != nil {
+		return nil, err
+	}
+	var all []syncproto.DeviceRecord
+	json.Unmarshal(b, &all)
+	pending := 0
+	for _, d := range all {
+		if !d.Active {
+			pending++
+		}
+	}
+	if pending >= maxPending {
+		return nil, errors.New("too many devices waiting for approval")
+	}
 	rec, _ := json.Marshal(syncproto.DeviceRecord{Device: req.Device})
 	if err := o.Store.Create(objDevices+req.Device.ID, rec); err != nil {
 		if errors.Is(err, ErrExists) {
@@ -161,9 +180,12 @@ func (o ObjectBackend) Devices() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// a record that does not parse, sits under another name or names
+		// a key that is not its own is skipped, one bad object does not
+		// stop approvals
 		var rec syncproto.DeviceRecord
-		if err := json.Unmarshal(b, &rec); err != nil {
-			return nil, fmt.Errorf("%s: %v", n, err)
+		if json.Unmarshal(b, &rec) != nil || objDevices+rec.ID != n || syncproto.DeviceID(rec.SignPub) != rec.ID {
+			continue
 		}
 		out = append(out, rec)
 	}
