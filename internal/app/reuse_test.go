@@ -46,7 +46,9 @@ func TestReuseArgs(t *testing.T) {
 		}
 		return
 	}
-	dir, err := os.MkdirTemp("", "r")
+	// the temp folder of macOS is too long for a socket path, ControlDir
+	// would rightly fall back to ~/.sshr/cm, /tmp is short on every Unix
+	dir, err := os.MkdirTemp("/tmp", "r")
 	if err != nil {
 		t.Fatal(err)
 	}
