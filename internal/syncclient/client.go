@@ -776,6 +776,9 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 			switch {
 			case m.Counter <= after:
 				return nil, fmt.Errorf("the server sent change %d again after %d, the history does not add up", m.Counter, after)
+			case m.Counter != after+1 && !joining && len(out) == 0 && after == c.st.Counter:
+				// the kept history starts past what this device saw
+				return nil, fmt.Errorf("the sync keeps only the last %d changes and no longer has changes %d to %d, this device fell behind or the history was cut, run sshr sync leave and join again", keepHistory, after+1, m.Counter-1)
 			case m.Counter != after+1 && !joining:
 				return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", after+1, m.Counter-1)
 			}

@@ -369,3 +369,20 @@ func TestObjectBackendTrimNeedsRealHistory(t *testing.T) {
 		t.Errorf("the store kept %v", all)
 	}
 }
+
+// a device whose next change is no longer kept is told it fell behind,
+// not that the history does not add up (#248)
+func TestFellBehindKeptHistory(t *testing.T) {
+	store, a, b := objWorld(t)
+	seen := b.st.Counter
+	for i := 0; i < 3; i++ {
+		_, err := a.Store.Add(hosts.Host{Name: fmt.Sprintf("h%d", i), Host: "10.0.0.9", User: "u"})
+		must(t, err)
+		must(t, a.Push())
+	}
+	must(t, store.Delete(manifestName(seen+1)))
+	err := b.Pull()
+	if err == nil || !strings.Contains(err.Error(), "keeps only the last") {
+		t.Errorf("pull behind the kept history: %v", err)
+	}
+}
