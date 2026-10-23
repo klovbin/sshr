@@ -59,6 +59,7 @@ Later
 
 7. sshr on iOS and Android, ssh in process, keys in the phone's keystore, joins sync like any device ([#25](https://github.com/klovbin/sshr/issues/25))
 9. Sync: automatic background sync, a paper recovery key, pairing by QR code
+12. Sync through a store you already have, Supabase, a 1Password vault or a folder Syncthing or Dropbox syncs, still end to end encrypted, the store sees only ciphertext ([#128](https://github.com/klovbin/sshr/issues/128))
 10. Sync without a server: device to device over the local network or the user's own WireGuard tunnel, TLS 1.3 with device keys pinned at pairing
 11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required
 

@@ -158,3 +158,4 @@ In this order, each one its own issue and commits:
 7. (#101) an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, the API token on the unix socket too
 8. (#102) done: `scripts/release.sh` and `.github/workflows/release.yml` build the six CLI files on a tag, checksums and a build attestation, the GUI is not in them, packages (#17) are next
 9. (#103) split `app` by its areas once 2 and 4 have settled the seams
+10. (#128) a sync backend interface in `syncclient`, `sshr-sync` over HTTP as its first implementation, then Supabase, 1Password and a synced folder, after 3 so every backend carries the versioned payload
