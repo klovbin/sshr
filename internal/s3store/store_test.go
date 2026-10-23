@@ -213,4 +213,10 @@ func TestCheckEndpoint(t *testing.T) {
 	if _, err := New(Config{Endpoint: "http://e.example", Bucket: "b", KeyID: "k"}, "s", nil); err == nil {
 		t.Error("New opened a plain http endpoint")
 	}
+	// no error repeats a password of the address (#239)
+	for _, raw := range []string{"https://u:pw@host:badport", "https://u:pw@host", "ftp://u:pw@host", "http://u:pw@e.example"} {
+		if err := CheckEndpoint(raw); err == nil || strings.Contains(err.Error(), "pw") {
+			t.Errorf("%q: %v", raw, err)
+		}
+	}
 }

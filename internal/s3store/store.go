@@ -87,7 +87,8 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 func CheckEndpoint(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		return fmt.Errorf("bad S3 endpoint %q", raw)
+		// the address is not repeated, it may hold a password
+		return errors.New("bad S3 endpoint, it has to look like https://host[:port]")
 	}
 	if u.User != nil {
 		return errors.New("the S3 endpoint must not carry a user or password, the key id and secret go apart")
@@ -101,7 +102,7 @@ func CheckEndpoint(raw string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("the S3 endpoint has to be https://, plain http only to this machine: %q", raw)
+	return fmt.Errorf("the S3 endpoint has to be https://, plain http only to this machine: %s", u.Redacted())
 }
 
 func ctx() (context.Context, context.CancelFunc) {
