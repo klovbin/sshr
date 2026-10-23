@@ -253,13 +253,19 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 		undo()
 		return fmt.Errorf("the sync keys did not move, nothing is changed: %v", err)
 	}
-	// a settings file that does not read is not replaced with defaults
+	// a settings file that does not read is not replaced with defaults, the
+	// keys go back to the keychain the mode still reads
 	st, err := LoadSettings()
-	if err != nil {
-		return fmt.Errorf("the vault key is wrapped in %s but settings.json does not read, the mode is not changed: %v", path, err)
+	if err == nil {
+		st.Vault = VaultPassphrase
+		if err = SaveSettings(st); err == nil {
+			return nil
+		}
 	}
-	st.Vault = VaultPassphrase
-	return SaveSettings(st)
+	if berr := MoveSecrets(secretNames, false); berr != nil {
+		return fmt.Errorf("settings.json was not saved and the sync keys did not go back to the keychain, fix settings.json and run the same command again: %v, %v", err, berr)
+	}
+	return fmt.Errorf("the vault key is wrapped in %s but settings.json was not saved, the mode is not changed: %v", path, err)
 }
 
 // UseKeychainVault stores the current vault key in the system keychain,
@@ -293,12 +299,16 @@ func UseKeychainVault(secretNames []string) error {
 		return fmt.Errorf("the sync keys did not move to the keychain, the passphrase vault stays: %v", err)
 	}
 	st, err := LoadSettings()
-	if err != nil {
-		return fmt.Errorf("the vault key is in the keychain but settings.json does not read, the mode is not changed: %v", err)
+	if err == nil {
+		st.Vault = ""
+		err = SaveSettings(st)
 	}
-	st.Vault = ""
-	if err := SaveSettings(st); err != nil {
-		return err
+	if err != nil {
+		// the mode still reads the file, the keys go back to it
+		if berr := MoveSecrets(secretNames, true); berr != nil {
+			return fmt.Errorf("settings.json was not saved and the sync keys did not go back to the secrets file, fix settings.json and run the same command again: %v, %v", err, berr)
+		}
+		return fmt.Errorf("the vault key is in the keychain but settings.json was not saved, the mode is not changed: %v", err)
 	}
 	path, err := passphraseFilePath()
 	if err != nil {

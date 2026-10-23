@@ -133,30 +133,44 @@ func secretStore(name string) Keychain {
 // passphrase vault file, or back when toFile is false: each value is read
 // back from the target and only then removed from the source, a name in
 // neither place is skipped, a keychain that is not there holds nothing to
-// move
+// move, a move that fails halfway takes back what it moved, the mode
+// reads one place and a key left in the other looks lost
 func MoveSecrets(names []string, toFile bool) error {
+	moved, err := moveSecrets(names, toFile)
+	if err == nil {
+		return nil
+	}
+	if _, berr := moveSecrets(moved, !toFile); berr != nil {
+		return fmt.Errorf("%v, %d of the keys stayed in the new place, run the same command again: %v", err, len(moved), berr)
+	}
+	return err
+}
+
+func moveSecrets(names []string, toFile bool) ([]string, error) {
 	var from, to Keychain = keychain, fileKeychain{}
 	if !toFile {
 		from, to = fileKeychain{}, keychain
 	}
+	var moved []string
 	for _, name := range names {
 		v, err := callStore(from, func(k Keychain) (string, error) { return k.Get(name) })
 		if errors.Is(err, keyring.ErrNotFound) || (toFile && errors.Is(err, ErrKeychainMissing)) {
 			continue
 		}
 		if err != nil {
-			return err
+			return moved, err
 		}
 		if _, err := callStore(to, func(k Keychain) (string, error) { return "", k.Set(name, v) }); err != nil {
-			return err
+			return moved, err
 		}
 		back, err := callStore(to, func(k Keychain) (string, error) { return k.Get(name) })
 		if err != nil || back != v {
-			return fmt.Errorf("the secret %s did not read back from its new place, it stays where it was", name)
+			return moved, fmt.Errorf("the secret %s did not read back from its new place, it stays where it was", name)
 		}
 		if _, err := callStore(from, func(k Keychain) (string, error) { return "", k.Delete(name) }); err != nil && !errors.Is(err, keyring.ErrNotFound) {
-			return err
+			return moved, err
 		}
+		moved = append(moved, name)
 	}
-	return nil
+	return moved, nil
 }

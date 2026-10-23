@@ -383,3 +383,50 @@ func TestPassphraseChangeFailureKeepsOldFile(t *testing.T) {
 		t.Fatalf("the old passphrase does not open the vault key now: %v", err)
 	}
 }
+
+// a sync key move that fails halfway takes back the keys it moved, the
+// mode did not change and still reads the keychain (#190)
+func TestFailedMoveTakesKeysBack(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	SecretSet("sync-device", []byte("seed"))
+	SecretSet("sync-key-1", []byte("k1"))
+	old := keychain
+	keychain = pickyKeychain{old, map[string]bool{"sync-key-1": true}}
+	t.Cleanup(func() { keychain = old })
+	if err := SetVaultPassphrase(pass, []string{"sync-device", "sync-key-1"}); err == nil {
+		t.Fatal("the change went through a key that does not read")
+	}
+	keychain = old
+	if VaultMode() == VaultPassphrase {
+		t.Fatal("the mode changed")
+	}
+	if v, ok, err := SecretGet("sync-device"); err != nil || !ok || string(v) != "seed" {
+		t.Fatalf("the moved key is not back in the keychain: %q %v %v", v, ok, err)
+	}
+	if _, err := (fileKeychain{}).Get("sync-device"); err == nil {
+		t.Error("a copy stayed in the secrets file")
+	}
+}
+
+// settings.json that does not save after the move sends the keys back
+// (#190)
+func TestSettingsFailureTakesKeysBack(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	SecretSet("sync-device", []byte("seed"))
+	path, _ := settingsPath()
+	os.WriteFile(path, []byte("{broken"), 0o600)
+	if err := SetVaultPassphrase(pass, []string{"sync-device"}); err == nil {
+		t.Fatal("the mode changed over a settings file that does not read")
+	}
+	if _, err := keyring.Get(keyringService, "sync-device"); err != nil {
+		t.Fatalf("the key did not come back to the keychain: %v", err)
+	}
+}
