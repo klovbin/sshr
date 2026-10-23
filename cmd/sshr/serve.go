@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"sshr.dev/internal/api"
 	"sshr.dev/internal/app"
@@ -46,7 +47,8 @@ func cmdServe(store *app.Store, args []string) {
 	}
 	srv := api.New(store, opts)
 	defer srv.Close()
-	hs := &http.Server{Handler: srv}
+	// a client that never finishes its headers does not keep a connection
+	hs := &http.Server{Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
