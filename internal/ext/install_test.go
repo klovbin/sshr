@@ -375,3 +375,25 @@ func TestNewerPinsAreNotCalledDamaged(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// a damaged pins file stops a removal before the folder goes (#167)
+func TestDamagedPinsTouchNoFolder(t *testing.T) {
+	r := &Registry{Root: t.TempDir()}
+	st, err := Prepare(source(t, "hello", "#!/bin/sh\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Discard()
+	if err := r.Install(st); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"not json", `{"extensions":{},"version":"two"}`} {
+		os.WriteFile(filepath.Join(r.Root, PinsFile), []byte(bad), 0o600)
+		if err := r.Remove("hello"); err == nil {
+			t.Fatalf("%s: removed", bad)
+		}
+		if _, err := os.Stat(filepath.Join(r.Root, "hello")); err != nil {
+			t.Fatalf("%s: the folder went: %v", bad, err)
+		}
+	}
+}

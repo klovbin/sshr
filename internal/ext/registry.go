@@ -141,6 +141,11 @@ type pinsFile struct {
 // pinsWritable fails when .pins.json was written by a newer sshr, an
 // install or a removal checks it before it touches any folder
 func (r *Registry) pinsWritable() error {
+	// read the way the install and the removal read them later: a link, an
+	// oversized or damaged file fails here, before a folder changes
+	if _, err := r.pins(); err != nil {
+		return err
+	}
 	path := filepath.Join(r.Root, PinsFile)
 	b, err := app.ReadFileShared(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -149,7 +154,11 @@ func (r *Registry) pinsWritable() error {
 	if err != nil {
 		return err
 	}
-	if _, format, err := app.RecordExtra(b, reflect.TypeOf(pinsFile{})); err == nil && format > pinsFormat {
+	_, format, err := app.RecordExtra(b, reflect.TypeOf(pinsFile{}))
+	if err != nil {
+		return fmt.Errorf("%s is damaged, remove it and install the extensions again: %v", path, err)
+	}
+	if format > pinsFormat {
 		return fmt.Errorf("%w: %s was written by a newer sshr (format %d), update sshr to install or remove extensions", app.ErrNewerFormat, path, format)
 	}
 	return nil
