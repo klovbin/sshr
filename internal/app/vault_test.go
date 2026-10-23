@@ -296,3 +296,50 @@ func TestKeychainCanBeReplaced(t *testing.T) {
 		t.Error("the secret stayed")
 	}
 }
+
+// a keychain call that answers after the time limit ends the quiet
+// period, an unlock typed late does not keep the keychain refused (#173)
+func TestLateKeychainAnswerEndsTheQuiet(t *testing.T) {
+	old := keyringTimeout
+	keyringTimeout = 50 * time.Millisecond
+	t.Cleanup(func() {
+		keyringTimeout = old
+		keyringMu.Lock()
+		keyringDownUntil = time.Time{}
+		keyringMu.Unlock()
+	})
+	release, answered := make(chan struct{}), make(chan struct{})
+	_, err := keyringCall(func() (string, error) {
+		<-release
+		defer close(answered)
+		return "v", nil
+	})
+	if !errors.Is(err, errKeyringTimeout) {
+		t.Fatalf("no timeout: %v", err)
+	}
+	if _, err := keyringCall(func() (string, error) { return "", nil }); !errors.Is(err, errKeyringTimeout) {
+		t.Fatalf("the quiet period is off right after a timeout: %v", err)
+	}
+	close(release)
+	<-answered
+	time.Sleep(10 * time.Millisecond)
+	if _, err := keyringCall(func() (string, error) { return "ok", nil }); err != nil {
+		t.Fatalf("the late answer did not end the quiet period: %v", err)
+	}
+}
+
+// after storing a new vault key ran out of time no other key is made in
+// this process (#173)
+func TestNoSecondKeyAfterATimedOutStore(t *testing.T) {
+	resetVault(t)
+	old := keychain
+	keychain = mapKeychain{}
+	t.Cleanup(func() { keychain = old; keySetPending = false })
+	keySetPending = true
+	if _, err := VaultKey(); err == nil || !errors.Is(err, ErrNoKeychain) {
+		t.Fatalf("a key was made: %v", err)
+	}
+	if len(keychain.(mapKeychain)) != 0 {
+		t.Fatal("a key reached the keychain")
+	}
+}

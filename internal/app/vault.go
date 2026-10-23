@@ -32,7 +32,7 @@ const (
 // keyringTimeout bounds every keychain call, a locked Secret Service
 // collection waits for an unlock prompt with no timeout of its own, over ssh
 // or with no desktop nobody answers it
-const keyringTimeout = 5 * time.Second
+var keyringTimeout = 5 * time.Second
 
 // ErrNoKeychain means there is no system keychain to keep the vault key in,
 // saved passwords and keys are unavailable then, asking for the password
@@ -105,6 +105,10 @@ var (
 	}
 )
 
+// keySetPending is set when storing a new vault key ran out of time, the
+// store may still land, this process makes no other key, under vaultMu
+var keySetPending bool
+
 // errKeyringTimeout is a keychain call that did not answer in time
 var errKeyringTimeout = errors.New("no answer from the keychain, is it locked?")
 
@@ -135,6 +139,13 @@ func keyringCall(f func() (string, error)) (string, error) {
 	ch := make(chan result, 1)
 	go func() {
 		v, err := f()
+		if err == nil {
+			// an answer, even one that came after the time limit (an unlock
+			// typed late), ends the quiet period
+			keyringMu.Lock()
+			keyringDownUntil = time.Time{}
+			keyringMu.Unlock()
+		}
 		ch <- result{v, err}
 	}()
 	select {
@@ -272,7 +283,15 @@ func createVaultKey() ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
+	if keySetPending {
+		return nil, keychainError(fmt.Errorf("%w: a new vault key may still reach the keychain from a call that ran out of time, start sshr again", errKeyringTimeout))
+	}
 	if err := SecretSet(keyringUser, key); err != nil {
+		if errors.Is(err, ErrKeychainTimeout) {
+			// the call may still complete with this key, another key made
+			// later in this process could be overwritten by it
+			keySetPending = true
+		}
 		return nil, err
 	}
 	// read back what the keychain holds, that is the key every other process
