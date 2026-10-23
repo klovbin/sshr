@@ -789,6 +789,11 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 			after = m.Counter
 			out = append(out, sm)
 		}
+		// past a gap keepHistory changes are enough to judge, a store
+		// could serve an endless list
+		if cut > 0 && len(out) >= keepHistory {
+			break
+		}
 	}
 	if cut > 0 {
 		var m syncproto.Manifest

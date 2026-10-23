@@ -447,3 +447,39 @@ func TestPutManifestDoesNotDownloadBlobs(t *testing.T) {
 		t.Error("a manifest with a missing blob went in")
 	}
 }
+
+// getCount counts the manifests a store hands out
+type getCount struct {
+	*memStore
+	n *int
+}
+
+func (s getCount) Get(name string, max int) ([]byte, error) {
+	if strings.HasPrefix(name, objManifests) {
+		*s.n++
+	}
+	return s.memStore.Get(name, max)
+}
+
+// past a gap the client reads no more than it needs to judge (#252)
+func TestGapStopsReading(t *testing.T) {
+	store, a, b := objWorld(t)
+	seen := b.st.Counter
+	_, err := a.Store.Add(hosts.Host{Name: "h", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, a.Push())
+	must(t, store.Delete(manifestName(seen+1)))
+	for n := seen + 2; n <= seen+3*keepHistory; n++ {
+		body, _ := json.Marshal(syncproto.Manifest{Counter: n})
+		signed, _ := json.Marshal(syncproto.Signed{Body: body})
+		must(t, store.Create(manifestName(n), signed))
+	}
+	got := 0
+	b.Backend = ObjectBackend{Store: getCount{store, &got}}
+	if err := b.Pull(); err == nil {
+		t.Fatal("a padded history went through")
+	}
+	if got > keepHistory+manifestPage {
+		t.Errorf("read %d manifests past the gap", got)
+	}
+}
