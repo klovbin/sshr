@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,6 +62,33 @@ const (
 	objBlobs     = "blobs/"
 	objManifests = "manifests/"
 )
+
+// The shapes of the names in a store account, a name from List of any
+// other shape is not used, a store cannot steer a read or a delete with
+// ../ or a stray name
+var (
+	objIDRe       = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	objHashRe     = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	objEpochRe    = regexp.MustCompile(`^[0-9]{10}$`)
+	objCounterRe  = regexp.MustCompile(`^[0-9]{20}$`)
+	errObjectName = errors.New("not a name of a sync account")
+)
+
+// checkID refuses a device id that is not 32 hex digits
+func checkID(id string) error {
+	if !objIDRe.MatchString(id) {
+		return fmt.Errorf("%w: device %q", errObjectName, id)
+	}
+	return nil
+}
+
+// checkHash refuses a blob hash that is not 64 hex digits
+func checkHash(hash string) error {
+	if !objHashRe.MatchString(hash) {
+		return fmt.Errorf("%w: blob %q", errObjectName, hash)
+	}
+	return nil
+}
 
 func manifestName(counter uint64) string { return fmt.Sprintf("%s%020d", objManifests, counter) }
 
@@ -123,6 +151,9 @@ func (o ObjectBackend) Devices() ([]byte, error) {
 	}
 	out := []syncproto.DeviceRecord{}
 	for _, n := range names {
+		if !objIDRe.MatchString(strings.TrimPrefix(n, objDevices)) {
+			continue
+		}
 		b, err := o.Store.Get(n, maxSmall)
 		if errors.Is(err, ErrNotFound) {
 			continue
@@ -140,6 +171,9 @@ func (o ObjectBackend) Devices() ([]byte, error) {
 }
 
 func (o ObjectBackend) Activate(id string) error {
+	if err := checkID(id); err != nil {
+		return err
+	}
 	b, err := o.Store.Get(objDevices+id, maxSmall)
 	if err != nil {
 		return err
@@ -156,6 +190,9 @@ func (o ObjectBackend) Activate(id string) error {
 // RemoveDevice takes the device and its envelopes out, the device keeps
 // whatever access the store credential gives it
 func (o ObjectBackend) RemoveDevice(id string) error {
+	if err := checkID(id); err != nil {
+		return err
+	}
 	if _, err := o.Store.Get(objDevices+id, maxSmall); err != nil {
 		return err
 	}
@@ -164,6 +201,9 @@ func (o ObjectBackend) RemoveDevice(id string) error {
 		return err
 	}
 	for _, n := range envs {
+		if !objEpochRe.MatchString(strings.TrimPrefix(n, objEnvelopes+id+"/")) {
+			continue
+		}
 		if err := o.Store.Delete(n); err != nil {
 			return err
 		}
@@ -179,7 +219,11 @@ func (o ObjectBackend) envelopes(id string) ([]int, error) {
 	}
 	var out []int
 	for _, n := range names {
-		if e, err := strconv.Atoi(strings.TrimPrefix(n, objEnvelopes+id+"/")); err == nil && e > 0 {
+		suffix := strings.TrimPrefix(n, objEnvelopes+id+"/")
+		if !objEpochRe.MatchString(suffix) {
+			continue
+		}
+		if e, err := strconv.Atoi(suffix); err == nil && e > 0 {
 			out = append(out, e)
 		}
 	}
@@ -190,6 +234,9 @@ func (o ObjectBackend) envelopes(id string) ([]int, error) {
 // is there already stays, a rotation delivers a new epoch, so a planted or
 // older envelope never covers the one a device reads
 func (o ObjectBackend) PutEnvelope(id string, env []byte) error {
+	if err := checkID(id); err != nil {
+		return err
+	}
 	var e syncproto.Envelope
 	if err := json.Unmarshal(env, &e); err != nil {
 		return err
@@ -208,6 +255,9 @@ func (o ObjectBackend) PutEnvelope(id string, env []byte) error {
 // never taken for it, while it is missing the newest older one says the
 // key is still on its way
 func (o ObjectBackend) GetEnvelope(id string, epoch int) ([]byte, error) {
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
 	b, err := o.Store.Get(envelopeName(id, epoch), maxSmall)
 	if !errors.Is(err, ErrNotFound) {
 		return b, err
@@ -229,6 +279,9 @@ func (o ObjectBackend) GetEnvelope(id string, epoch int) ([]byte, error) {
 }
 
 func (o ObjectBackend) PutBlob(hash string, blob []byte) error {
+	if err := checkHash(hash); err != nil {
+		return err
+	}
 	if len(blob) > syncproto.MaxBlob {
 		return ErrTooLarge
 	}
@@ -236,6 +289,9 @@ func (o ObjectBackend) PutBlob(hash string, blob []byte) error {
 }
 
 func (o ObjectBackend) GetBlob(hash string) ([]byte, error) {
+	if err := checkHash(hash); err != nil {
+		return nil, err
+	}
 	return o.Store.Get(objBlobs+hash, syncproto.MaxBlob)
 }
 
@@ -247,7 +303,11 @@ func (o ObjectBackend) manifests() ([]uint64, error) {
 	}
 	var out []uint64
 	for _, n := range names {
-		if c, err := strconv.ParseUint(strings.TrimPrefix(n, objManifests), 10, 64); err == nil {
+		suffix := strings.TrimPrefix(n, objManifests)
+		if !objCounterRe.MatchString(suffix) {
+			continue
+		}
+		if c, err := strconv.ParseUint(suffix, 10, 64); err == nil {
 			out = append(out, c)
 		}
 	}
@@ -311,6 +371,9 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 	for id, e := range m.Entries {
 		if e.Hash == "" {
 			continue
+		}
+		if err := checkHash(e.Hash); err != nil {
+			return err
 		}
 		if _, err := o.Store.Get(objBlobs+e.Hash, syncproto.MaxBlob); err != nil {
 			return fmt.Errorf("the blob of %s is not in the store: %v", short(id, 8), err)

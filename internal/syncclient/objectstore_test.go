@@ -184,23 +184,23 @@ func TestObjectBackendRemoveDevice(t *testing.T) {
 // one does not hide it, an envelope that is there stays (#128, #227)
 func TestObjectBackendEnvelopeEpochs(t *testing.T) {
 	o := ObjectBackend{Store: newMemStore()}
-	must(t, o.PutEnvelope("d", []byte(`{"epoch":2,"data":"AA=="}`)))
-	must(t, o.Store.Put(envelopeName("d", 99), []byte(`{"epoch":99,"data":"garbage"}`)))
-	b, err := o.GetEnvelope("d", 2)
+	must(t, o.PutEnvelope(testDev, []byte(`{"epoch":2,"data":"AA=="}`)))
+	must(t, o.Store.Put(envelopeName(testDev, 99), []byte(`{"epoch":99,"data":"garbage"}`)))
+	b, err := o.GetEnvelope(testDev, 2)
 	if err != nil || !strings.Contains(string(b), `"epoch":2`) {
 		t.Fatalf("envelope of epoch 2: %s %v", b, err)
 	}
-	if err := o.PutEnvelope("d", []byte(`{"epoch":2,"data":"BB=="}`)); err != ErrStaleEpoch {
+	if err := o.PutEnvelope(testDev, []byte(`{"epoch":2,"data":"BB=="}`)); err != ErrStaleEpoch {
 		t.Fatalf("second envelope of epoch 2 = %v", err)
 	}
-	if b, _ := o.GetEnvelope("d", 2); !strings.Contains(string(b), "AA==") {
+	if b, _ := o.GetEnvelope(testDev, 2); !strings.Contains(string(b), "AA==") {
 		t.Errorf("the envelope of epoch 2 was replaced: %s", b)
 	}
 	// epoch 3 not delivered yet, the older one says the key is on its way
-	if b, err := o.GetEnvelope("d", 3); err != nil || !strings.Contains(string(b), `"epoch":2`) {
+	if b, err := o.GetEnvelope(testDev, 3); err != nil || !strings.Contains(string(b), `"epoch":2`) {
 		t.Errorf("envelope while epoch 3 is on its way: %s %v", b, err)
 	}
-	if _, err := o.GetEnvelope("x", 1); err != ErrNotFound {
+	if _, err := o.GetEnvelope(strings.Repeat("e", 32), 1); err != ErrNotFound {
 		t.Errorf("no envelope = %v", err)
 	}
 }
@@ -232,15 +232,15 @@ func TestObjectBackendLimits(t *testing.T) {
 	store := newMemStore()
 	o := ObjectBackend{Store: store}
 	big := make([]byte, syncproto.MaxBlob+1)
-	if err := o.PutBlob("h", big); err != ErrTooLarge {
+	if err := o.PutBlob(testHash, big); err != ErrTooLarge {
 		t.Errorf("big blob in = %v", err)
 	}
-	store.Put(objBlobs+"h", big)
-	if _, err := o.GetBlob("h"); err != ErrTooLarge {
+	store.Put(objBlobs+testHash, big)
+	if _, err := o.GetBlob(testHash); err != ErrTooLarge {
 		t.Errorf("big blob out = %v", err)
 	}
-	store.Put(envelopeName("d", 1), make([]byte, maxSmall+1))
-	if _, err := o.GetEnvelope("d", 1); err != ErrTooLarge {
+	store.Put(envelopeName(testDev, 1), make([]byte, maxSmall+1))
+	if _, err := o.GetEnvelope(testDev, 1); err != ErrTooLarge {
 		t.Errorf("big envelope = %v", err)
 	}
 	for i := 0; i <= maxNames; i++ {
@@ -248,5 +248,31 @@ func TestObjectBackendLimits(t *testing.T) {
 	}
 	if _, err := o.Devices(); err == nil {
 		t.Error("a store with more device objects than an account holds was listed")
+	}
+}
+
+var (
+	testDev  = strings.Repeat("d", 32)
+	testHash = strings.Repeat("a", 64)
+)
+
+// names of a shape a sync account never writes are not used, a blob or a
+// device named with ../ is refused (#229)
+func TestObjectBackendNames(t *testing.T) {
+	store := newMemStore()
+	o := ObjectBackend{Store: store}
+	store.Put("devices/../account", []byte(`{"id":"x"}`))
+	store.Put(objManifests+"1", []byte("{}"))
+	if b, err := o.Devices(); err != nil || string(b) != "[]" {
+		t.Errorf("devices %s %v", b, err)
+	}
+	if _, _, err := o.Head(); err != ErrNotFound {
+		t.Errorf("a manifest of another name shape was taken: %v", err)
+	}
+	if _, err := o.GetBlob("../account"); err == nil {
+		t.Error("a blob named ../account was read")
+	}
+	if err := o.RemoveDevice("../x"); err == nil {
+		t.Error("a device named ../x was removed")
 	}
 }
