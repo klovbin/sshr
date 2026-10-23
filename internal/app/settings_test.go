@@ -243,3 +243,32 @@ func TestCommandTargetFollowsHops(t *testing.T) {
 		t.Fatal("the target did not change when the jump host was repointed")
 	}
 }
+
+// two processes changing the command list keep each other's changes, a
+// denial is not undone by an allow of another host (#218)
+func TestCommandHostsMergeByKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	x := &Host{ID: "x", Name: "x"}
+	y := &Host{ID: "y", Name: "y"}
+	st, _ := LoadSettings()
+	st.AllowCommands(x, "tx")
+	if err := SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	p1, _ := LoadSettings()
+	p2, _ := LoadSettings()
+	p2.DenyCommands("x")
+	if err := SaveSettings(p2); err != nil {
+		t.Fatal(err)
+	}
+	p1.AllowCommands(y, "ty")
+	if err := SaveSettings(p1); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadSettings()
+	if _, back := got.CommandHosts["x"]; back || got.CommandHosts["y"] != "ty" {
+		t.Fatalf("command_hosts %v", got.CommandHosts)
+	}
+}

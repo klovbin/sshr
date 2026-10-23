@@ -318,8 +318,35 @@ func mergeChanged(dst *Settings, s, base Settings) {
 		if !sv.Type().Field(i).IsExported() {
 			continue
 		}
-		if !reflect.DeepEqual(sv.Field(i).Interface(), bv.Field(i).Interface()) {
-			d.Field(i).Set(sv.Field(i))
+		if reflect.DeepEqual(sv.Field(i).Interface(), bv.Field(i).Interface()) {
+			continue
+		}
+		if m, ok := sv.Field(i).Interface().(map[string]string); ok {
+			// a map changes key by key, a denial saved by another process
+			// meanwhile is not undone by an allow of another key here
+			d.Field(i).Set(reflect.ValueOf(mergeKeys(d.Field(i).Interface().(map[string]string), m, bv.Field(i).Interface().(map[string]string))))
+			continue
+		}
+		d.Field(i).Set(sv.Field(i))
+	}
+}
+
+// mergeKeys applies to cur the keys that s added, changed or removed
+// against base
+func mergeKeys(cur, s, base map[string]string) map[string]string {
+	out := make(map[string]string, len(cur)+len(s))
+	for k, v := range cur {
+		out[k] = v
+	}
+	for k, v := range s {
+		if bv, ok := base[k]; !ok || bv != v {
+			out[k] = v
 		}
 	}
+	for k := range base {
+		if _, ok := s[k]; !ok {
+			delete(out, k)
+		}
+	}
+	return out
 }
