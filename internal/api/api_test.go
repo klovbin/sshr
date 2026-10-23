@@ -96,6 +96,16 @@ func TestAPIGuard(t *testing.T) {
 	if rec.Code != 403 {
 		t.Errorf("rebinding host = %d", rec.Code)
 	}
+	// only loopback addresses, the API is not for the network (#197)
+	for host, want := range map[string]int{"192.168.1.5:7000": 403, "0.0.0.0:7000": 403, "[::1]:7000": 200, "127.0.0.1:7000": 200} {
+		req := httptest.NewRequest("GET", "http://"+host+"/v1/hosts", nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("Host %s = %d, want %d", host, rec.Code, want)
+		}
+	}
 }
 
 func TestAPIUploadAndTunnelChecks(t *testing.T) {

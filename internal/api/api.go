@@ -88,7 +88,7 @@ func (a *api) guard(next http.Handler) http.Handler {
 			if h, _, err := net.SplitHostPort(host); err == nil {
 				host = h
 			}
-			if host != "localhost" && net.ParseIP(host) == nil {
+			if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 				fail(w, http.StatusForbidden, errors.New("connect to 127.0.0.1 or localhost"))
 				return
 			}
