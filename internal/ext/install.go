@@ -217,6 +217,9 @@ func (r *Registry) Install(s *Staged) error {
 		return err
 	}
 	return r.locked(func() error {
+		if err := r.pinsWritable(); err != nil {
+			return err
+		}
 		fresh := filepath.Join(r.Root, "."+s.Name+".new")
 		old := filepath.Join(r.Root, "."+s.Name+".old")
 		dest := filepath.Join(r.Root, s.Name)

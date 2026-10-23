@@ -135,6 +135,23 @@ type pinsFile struct {
 	Extensions map[string]json.RawMessage `json:"extensions"`
 }
 
+// pinsWritable fails when .pins.json was written by a newer sshr, an
+// install or a removal checks it before it touches any folder
+func (r *Registry) pinsWritable() error {
+	path := filepath.Join(r.Root, PinsFile)
+	b, err := app.ReadFileShared(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, format, err := app.RecordExtra(b, reflect.TypeOf(pinsFile{})); err == nil && format > pinsFormat {
+		return fmt.Errorf("%w: %s was written by a newer sshr (format %d), update sshr to install or remove extensions", app.ErrNewerFormat, path, format)
+	}
+	return nil
+}
+
 // writePins writes the pins, the keys and pins of a newer sshr that this
 // write does not change are kept, a file of a newer format is not written
 func (r *Registry) writePins(pins map[string]Lock) error {
@@ -289,6 +306,9 @@ func (r *Registry) Remove(name string) error {
 		return ErrNotInstalled
 	}
 	return r.locked(func() error {
+		if err := r.pinsWritable(); err != nil {
+			return err
+		}
 		dir := filepath.Join(r.Root, name)
 		info, err := os.Lstat(dir)
 		if errors.Is(err, fs.ErrNotExist) {

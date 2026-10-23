@@ -335,3 +335,33 @@ func TestPinsKeepWhatANewerSshrWrote(t *testing.T) {
 		t.Errorf("a newer pins file was written: %v", err)
 	}
 }
+
+// a pins file of a newer format stops a removal and an install before any
+// folder changes (#161)
+func TestNewerPinsTouchNoFolder(t *testing.T) {
+	r := &Registry{Root: t.TempDir()}
+	st, err := Prepare(source(t, "hello", "#!/bin/sh\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Discard()
+	if err := r.Install(st); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(r.Root, PinsFile)
+	b, _ := os.ReadFile(path)
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	m["version"] = 3
+	b, _ = json.Marshal(m)
+	os.WriteFile(path, b, 0o600)
+	if err := r.Remove("hello"); !errors.Is(err, app.ErrNewerFormat) {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(r.Root, "hello")); err != nil {
+		t.Fatalf("the folder went: %v", err)
+	}
+	if err := r.Install(st); !errors.Is(err, app.ErrNewerFormat) {
+		t.Fatalf("install: %v", err)
+	}
+}
