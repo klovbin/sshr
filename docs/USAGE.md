@@ -324,6 +324,8 @@ Other clients: `{"mcpServers": {"sshr": {"command": "sshr", "args": ["mcp"]}}}`
 - `run_command` is off by default (`--allow-commands` or `"mcp_commands": true`), it is marked destructive so clients ask before each call
 - secrets never leave sshr, hosts that ask for a password cannot be used, nothing listens (stdin and stdout of a child process), every command is logged to stderr
 
+- `--audit` (or `"audit_log": true`) keeps `~/.sshr/audit.jsonl`: a JSON line at the start and at the end of each upload and command, with the client, the host and the exit code, a command as its length, first word and a keyed hash (`"audit_commands": "full"` keeps it whole), the file moves to `audit.jsonl.1` at `audit_max_mb` (10), an action whose start cannot be written is refused
+
 Setup for each client, every tool with its limits, the log and troubleshooting: [MCP.md](MCP.md)
 
 ## REST API
@@ -344,5 +346,7 @@ curl -H "Authorization: Bearer $(cat ~/.sshr/api-token)" http://127.0.0.1:7522/v
 | `POST /v1/hosts/{host}/upload?ext=png` | the body is the file, returns its remote path, removed after 15 minutes |
 | `POST /v1/hosts/{host}/run` | `{"command", "timeout_seconds"}`, off by default (`--allow-commands`, `"api_commands": true`) |
 | `POST /v1/hosts/{host}/tunnels`, `GET /v1/tunnels`, `DELETE /v1/tunnels/{id}` | open saved forwards, list, close |
+
+`--audit` writes host changes, uploads, runs and tunnels to the same `~/.sshr/audit.jsonl` as `sshr mcp`, the client is the uid on the socket or the address on a port
 
 Never listens on the network (`127.0.0.1`, `::1`, `localhost` only), the socket is 0600 in a 0700 folder, a port needs the token, requests with an `Origin` (web pages) or a non-loopback `Host` (DNS rebinding) are refused, passwords, keys and references are never returned or accepted

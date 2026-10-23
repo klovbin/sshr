@@ -16,17 +16,23 @@ func cmdMCP(store *app.Store, args []string) {
 	app.NoTerminalPrompts = true
 	st, _ := app.LoadSettings()
 	opts := mcp.Options{AllowCommands: st.MCPCommands, Version: app.BuildVersion()}
+	auditOn := st.AuditLog
 	for _, a := range args {
 		switch a {
 		case "--allow-commands":
 			opts.AllowCommands = true
 		case "--no-commands":
 			opts.AllowCommands = false
+		case "--audit":
+			auditOn = true
+		case "--no-audit":
+			auditOn = false
 		default:
-			fmt.Fprintln(os.Stderr, "Usage: sshr mcp [--allow-commands|--no-commands]")
+			fmt.Fprintln(os.Stderr, "Usage: sshr mcp [--allow-commands|--no-commands] [--audit|--no-audit]")
 			os.Exit(1)
 		}
 	}
+	opts.Audit = openAudit(st, auditOn)
 	if err := mcp.Serve(os.Stdin, os.Stdout, store, opts); err != nil {
 		fatal(err)
 	}

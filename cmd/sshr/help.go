@@ -186,7 +186,9 @@ Options:
 
 Options:
   --allow-commands   allow run_command, off by default (mcp_commands setting)
-  --no-commands      refuse it even when the setting is on`},
+  --no-commands      refuse it even when the setting is on
+  --audit            keep ~/.sshr/audit.jsonl, off by default (audit_log setting)
+  --no-audit         keep no audit log even when the setting is on`},
 	{name: "serve", usage: "sshr serve [options]", short: "local REST API",
 		details: `Never returns secrets, commands are off by default
 
@@ -194,7 +196,9 @@ Options:
   --listen unix:<path>       a unix socket, the default
   --listen 127.0.0.1:<port>  a loopback port, needs the token from ~/.sshr/api-token
   --allow-commands           allow POST /run, off by default (api_commands setting)
-  --no-commands              refuse it even when the setting is on`},
+  --no-commands              refuse it even when the setting is on
+  --audit                    keep ~/.sshr/audit.jsonl, off by default (audit_log setting)
+  --no-audit                 keep no audit log even when the setting is on`},
 	{name: "sync", usage: "sshr sync [init|invite|join|pending|approve|pull|push|status|remove-device|leave]", short: "sync hosts between devices",
 		details: `End to end encrypted through an sshr-sync server, sshr sync help shows
 the steps`},

@@ -23,6 +23,7 @@ const module = "sshr.dev/"
 var allowed = map[string][]string{
 	"assets":              {},
 	"internal/fileio":     {},
+	"internal/audit":      {"internal/fileio"},
 	"internal/app":        {"internal/fileio"},
 	"internal/syncproto":  {},
 	"internal/clip":       {},
@@ -30,20 +31,20 @@ var allowed = map[string][]string{
 	"internal/archtest":   {},
 	"internal/syncclient": {"internal/app", "internal/syncproto"},
 	"internal/syncserver": {"internal/syncproto", "internal/fileio"},
-	"internal/api":        {"internal/app"},
-	"internal/mcp":        {"internal/app"},
+	"internal/api":        {"internal/app", "internal/audit"},
+	"internal/mcp":        {"internal/app", "internal/audit"},
 	"internal/ext":        {"internal/app"},
 	"internal/desktop":    {"assets", "internal/fileio"},
 	"internal/ui":         {"internal/app", "internal/clip", "internal/i18n", "assets"},
 	"cmd/sshr-sync":       {"internal/fileio", "internal/syncserver"},
-	"cmd/sshr": {"internal/app", "internal/api", "internal/mcp", "internal/ext", "internal/syncclient", "internal/ui",
+	"cmd/sshr": {"internal/app", "internal/audit", "internal/api", "internal/mcp", "internal/ext", "internal/syncclient", "internal/ui",
 		"internal/desktop", "internal/clip", "assets"},
 }
 
 // noExec lists the packages that start no program themselves, the GUI,
 // the assistant and the sync server ask the core for anything that runs
 var noExec = []string{"internal/ui", "internal/mcp", "internal/syncserver", "internal/syncclient",
-	"internal/syncproto", "internal/fileio", "internal/i18n", "assets", "cmd/sshr-sync"}
+	"internal/syncproto", "internal/fileio", "internal/audit", "internal/i18n", "assets", "cmd/sshr-sync"}
 
 // phoneCore lists the packages a phone build links, os/exec is not in
 // them even through another package, the core joins once #103 splits off

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -58,4 +59,13 @@ func peerGuard(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// peerName names the client of a request for the audit log, the uid on the
+// unix socket, the address on TCP
+func peerName(r *http.Request) string {
+	if p, ok := r.Context().Value(peerKey{}).(peer); ok && p.err == nil {
+		return fmt.Sprintf("uid %d", p.uid)
+	}
+	return r.RemoteAddr
 }

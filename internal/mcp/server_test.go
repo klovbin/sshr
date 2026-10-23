@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"sshr.dev/internal/app"
+	"sshr.dev/internal/audit"
 )
 
 // exchange sends one request per line and returns the answers by id
@@ -275,5 +276,47 @@ func TestRunOutputIsData(t *testing.T) {
 	// the real end marker carries a nonce the remote side cannot know
 	if strings.Count(text, "--- end stdout ") != 1 {
 		t.Fatalf("the remote marker looks like the real one: %q", text)
+	}
+}
+
+// with an audit log every command leaves a start and an end, a log that
+// cannot be written stops the command before ssh runs (#101)
+func TestRunCommandAudited(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	os.WriteFile(filepath.Join(dir, "ssh"), []byte("#!/bin/sh\ntouch "+marker+"\necho ok\n"), 0o700)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	logOut = &bytes.Buffer{}
+	t.Cleanup(func() { logOut = os.Stderr })
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	logDir := t.TempDir()
+	l, err := audit.Open(logDir, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"uptime"}}}`
+	exchange(t, s, Options{AllowCommands: true, Audit: l},
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"tester","version":"1"}}}`, call)
+	b, _ := os.ReadFile(filepath.Join(logDir, audit.FileName))
+	if strings.Count(string(b), "\n") != 2 || !strings.Contains(string(b), `"client":"tester 1`) || !strings.Contains(string(b), `"cmd_prog":"uptime"`) {
+		t.Fatalf("log: %s", b)
+	}
+	if os.Getuid() == 0 {
+		return
+	}
+	os.Remove(marker)
+	os.Remove(filepath.Join(logDir, audit.FileName))
+	os.Chmod(logDir, 0o500)
+	t.Cleanup(func() { os.Chmod(logDir, 0o700) })
+	got := exchange(t, s, Options{AllowCommands: true, Audit: l}, call)
+	if res, _ := got["2"]["result"].(map[string]any); res == nil || res["isError"] != true {
+		t.Fatalf("not refused: %v", got["2"])
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("ssh ran without a record in the audit log")
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"sshr.dev/internal/app"
+	"sshr.dev/internal/audit"
 )
 
 // Options are the choices made when the server starts
@@ -29,6 +30,35 @@ type Options struct {
 	Token string
 	// AllowCommands enables POST /v1/hosts/{host}/run, off by default
 	AllowCommands bool
+	// Audit records every request that changes something or runs on a
+	// host, nil keeps no record
+	Audit *audit.Log
+	// Client names the caller of a request for the audit log, the remote
+	// address when nil
+	Client func(*http.Request) string
+}
+
+// begin writes the start of an action to the audit log and answers 503
+// itself when it cannot, nil then means the action must not run
+func (a *api) begin(w http.ResponseWriter, r *http.Request, action string, h *app.Host, command string) func(int, int64, error) {
+	client := r.RemoteAddr
+	if a.opts.Client != nil {
+		client = a.opts.Client(r)
+	}
+	end, err := a.opts.Audit.Begin(audit.Record{Surface: "rest", Client: client, Action: action,
+		HostID: h.ID, HostName: h.Name, Target: fmt.Sprintf("%s:%d", h.Dest(), h.Port), Command: command})
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, err)
+		return nil
+	}
+	return end
+}
+
+func exitOf(err error) int {
+	if err != nil {
+		return -1
+	}
+	return 0
 }
 
 // logOut is where the server says what it runs
@@ -237,11 +267,17 @@ func (a *api) addHost(w http.ResponseWriter, r *http.Request) {
 		}
 		h.Forwards = fs
 	}
+	end := a.begin(w, r, "add_host", &h, "")
+	if end == nil {
+		return
+	}
 	saved, err := a.store.Add(h)
 	if err != nil {
+		end(-1, 0, err)
 		fail(w, http.StatusBadRequest, err)
 		return
 	}
+	end(0, 0, nil)
 	reply(w, http.StatusCreated, saved.Summary())
 }
 
@@ -250,7 +286,13 @@ func (a *api) deleteHost(w http.ResponseWriter, r *http.Request) {
 	if h == nil {
 		return
 	}
-	if err := a.store.Delete(h.ID); err != nil {
+	end := a.begin(w, r, "delete_host", h, "")
+	if end == nil {
+		return
+	}
+	err := a.store.Delete(h.ID)
+	end(exitOf(err), 0, err)
+	if err != nil {
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -296,7 +338,12 @@ func (a *api) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	end := a.begin(w, r, "upload", h, "")
+	if end == nil {
+		return
+	}
 	remote, err := a.store.UploadImage(h, data, ext, true)
+	end(exitOf(err), int64(len(data)), err)
 	if err != nil {
 		fail(w, http.StatusBadGateway, err)
 		return
@@ -330,11 +377,17 @@ func (a *api) run(w http.ResponseWriter, r *http.Request) {
 	// quoted, a carriage return or an escape sequence in the command cannot
 	// rewrite lines in the terminal or log
 	fmt.Fprintf(logOut, "sshr serve: run on %q: %q\n", h.Name, in.Command)
+	end := a.begin(w, r, "run", h, in.Command)
+	if end == nil {
+		return
+	}
 	res, err := a.store.RunRemote(h, in.Command, nil, time.Duration(in.TimeoutSeconds)*time.Second)
 	if err != nil {
+		end(-1, 0, err)
 		fail(w, http.StatusBadGateway, err)
 		return
 	}
+	end(res.ExitCode, int64(len(res.Stdout)+len(res.Stderr)), nil)
 	reply(w, http.StatusOK, map[string]any{
 		"host": h.Name, "exit_code": res.ExitCode,
 		"stdout": string(res.Stdout), "stderr": string(res.Stderr), "truncated": res.Truncated,
@@ -395,8 +448,14 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	end := a.begin(w, r, "open_tunnel", h, "")
+	if end == nil {
+		stop()
+		return
+	}
 	if err := cmd.Start(); err != nil {
 		stop()
+		end(-1, 0, err)
 		fail(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -417,10 +476,13 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 		if msg == "" {
 			msg = "ssh exited"
 		}
-		fail(w, http.StatusBadGateway, fmt.Errorf("tunnel to %s did not open: %s", h.Name, msg))
+		err := fmt.Errorf("tunnel to %s did not open: %s", h.Name, msg)
+		end(-1, 0, err)
+		fail(w, http.StatusBadGateway, err)
 		return
 	case <-time.After(tunnelStartup):
 	}
+	end(0, 0, nil)
 	a.mu.Lock()
 	select {
 	case <-done:
@@ -450,6 +512,11 @@ func (a *api) closeTunnel(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, errors.New("no such tunnel"))
 		return
 	}
-	t.cmd.Process.Kill()
+	end := a.begin(w, r, "close_tunnel", &app.Host{Name: t.Host}, "")
+	if end == nil {
+		return
+	}
+	err := t.cmd.Process.Kill()
+	end(exitOf(err), 0, err)
 	w.WriteHeader(http.StatusNoContent)
 }

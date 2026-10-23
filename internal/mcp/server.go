@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"sshr.dev/internal/app"
+	"sshr.dev/internal/audit"
 )
 
 // protocol versions this server speaks, newest first
@@ -31,6 +32,8 @@ type Options struct {
 	// can run commands on every saved server can also break them
 	AllowCommands bool
 	Version       string
+	// Audit records uploads and commands, nil keeps no record
+	Audit *audit.Log
 }
 
 type request struct {
@@ -101,6 +104,25 @@ type server struct {
 	mu    sync.Mutex
 	w     io.Writer
 	slots chan struct{}
+	// client is what the client said it is in initialize
+	client string
+}
+
+// begin writes the start of an action to the audit log, an action whose
+// start cannot be written does not run
+func (s *server) begin(action string, h *app.Host, command string) (func(int, int64, error), error) {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	return s.opts.Audit.Begin(audit.Record{Surface: "mcp", Client: client, Action: action,
+		HostID: h.ID, HostName: h.Name, Target: fmt.Sprintf("%s:%d", h.Dest(), h.Port), Command: command})
+}
+
+func exitOf(err error) int {
+	if err != nil {
+		return -1
+	}
+	return 0
 }
 
 func (s *server) send(resp response) {
@@ -119,8 +141,16 @@ func (s *server) handle(req request) {
 	case "initialize":
 		var p struct {
 			ProtocolVersion string `json:"protocolVersion"`
+			ClientInfo      struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"clientInfo"`
 		}
 		json.Unmarshal(req.Params, &p)
+		// the client names itself, the parent process is what started sshr
+		s.mu.Lock()
+		s.client = fmt.Sprintf("%s %s, parent pid %d", p.ClientInfo.Name, p.ClientInfo.Version, os.Getppid())
+		s.mu.Unlock()
 		version := versions[0]
 		for _, v := range versions {
 			if v == p.ProtocolVersion {
@@ -325,7 +355,12 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 	if ext == "" {
 		ext = "bin"
 	}
+	end, err := s.begin("upload_file", h, "")
+	if err != nil {
+		return toolResult{}, err
+	}
 	remote, err := s.store.UploadImage(h, data, ext, true)
+	end(exitOf(err), int64(len(data)), err)
 	if err != nil {
 		return toolResult{}, err
 	}
@@ -352,10 +387,16 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 	// quoted, a carriage return or an escape sequence in the command cannot
 	// rewrite lines in the log of the client
 	fmt.Fprintf(logOut, "sshr mcp: run on %q: %q\n", h.Name, command)
-	res, err := s.store.RunRemote(h, command, nil, time.Duration(timeout)*time.Second)
+	end, err := s.begin("run_command", h, command)
 	if err != nil {
 		return toolResult{}, err
 	}
+	res, err := s.store.RunRemote(h, command, nil, time.Duration(timeout)*time.Second)
+	if err != nil {
+		end(-1, 0, err)
+		return toolResult{}, err
+	}
+	end(res.ExitCode, int64(len(res.Stdout)+len(res.Stderr)), nil)
 	// the output is the remote host's, it reaches the model as data
 	stdout, n1 := dataText(string(res.Stdout))
 	stderr, n2 := dataText(string(res.Stderr))

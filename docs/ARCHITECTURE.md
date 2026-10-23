@@ -22,18 +22,19 @@ How sshr is built, which package may use which, where data lives and how the mai
 
 | Package | Does | May import (sshr packages) |
 |----|----|----|
+| `internal/audit` | the audit log of MCP and REST actions | `fileio` |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
 | `internal/app` | the core: hosts and their store, secrets, ssh command lines, ssh config import and export, health, settings | `fileio` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation | `app`, `syncproto` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
-| `internal/api` | local REST API over the core | `app` |
-| `internal/mcp` | MCP server over the core | `app` |
+| `internal/api` | local REST API over the core | `app`, `audit` |
+| `internal/mcp` | MCP server over the core | `app`, `audit` |
 | `internal/ext` | extensions: manifest, the installed ones, running one with a clean environment | `app` |
 | `internal/ui` | the Gio desktop app | `app`, `clip`, `i18n`, `assets` |
 | `internal/desktop` | menu entry, icons, app bundle | `assets`, `fileio` |
 | `internal/clip`, `internal/i18n`, `assets` | clipboard, translations, embedded icons | nothing |
-| `cmd/sshr` | CLI commands, wires the front ends together | `app`, `api`, `mcp`, `ext`, `syncclient`, `ui`, `desktop`, `clip`, `assets` |
+| `cmd/sshr` | CLI commands, wires the front ends together | `app`, `audit`, `api`, `mcp`, `ext`, `syncclient`, `ui`, `desktop`, `clip`, `assets` |
 | `cmd/sshr-sync` | starts the sync server | `fileio`, `syncserver` |
 
 Rules that follow:
@@ -93,6 +94,8 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/extensions/<name>/` | an installed extension: its files and `sshr-ext.json` by the author | `sshr ext install`, `ext.Registry.Install` |
 | `~/.sshr/extension-data/<name>/` | what an extension writes, state and caches, it stays when the extension is removed | the extension itself, `SSHR_EXT_DATA` |
 | `~/.sshr/extensions/.pins.json` | the pin of each installed extension: source, commit, hash of every file, outside the folders so a folder cannot bring its own, an extension folder without a pin is not trusted | `ext.Registry.Install` under `~/.sshr/extensions/.lock` |
+| `~/.sshr/audit.jsonl`, `audit.jsonl.1` | the audit log of `sshr mcp` and `sshr serve` with `--audit`, one JSON line per start and end of an action, 0600, moves to `.1` at `audit_max_mb` | `audit.Log.Begin` appending under `audit.jsonl.lock` |
+| `~/.sshr/audit.key` | key of the command hashes in the audit log | `audit.Open` |
 | `~/.sshr/api-token` | token of the REST API on a TCP port | `apiToken` through `WriteFileAtomic` |
 | `$XDG_RUNTIME_DIR/sshr` or `~/.sshr/cm` | ControlMaster sockets, askpass and agent sockets, `api.sock` | ssh, `sshauth`, `vaultkey`, `sshr serve` |
 | sync server data folder | accounts, devices, envelopes, manifests, blobs, all ciphertext but the device list | `syncserver`, its own copy of the atomic write |

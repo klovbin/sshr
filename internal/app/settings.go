@@ -67,6 +67,18 @@ type Settings struct {
 	// keychain, "passphrase" for a file wrapped with a passphrase (#98), off
 	// by default, a forgotten passphrase loses every saved secret
 	Vault string `json:"vault,omitempty"`
+	// AuditLog keeps ~/.sshr/audit.jsonl, a record of every upload,
+	// command and host change made through sshr mcp and sshr serve, off by
+	// default: it is one more file that grows (up to twice AuditMaxMB) and
+	// tells which servers were used when
+	AuditLog bool `json:"audit_log,omitempty"`
+	// AuditMaxMB is the size the log reaches before it moves to
+	// audit.jsonl.1, 0 means 10
+	AuditMaxMB int `json:"audit_max_mb,omitempty"`
+	// AuditCommands is "full" to keep whole commands in the log, empty
+	// keeps their length, first word and a keyed hash, a command may carry
+	// a password
+	AuditCommands string `json:"audit_commands,omitempty"`
 
 	// base is the file as LoadSettings read it, SaveSettings writes only
 	// the fields that differ from it, copies of the value share it
