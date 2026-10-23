@@ -417,7 +417,7 @@ func (c *Client) checkKey(epoch int, key []byte) ([]byte, error) {
 // envelopeKey reads the vault key of epoch from this device's envelope on
 // the server, without touching the keychain
 func (c *Client) envelopeKey(epoch int) ([]byte, error) {
-	b, err := c.backend().GetEnvelope(c.st.DeviceID)
+	b, err := c.backend().GetEnvelope(c.st.DeviceID, epoch)
 	if errors.Is(err, ErrNotFound) {
 		return nil, ErrKeyPending
 	}

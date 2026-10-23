@@ -175,16 +175,28 @@ func TestObjectBackendRemoveDevice(t *testing.T) {
 	}
 }
 
-// an older envelope never covers a newer one of the same device (#128)
+// a device reads the envelope of the epoch it asks for, a planted higher
+// one does not hide it, an envelope that is there stays (#128, #227)
 func TestObjectBackendEnvelopeEpochs(t *testing.T) {
 	o := ObjectBackend{Store: newMemStore()}
 	must(t, o.PutEnvelope("d", []byte(`{"epoch":2,"data":"AA=="}`)))
-	if err := o.PutEnvelope("d", []byte(`{"epoch":1,"data":"AA=="}`)); err != ErrStaleEpoch {
-		t.Fatalf("older envelope = %v", err)
-	}
-	b, err := o.GetEnvelope("d")
+	must(t, o.Store.Put(envelopeName("d", 99), []byte(`{"epoch":99,"data":"garbage"}`)))
+	b, err := o.GetEnvelope("d", 2)
 	if err != nil || !strings.Contains(string(b), `"epoch":2`) {
-		t.Fatalf("envelope %s %v", b, err)
+		t.Fatalf("envelope of epoch 2: %s %v", b, err)
+	}
+	if err := o.PutEnvelope("d", []byte(`{"epoch":2,"data":"BB=="}`)); err != ErrStaleEpoch {
+		t.Fatalf("second envelope of epoch 2 = %v", err)
+	}
+	if b, _ := o.GetEnvelope("d", 2); !strings.Contains(string(b), "AA==") {
+		t.Errorf("the envelope of epoch 2 was replaced: %s", b)
+	}
+	// epoch 3 not delivered yet, the older one says the key is on its way
+	if b, err := o.GetEnvelope("d", 3); err != nil || !strings.Contains(string(b), `"epoch":2`) {
+		t.Errorf("envelope while epoch 3 is on its way: %s %v", b, err)
+	}
+	if _, err := o.GetEnvelope("x", 1); err != ErrNotFound {
+		t.Errorf("no envelope = %v", err)
 	}
 }
 

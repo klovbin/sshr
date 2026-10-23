@@ -25,8 +25,10 @@ type Backend interface {
 	// PutEnvelope stores the vault key of device id, ErrStaleEpoch when it
 	// holds a newer one
 	PutEnvelope(id string, env []byte) error
-	// GetEnvelope reads the envelope of device id, ErrNotFound when none
-	GetEnvelope(id string) ([]byte, error)
+	// GetEnvelope reads the envelope of device id for epoch, or the newest
+	// older one while that is not delivered yet, ErrNotFound when none,
+	// sshr-sync keeps one envelope per device and answers with it
+	GetEnvelope(id string, epoch int) ([]byte, error)
 	PutBlob(hash string, blob []byte) error
 	GetBlob(hash string) ([]byte, error)
 	// Head is the newest signed manifest and its counter, ErrNotFound for
@@ -110,7 +112,7 @@ func (h httpBackend) PutEnvelope(id string, env []byte) error {
 	return err
 }
 
-func (h httpBackend) GetEnvelope(id string) ([]byte, error) {
+func (h httpBackend) GetEnvelope(id string, _ int) ([]byte, error) {
 	b, _, err := h.want("GET", "/envelopes/"+id, nil, nil, http.StatusOK, map[int]error{http.StatusNotFound: ErrNotFound})
 	return b, err
 }

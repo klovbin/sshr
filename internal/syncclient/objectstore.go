@@ -159,46 +159,61 @@ func (o ObjectBackend) RemoveDevice(id string) error {
 	return o.Store.Delete(objDevices + id)
 }
 
-// newestEnvelope is the name and epoch of the newest envelope of id
-func (o ObjectBackend) newestEnvelope(id string) (string, int, error) {
+// envelopes are the epochs of the envelopes of id
+func (o ObjectBackend) envelopes(id string) ([]int, error) {
 	names, err := o.Store.List(objEnvelopes + id + "/")
 	if err != nil {
-		return "", 0, err
+		return nil, err
 	}
-	best, epoch := "", 0
+	var out []int
 	for _, n := range names {
-		e, err := strconv.Atoi(strings.TrimPrefix(n, objEnvelopes+id+"/"))
-		if err == nil && e > epoch {
-			best, epoch = n, e
+		if e, err := strconv.Atoi(strings.TrimPrefix(n, objEnvelopes+id+"/")); err == nil && e > 0 {
+			out = append(out, e)
 		}
 	}
-	return best, epoch, nil
+	return out, nil
 }
 
-// PutEnvelope keeps one envelope per epoch, an older one never covers a
-// newer one
+// PutEnvelope keeps one envelope per epoch, an envelope of an epoch that
+// is there already stays, a rotation delivers a new epoch, so a planted or
+// older envelope never covers the one a device reads
 func (o ObjectBackend) PutEnvelope(id string, env []byte) error {
 	var e syncproto.Envelope
 	if err := json.Unmarshal(env, &e); err != nil {
 		return err
 	}
-	if _, newest, err := o.newestEnvelope(id); err != nil {
-		return err
-	} else if newest > e.Epoch {
+	if e.Epoch <= 0 {
+		return fmt.Errorf("envelope of epoch %d", e.Epoch)
+	}
+	err := o.Store.Create(envelopeName(id, e.Epoch), env)
+	if errors.Is(err, ErrExists) {
 		return ErrStaleEpoch
 	}
-	return o.Store.Put(envelopeName(id, e.Epoch), env)
+	return err
 }
 
-func (o ObjectBackend) GetEnvelope(id string) ([]byte, error) {
-	name, _, err := o.newestEnvelope(id)
+// GetEnvelope reads the envelope of epoch, a higher one someone planted is
+// never taken for it, while it is missing the newest older one says the
+// key is still on its way
+func (o ObjectBackend) GetEnvelope(id string, epoch int) ([]byte, error) {
+	b, err := o.Store.Get(envelopeName(id, epoch))
+	if !errors.Is(err, ErrNotFound) {
+		return b, err
+	}
+	epochs, err := o.envelopes(id)
 	if err != nil {
 		return nil, err
 	}
-	if name == "" {
+	older := 0
+	for _, e := range epochs {
+		if e < epoch && e > older {
+			older = e
+		}
+	}
+	if older == 0 {
 		return nil, ErrNotFound
 	}
-	return o.Store.Get(name)
+	return o.Store.Get(envelopeName(id, older))
 }
 
 func (o ObjectBackend) PutBlob(hash string, blob []byte) error {
