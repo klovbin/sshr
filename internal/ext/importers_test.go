@@ -86,3 +86,59 @@ func TestRemminaImporter(t *testing.T) {
 		t.Error("an empty folder gave hosts")
 	}
 }
+
+func TestPuttyImporter(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"web%20prod":               "HostName=deploy@10.0.0.5\nPortNumber=2222\nProtocol=ssh\nPublicKeyFile=/home/u/k.ppk\n",
+		"db":                       "HostName=db.internal\nUserName=app\nProtocol=ssh\nPortNumber=22\nProxyMethod=6\nProxyHost=gw\nProxyUsername=ops\nProxyPort=2200\nPublicKeyFile=/home/u/.ssh/id\n",
+		"tel":                      "HostName=x\nProtocol=telnet\n",
+		"Default%20Settings":       "HostName=defaults\nProtocol=ssh\n",
+		"%D0%9F%D1%80%D0%BE%D0%B4": "HostName=s\r\nProtocol=ssh\r\nProxyMethod=3\r\nProxyHost=p\r\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := map[string]ExtHost{}
+	for _, h := range runImporter(t, "putty", dir) {
+		got[h.Key] = h
+	}
+	if len(got) != 3 {
+		t.Fatalf("hosts %+v", got)
+	}
+	if w := got["web prod"]; w.Host != "10.0.0.5" || w.User != "deploy" || w.Port != 2222 || w.KeyFile != "" {
+		t.Errorf("web %+v, a .ppk key must be left out", w)
+	}
+	if d := got["db"]; d.Jump != "ops@gw:2200" || d.KeyFile != "/home/u/.ssh/id" || d.User != "app" {
+		t.Errorf("db %+v", d)
+	}
+	if p, ok := got["Прод"]; !ok || p.Host != "s" || p.Jump != "" {
+		t.Errorf("a UTF-8 session name or an HTTP proxy: %+v", got)
+	}
+	for _, h := range got {
+		if _, err := h.ToHost("putty"); err != nil {
+			t.Errorf("%s: %v", h.Key, err)
+		}
+	}
+}
+
+// with no folder given the importer looks where PuTTY saves, and a machine
+// without PuTTY gives no hosts rather than an error
+func TestPuttyImporterFindsTheSessions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("PUTTYDIR", "")
+	t.Setenv("PUTTYSESSIONS", "")
+	if len(runImporter(t, "putty")) != 0 {
+		t.Fatal("hosts without PuTTY")
+	}
+	sessions := filepath.Join(home, ".putty", "sessions")
+	os.MkdirAll(sessions, 0o700)
+	os.WriteFile(filepath.Join(sessions, "a"), []byte("HostName=a.example\n"), 0o600)
+	if hosts := runImporter(t, "putty"); len(hosts) != 1 || hosts[0].Host != "a.example" {
+		t.Fatalf("~/.putty/sessions: %+v", hosts)
+	}
+}

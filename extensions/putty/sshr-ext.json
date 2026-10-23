@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "putty",
+  "version": "0.1.0",
+  "description": "imports the saved sessions of PuTTY on Linux and macOS, PuTTY saves no passwords",
+  "command": { "default": ["./putty.sh"] },
+  "kinds": ["import"]
+}

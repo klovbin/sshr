@@ -267,7 +267,7 @@ sshr ext list
 sshr ext remove hello
 ```
 
-A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. `extensions/putty` reads the saved sessions of PuTTY on Linux and macOS where PuTTY keeps them (`~/.config/putty/sessions` or `~/.putty/sessions`, `$PUTTYSESSIONS` and `$PUTTYDIR` count), an SSH proxy of a session becomes a jump host, a `.ppk` key is left out with the `puttygen` command that converts it, PuTTY saves no passwords. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
 
 ```json
 {

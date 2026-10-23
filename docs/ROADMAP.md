@@ -53,7 +53,7 @@ Features
 
 3. Drag and drop files onto a host in the app ([#32](https://github.com/klovbin/sshr/issues/32))
 5. Local commands before and after connect, their fields go on the #30 list ([#29](https://github.com/klovbin/sshr/issues/29))
-6. Import from PuTTY, MobaXterm, Termius, Royal TS as extensions of kind import, Remmina is done in `extensions/remmina` ([#34](https://github.com/klovbin/sshr/issues/34))
+6. Import from PuTTY on Windows (registry), MobaXterm, Termius, Royal TS as extensions of kind import, Remmina and PuTTY on Linux and macOS are done in `extensions/` ([#34](https://github.com/klovbin/sshr/issues/34))
 
 Later
 
