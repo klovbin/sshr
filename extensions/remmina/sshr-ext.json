@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "remmina",
+  "version": "0.1.0",
+  "description": "imports the SSH profiles of Remmina, no passwords, Remmina keeps them in the keyring",
+  "command": { "default": ["./remmina.sh"] },
+  "kinds": ["import"]
+}

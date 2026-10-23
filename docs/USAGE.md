@@ -262,12 +262,12 @@ TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-25
 sshr ext install https://github.com/someone/sshr-hello.git   # shows what it is and asks
 sshr ext install ./my-extension --yes                        # a folder, no question, for scripts
 sshr hello a b                                               # runs the extension called hello
-sshr ext import putty                                        # an extension that reads another tool's hosts
+sshr ext import remmina                                      # an extension that reads another tool's hosts
 sshr ext list
 sshr ext remove hello
 ```
 
-A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
 
 ```json
 {
