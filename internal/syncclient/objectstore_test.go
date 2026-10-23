@@ -1,6 +1,7 @@
 package syncclient
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strings"
@@ -302,3 +303,17 @@ func TestJoinChecksTheAccount(t *testing.T) {
 		t.Fatalf("join into another account = %v", err)
 	}
 }
+
+// a manifest for another account is not written into the store (#225)
+func TestObjectBackendManifestAccount(t *testing.T) {
+	store := newMemStore()
+	store.Put(objAccount, []byte(strings.Repeat("a", 32)))
+	o := ObjectBackend{Store: store}
+	body := `{"version":1,"account":"` + strings.Repeat("b", 32) + `","epoch":1,"counter":1}`
+	signed := fmt.Sprintf(`{"body":%q}`, base64Std(body))
+	if err := o.PutManifest(0, []byte(signed)); err == nil || !strings.Contains(err.Error(), "another account") {
+		t.Fatalf("manifest of another account = %v", err)
+	}
+}
+
+func base64Std(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }

@@ -390,6 +390,13 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 	if m.Counter != expect+1 {
 		return fmt.Errorf("manifest counter %d does not follow %d", m.Counter, expect)
 	}
+	account, err := o.Store.Get(objAccount, maxSmall)
+	if err != nil {
+		return err
+	}
+	if m.Account != string(account) {
+		return errors.New("the manifest is for another account than the store holds")
+	}
 	for id, e := range m.Entries {
 		if e.Hash == "" {
 			continue
@@ -401,7 +408,7 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 			return fmt.Errorf("the blob of %s is not in the store: %v", short(id, 8), err)
 		}
 	}
-	err := o.Store.Create(manifestName(m.Counter), signed)
+	err = o.Store.Create(manifestName(m.Counter), signed)
 	if errors.Is(err, ErrExists) {
 		return ErrCASLost
 	}
