@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -68,5 +69,41 @@ func TestSaveSettingsBuiltFromScratchWritesAll(t *testing.T) {
 	}
 	if got, err := LoadSettings(); err != nil || !got.Mosh || !got.Reuse {
 		t.Fatalf("after a damaged file: %+v, %v", got, err)
+	}
+}
+
+func TestSaveSettingsKeepsAChangeInsideAList(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	st, _ := LoadSettings()
+	st.AddOPAccount("acc1", "")
+	if err := SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = LoadSettings()
+	// the email of a linked account is set in place, inside the slice
+	st.AddOPAccount("acc1", "me@example.com")
+	if err := SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadSettings()
+	if len(got.OPAccounts) != 1 || got.OPAccounts[0].Email != "me@example.com" {
+		t.Fatalf("accounts after save: %+v", got.OPAccounts)
+	}
+}
+
+// a new list or map in Settings must be copied by cloneSettings, or a change
+// made inside it in place is never saved
+func TestCloneSettingsCoversEveryList(t *testing.T) {
+	typ := reflect.TypeOf(Settings{})
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" {
+			t.Errorf("Settings.%s is a %s, copy it in cloneSettings and list it here", f.Name, k)
+		}
 	}
 }

@@ -96,9 +96,19 @@ func settingsPath() (string, error) {
 // another process saved meanwhile
 func LoadSettings() (Settings, error) {
 	s, err := readSettings()
-	read := s
+	read := cloneSettings(s)
 	s.base = &read
 	return s, err
+}
+
+// cloneSettings is a copy that shares no slice with s, a change made in
+// place inside a list (AddOPAccount sets an email that way) must show as a
+// difference against what was read
+func cloneSettings(s Settings) Settings {
+	c := s
+	c.base = nil
+	c.OPAccounts = append([]OPLinkedAccount(nil), s.OPAccounts...)
+	return c
 }
 
 func readSettings() (Settings, error) {
@@ -224,7 +234,7 @@ func SaveSettings(s Settings) error {
 	if s.base != nil {
 		// the saved fields are now what the holder agrees with the file on,
 		// the next save does not write them again over a newer change
-		mergeChanged(s.base, s, *s.base)
+		mergeChanged(s.base, cloneSettings(s), *s.base)
 	}
 	return nil
 }
