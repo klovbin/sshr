@@ -407,7 +407,9 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 		if err := checkHash(e.Hash); err != nil {
 			return err
 		}
-		if _, err := o.Store.Get(objBlobs+e.Hash, syncproto.MaxBlob); err != nil {
+		// one byte is enough to know the blob is there, ErrTooLarge
+		// says it holds more
+		if _, err := o.Store.Get(objBlobs+e.Hash, 0); err != nil && !errors.Is(err, ErrTooLarge) {
 			return fmt.Errorf("the blob of %s is not in the store: %v", short(id, 8), err)
 		}
 	}

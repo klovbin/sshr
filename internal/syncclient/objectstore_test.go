@@ -397,3 +397,39 @@ func TestFellBehindKeptHistory(t *testing.T) {
 		t.Errorf("pull behind the kept history: %v", err)
 	}
 }
+
+// countStore counts the bytes Get hands out
+type countStore struct {
+	*memStore
+	read *int
+}
+
+func (s countStore) Get(name string, max int) ([]byte, error) {
+	b, err := s.memStore.Get(name, max)
+	*s.read += len(b)
+	if err == ErrTooLarge {
+		*s.read++
+	}
+	return b, err
+}
+
+// a push checks that the blobs are there without downloading them (#250)
+func TestPutManifestDoesNotDownloadBlobs(t *testing.T) {
+	store := newMemStore()
+	must(t, store.Put(objAccount, []byte("acct")))
+	hash := strings.Repeat("ab", 32)
+	must(t, store.Put(objBlobs+hash, make([]byte, 50000)))
+	read := 0
+	o := ObjectBackend{Store: countStore{store, &read}}
+	body, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: 1, Entries: map[string]syncproto.Entry{"x": {Hash: hash}}})
+	signed, _ := json.Marshal(syncproto.Signed{Body: body})
+	must(t, o.PutManifest(0, signed))
+	if read > 100 {
+		t.Errorf("the push read %d bytes", read)
+	}
+	missing, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: 2, Entries: map[string]syncproto.Entry{"y": {Hash: strings.Repeat("cd", 32)}}})
+	signed, _ = json.Marshal(syncproto.Signed{Body: missing})
+	if err := o.PutManifest(1, signed); err == nil {
+		t.Error("a manifest with a missing blob went in")
+	}
+}
