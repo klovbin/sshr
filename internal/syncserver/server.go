@@ -62,6 +62,7 @@ func New(dir string) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{dir: dir, mux: http.NewServeMux(), locks: map[string]*sync.Mutex{}, creates: map[string][]time.Time{}}
+	s.mux.HandleFunc("GET /v1/health", s.health)
 	s.mux.HandleFunc("POST /v1/accounts", s.newAccount)
 	s.mux.HandleFunc("POST /v1/accounts/{a}/join", s.join)
 	s.mux.HandleFunc("GET /v1/accounts/{a}/devices", s.auth(s.listDevices))
@@ -78,6 +79,19 @@ func New(dir string) (*Server, error) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+
+// health answers a monitor: 200 while the data folder can be written,
+// 503 when it cannot, nothing about accounts
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	f, err := os.CreateTemp(s.dir, ".health-*")
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "the data folder cannot be written")
+		return
+	}
+	f.Close()
+	os.Remove(f.Name())
+	reply(w, http.StatusOK, map[string]bool{"ok": true})
+}
 
 func reply(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")

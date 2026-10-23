@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -317,5 +318,30 @@ func TestOrphanBlobsKeptADay(t *testing.T) {
 		if (err == nil) != want {
 			t.Errorf("blob %s kept = %v, want %v", h[:8], err == nil, want)
 		}
+	}
+}
+
+// /v1/health answers 200 while the data folder can be written, 503 when
+// it cannot (#149)
+func TestHealth(t *testing.T) {
+	dir := t.TempDir()
+	srv, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("health = %d %s", rec.Code, rec.Body)
+	}
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		return
+	}
+	os.Chmod(dir, 0o500)
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/health", nil))
+	if rec.Code != 503 {
+		t.Fatalf("health of a read-only folder = %d", rec.Code)
 	}
 }
