@@ -242,3 +242,15 @@ func TestRunCommandLogQuoted(t *testing.T) {
 		t.Fatalf("control characters reach the log: %q", out)
 	}
 }
+
+// a response of the client gets no answer, a request next to it does
+// (#201)
+func TestClientResponseNotAnswered(t *testing.T) {
+	got := exchange(t, &app.Store{Dir: t.TempDir()}, Options{},
+		`{"jsonrpc":"2.0","id":"sshr-1","result":{"action":"accept"}}`,
+		`{"jsonrpc":"2.0","id":"sshr-2","error":{"code":-1,"message":"no"}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"ping"}`)
+	if len(got) != 1 || got["3"] == nil {
+		t.Fatalf("answers: %v", got)
+	}
+}

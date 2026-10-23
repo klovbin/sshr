@@ -38,6 +38,10 @@ type request struct {
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+	// Result and Error mark a response of the client to a request of the
+	// server, it is not a request and gets no answer
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  json.RawMessage `json:"error,omitempty"`
 }
 
 type rpcError struct {
@@ -70,6 +74,10 @@ func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
 		}
 		if len(req.ID) == 0 {
 			// a notification, initialized and cancelled need no answer
+			continue
+		}
+		if req.Method == "" && (len(req.Result) > 0 || len(req.Error) > 0) {
+			// a response is never answered, an answer to it would loop
 			continue
 		}
 		// a command can take minutes, other requests are answered meanwhile
