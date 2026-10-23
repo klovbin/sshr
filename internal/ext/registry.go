@@ -179,13 +179,16 @@ func (r *Registry) Remove(name string) error {
 }
 
 // HashTree hashes the files of an extension folder, their paths, whether
-// they are executable and their content, the lock file and a .git folder are
-// left out, a link, a device or any file that is not a plain one is refused
-// because it could point to something installed nowhere
+// they are executable and their content, only the lock file is left out, a
+// .git folder is hashed like any other, so nothing can be added there
+// unseen, a link, a device or any file that is not a plain one is refused
+// because it could point to something installed nowhere, folders count
+// toward the limit too
 func HashTree(dir string) (string, error) {
 	type item struct{ rel, sum string }
 	var items []item
 	var total int64
+	entries := 0
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -194,10 +197,10 @@ func HashTree(dir string) (string, error) {
 		if rel == "." {
 			return nil
 		}
+		if entries++; entries > treeMaxFiles {
+			return fmt.Errorf("more than %d files and folders", treeMaxFiles)
+		}
 		if d.IsDir() {
-			if d.Name() == ".git" {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 		if rel == LockFile {
@@ -209,9 +212,6 @@ func HashTree(dir string) (string, error) {
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("%s is not a plain file, links and special files are not allowed in an extension", rel)
-		}
-		if len(items) >= treeMaxFiles {
-			return fmt.Errorf("more than %d files", treeMaxFiles)
 		}
 		total += info.Size()
 		if total > treeMaxBytes {

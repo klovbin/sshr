@@ -112,7 +112,7 @@ func copyTree(from, to string) (int, error) {
 	if err := os.MkdirAll(to, 0o700); err != nil {
 		return 0, err
 	}
-	files := 0
+	files, entries := 0, 0
 	var total int64
 	err := filepath.WalkDir(from, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -124,10 +124,18 @@ func copyTree(from, to string) (int, error) {
 		}
 		dest := filepath.Join(to, rel)
 		if d.IsDir() {
+			// the history of a clone is not part of the extension, HashTree
+			// counts a .git folder, so none is installed
 			if d.Name() == ".git" {
 				return filepath.SkipDir
 			}
+			if entries++; entries > treeMaxFiles {
+				return fmt.Errorf("more than %d files and folders", treeMaxFiles)
+			}
 			return os.MkdirAll(dest, 0o700)
+		}
+		if entries++; entries > treeMaxFiles {
+			return fmt.Errorf("more than %d files and folders", treeMaxFiles)
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -141,9 +149,7 @@ func copyTree(from, to string) (int, error) {
 		if rel == LockFile && filepath.Dir(rel) == "." {
 			return nil
 		}
-		if files++; files > treeMaxFiles {
-			return fmt.Errorf("more than %d files", treeMaxFiles)
-		}
+		files++
 		if total += info.Size(); total > treeMaxBytes {
 			return fmt.Errorf("more than %d MiB of files", treeMaxBytes>>20)
 		}

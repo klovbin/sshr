@@ -105,6 +105,11 @@ func checkArgv(argv []string) error {
 	if clean := path.Clean(first); clean == ".." || strings.HasPrefix(clean, "../") || clean == "." {
 		return fmt.Errorf("the program %q must be a file inside the folder", first)
 	}
+	for _, part := range strings.Split(first, "/") {
+		if part == ".git" {
+			return fmt.Errorf("the program %q is under .git, which an install never carries", first)
+		}
+	}
 	for _, a := range argv {
 		if strings.ContainsRune(a, 0) {
 			return errors.New("an argument holds a NUL byte")

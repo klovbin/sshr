@@ -38,6 +38,7 @@ func TestParseManifestRefuses(t *testing.T) {
 		"an option as program": `{"protocol":1,"name":"a","version":"1","command":{"default":["-c"]},"kinds":["command"]}`,
 		"a backslash":          `{"protocol":1,"name":"a","version":"1","command":{"default":["..\\x"]},"kinds":["command"]}`,
 		"an unknown field":     `{"protocol":1,"name":"a","version":"1","command":{"default":["./a"]},"kinds":["command"],"sha256":"x"}`,
+		"a program in .git":    `{"protocol":1,"name":"a","version":"1","command":{"default":[".git/run"]},"kinds":["command"]}`,
 		"not JSON":             `name: a`,
 	}
 	for name, in := range cases {

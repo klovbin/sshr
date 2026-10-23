@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -92,18 +93,21 @@ func TestHashTreeSeesTheExecutableBit(t *testing.T) {
 	}
 }
 
-func TestHashTreeIgnoresGitAndLockButNotLinks(t *testing.T) {
+func TestHashTreeIgnoresTheLockButSeesGitAndLinks(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "a"), []byte("x"), 0o600)
 	base, err := HashTree(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.MkdirAll(filepath.Join(dir, ".git"), 0o700)
-	os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref"), 0o600)
 	os.WriteFile(filepath.Join(dir, LockFile), []byte("{}"), 0o600)
 	if got, _ := HashTree(dir); got != base {
-		t.Error(".git and the lock file change the hash")
+		t.Error("the lock file changes the hash")
+	}
+	os.MkdirAll(filepath.Join(dir, "lib", ".git"), 0o700)
+	os.WriteFile(filepath.Join(dir, "lib", ".git", "payload"), []byte("x"), 0o700)
+	if got, _ := HashTree(dir); got == base {
+		t.Error("a file added under .git did not change the hash")
 	}
 	if runtime.GOOS == "windows" {
 		return
@@ -113,6 +117,16 @@ func TestHashTreeIgnoresGitAndLockButNotLinks(t *testing.T) {
 	}
 	if _, err := HashTree(dir); err == nil {
 		t.Error("a link inside an extension was hashed")
+	}
+}
+
+func TestHashTreeCountsFolders(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i <= treeMaxFiles; i++ {
+		os.Mkdir(filepath.Join(dir, "d"+strconv.Itoa(i)), 0o700)
+	}
+	if _, err := HashTree(dir); err == nil {
+		t.Error("more empty folders than the limit were hashed")
 	}
 }
 
