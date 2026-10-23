@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zalando/go-keyring"
+
 	"sshr.dev/internal/app"
 )
 
@@ -195,4 +197,24 @@ func readFileKeys(t *testing.T, path string) map[string]json.RawMessage {
 	var m map[string]json.RawMessage
 	must(t, json.Unmarshal(b, &m))
 	return m
+}
+
+// a host of a newer format is refused before its saved password is
+// opened, the sync does not reach the keychain for a host it leaves out
+// (#168)
+func TestPayloadOfNewerHostOpensNoPassword(t *testing.T) {
+	// never the real keychain or home, even when the order breaks again
+	keyring.MockInit()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	dir := t.TempDir()
+	s := &app.Store{Dir: dir}
+	id := "0123456789abcdef0123456789abcdef"
+	raw := `{"version":2,"id":"` + id + `","name":"w","host":"h","user":"u","password_mode":"saved","password_sealed":"v2:not-a-seal"}`
+	must(t, os.WriteFile(filepath.Join(dir, id+".json"), []byte(raw), 0o600))
+	h, err := s.Find(id)
+	must(t, err)
+	if _, err := payloadOf(*h); !errors.Is(err, app.ErrNewerFormat) {
+		t.Fatalf("the password was opened first: %v", err)
+	}
 }
