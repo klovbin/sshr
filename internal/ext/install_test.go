@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"sshr.dev/internal/app"
 )
 
 // source makes a folder with an extension in it
@@ -304,5 +307,31 @@ func TestInstallsOfOneNameDoNotClobberEachOther(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(r.Root, left)); err == nil {
 			t.Errorf("%s was left behind", left)
 		}
+	}
+}
+
+// .pins.json keeps the keys and the pin fields a newer sshr wrote, a pins
+// file of a newer format is not written (#97)
+func TestPinsKeepWhatANewerSshrWrote(t *testing.T) {
+	reg := &Registry{Root: t.TempDir()}
+	path := filepath.Join(reg.Root, PinsFile)
+	os.WriteFile(path, []byte(`{"extensions":{"a":{"source":"s","tree":"t","signed_by":"k"}},"future":1}`), 0o600)
+	if err := reg.Pin("b", Lock{Source: "s2", Tree: "t2"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	var file struct {
+		Extensions map[string]map[string]any `json:"extensions"`
+		Future     int                       `json:"future"`
+	}
+	if err := json.Unmarshal(b, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Future != 1 || file.Extensions["a"]["signed_by"] != "k" || file.Extensions["b"]["tree"] != "t2" {
+		t.Fatalf("pins: %s", b)
+	}
+	os.WriteFile(path, []byte(`{"extensions":{},"version":3}`), 0o600)
+	if err := reg.Pin("c", Lock{Source: "s", Tree: "t"}); !errors.Is(err, app.ErrNewerFormat) {
+		t.Errorf("a newer pins file was written: %v", err)
 	}
 }
