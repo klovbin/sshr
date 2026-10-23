@@ -288,3 +288,17 @@ func TestObjectBackendBadDeviceRecords(t *testing.T) {
 		t.Fatalf("pending %+v %v", pending, err)
 	}
 }
+
+// a device joins only the account of its invite, a store that holds
+// another account is refused (#230)
+func TestJoinChecksTheAccount(t *testing.T) {
+	_, a, _ := objWorld(t)
+	code, err := a.Invite()
+	must(t, err)
+	other := newMemStore()
+	other.Put(objAccount, []byte(strings.Repeat("f", 32)))
+	c := &Client{Store: &hosts.Store{Dir: t.TempDir()}, Dir: t.TempDir(), KeyPrefix: "c-", Backend: ObjectBackend{Store: other}, Log: &strings.Builder{}}
+	if _, err := c.Join("other", code, "x"); err == nil || !strings.Contains(err.Error(), "invite is for") {
+		t.Fatalf("join into another account = %v", err)
+	}
+}

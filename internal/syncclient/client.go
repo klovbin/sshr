@@ -572,6 +572,11 @@ func (c *Client) join(server, code, name string) (string, error) {
 	if err := json.Unmarshal(b, &tr); err != nil {
 		return "", err
 	}
+	// the account that took the device is the one of the invite, a store
+	// or server that holds another is not joined
+	if tr.Account != account {
+		return "", fmt.Errorf("the sync store holds account %s, the invite is for %s, check the server or store", short(tr.Account, 8), short(account, 8))
+	}
 	c.st.Token, c.st.DeviceID = tr.Token, self.ID
 	return Fingerprint(self.SignPub), c.save()
 }
