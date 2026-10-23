@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -295,6 +297,12 @@ func UseKeychainVault(secretNames []string) error {
 		}
 		return err
 	}
+	// every secret the file holds goes back, a profile with another prefix
+	// or an epoch state.json does not list yet is not left behind
+	secretNames, err = withFileSecrets(secretNames)
+	if err != nil {
+		return err
+	}
 	if err := MoveSecrets(secretNames, false); err != nil {
 		return fmt.Errorf("the sync keys did not move to the keychain, the passphrase vault stays: %v", err)
 	}
@@ -318,8 +326,49 @@ func UseKeychainVault(secretNames []string) error {
 		return err
 	}
 	// the secrets moved out, a stale copy would come back on the next switch
-	if sp, err := secretsPath(); err == nil {
-		os.Remove(sp)
+	return removeEmptySecrets()
+}
+
+// withFileSecrets adds the names secrets.json holds to names
+func withFileSecrets(names []string) ([]string, error) {
+	path, err := secretsPath()
+	if err != nil {
+		return nil, err
+	}
+	f, err := readSecrets(path)
+	if err != nil {
+		return nil, err
+	}
+	out := append([]string(nil), names...)
+	for _, n := range slices.Sorted(maps.Keys(f.Secrets)) {
+		if !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// removeEmptySecrets removes secrets.json under its lock, a secret another
+// process wrote there after the move keeps the file
+func removeEmptySecrets() error {
+	path, err := secretsPath()
+	if err != nil {
+		return err
+	}
+	unlock, err := waitLock(path+".lock", "saving a secret", secretsWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	f, err := readSecrets(path)
+	if err != nil {
+		return err
+	}
+	if len(f.Secrets) > 0 {
+		return fmt.Errorf("%s got %d secrets while the vault moved to the keychain, run sshr vault keychain again to move them", path, len(f.Secrets))
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }

@@ -430,3 +430,27 @@ func TestSettingsFailureTakesKeysBack(t *testing.T) {
 		t.Fatalf("the key did not come back to the keychain: %v", err)
 	}
 }
+
+// a move back to the keychain takes every secret of the file, also one
+// under a name sshr did not list (#189)
+func TestUseKeychainMovesEverySecret(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetVaultPassphrase(pass, nil); err != nil {
+		t.Fatal(err)
+	}
+	SecretSet("sync-device", []byte("seed"))
+	SecretSet("work-sync-device", []byte("seed2"))
+	if err := UseKeychainVault([]string{"sync-device"}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := SecretGet("work-sync-device"); err != nil || !ok || string(v) != "seed2" {
+		t.Fatalf("a secret the names did not list was lost: %q %v %v", v, ok, err)
+	}
+	if sp, _ := secretsPath(); fileExists(sp) {
+		t.Error("secrets.json stayed")
+	}
+}
