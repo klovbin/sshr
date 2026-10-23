@@ -202,16 +202,21 @@ func TestReplaceStoreKey(t *testing.T) {
 		t.Fatalf("store ref %+v", got)
 	}
 	newRef := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"new"}`)}
-	if err := mk().ReplaceStoreKey(newRef, "x", ObjectBackend{Store: newMemStore()}); err == nil {
+	if err := mk().ReplaceStoreKey(*got, newRef, "x", ObjectBackend{Store: newMemStore()}); err == nil {
 		t.Error("a key that does not read the account was taken")
 	}
 	if _, ok, _ := vault.SecretGet("a-store-secret"); ok {
 		t.Error("a refused key reached the keychain")
 	}
-	if err := mk().ReplaceStoreKey(BackendRef{Kind: "s3"}, "x", ObjectBackend{Store: store}); err == nil {
+	if err := mk().ReplaceStoreKey(*got, BackendRef{Kind: "s3"}, "x", ObjectBackend{Store: store}); err == nil {
 		t.Error("a key of another kind of store was taken")
 	}
-	must(t, mk().ReplaceStoreKey(newRef, "new-secret", ObjectBackend{Store: store}))
+	// settings that are no longer the ones of the state (#242)
+	stale := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"other"}`)}
+	if err := mk().ReplaceStoreKey(stale, newRef, "x", ObjectBackend{Store: store}); err == nil || !strings.Contains(err.Error(), "changed meanwhile") {
+		t.Errorf("a key for settings the state no longer names: %v", err)
+	}
+	must(t, mk().ReplaceStoreKey(*got, newRef, "new-secret", ObjectBackend{Store: store}))
 
 	var opened BackendRef
 	var secret string

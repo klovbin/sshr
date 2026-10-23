@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 
 	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/vault"
@@ -125,9 +126,10 @@ func (c *Client) StoreRef() (*BackendRef, error) {
 }
 
 // ReplaceStoreKey puts a new key of the same store into the state and the
-// keychain, b is that store opened with the new key, it has to read the
+// keychain, old is the store the caller read from StoreRef and built ref
+// and b from, b is that store opened with the new key, it has to read the
 // account before anything changes, a failed save puts the old secret back
-func (c *Client) ReplaceStoreKey(ref BackendRef, secret string, b Backend) error {
+func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) error {
 	return c.run(func() error {
 		c.Backend = b
 		if err := c.load(); err != nil {
@@ -135,6 +137,11 @@ func (c *Client) ReplaceStoreKey(ref BackendRef, secret string, b Backend) error
 		}
 		if c.st.Backend == nil || c.st.Backend.Kind != ref.Kind {
 			return fmt.Errorf("this account is not in a sync store of kind %q", ref.Kind)
+		}
+		// the state may have changed since StoreRef read it, a key for the
+		// store the caller saw must not land on another one
+		if !sameJSON(c.st.Backend.Config, old.Config) || c.st.Backend.Kind != old.Kind {
+			return errors.New("the sync store of this machine changed meanwhile, run sshr sync store-key again")
 		}
 		if _, _, err := b.Head(); err != nil {
 			return fmt.Errorf("the new key does not read this account: %v", err)
@@ -160,4 +167,14 @@ func (c *Client) ReplaceStoreKey(ref BackendRef, secret string, b Backend) error
 		}
 		return nil
 	})
+}
+
+// sameJSON compares two JSON values, not their spelling, the state keeps
+// its config indented
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
 }

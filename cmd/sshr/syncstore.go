@@ -149,7 +149,7 @@ func (f *storeFlags) replaceKey(c *syncclient.Client) error {
 	if err != nil {
 		return err
 	}
-	return c.ReplaceStoreKey(syncclient.BackendRef{Kind: "s3", Config: raw}, secret, syncclient.ObjectBackend{Store: store})
+	return c.ReplaceStoreKey(*ref, syncclient.BackendRef{Kind: "s3", Config: raw}, secret, syncclient.ObjectBackend{Store: store})
 }
 
 // s3Address names the bucket in the status, it is not dialed
