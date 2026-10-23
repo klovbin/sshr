@@ -50,9 +50,10 @@ func TestExportSSHConfig(t *testing.T) {
 	}
 	out, _ := os.ReadFile(s.SSHConfigOut)
 	for _, want := range []string{
-		"Host bastion\n  HostName 10.0.0.1\n  User jump\n  IdentityFile \"" + key + "\"\n  IdentitiesOnly yes\n",
+		// the export writes / on every system, OpenSSH reads it everywhere
+		"Host bastion\n  HostName 10.0.0.1\n  User jump\n  IdentityFile \"" + filepath.ToSlash(key) + "\"\n  IdentitiesOnly yes\n",
 		"Host web-prod\n  HostName 10.0.0.2\n  User deploy\n  Port 2222\n  ProxyJump bastion,edge.example.com\n",
-		"IdentityAgent \"" + strings.ReplaceAll(sock, "%", "%%") + "\"",
+		"IdentityAgent \"" + strings.ReplaceAll(filepath.ToSlash(sock), "%", "%%") + "\"",
 	} {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("export lacks %q:\n%s", want, out)
