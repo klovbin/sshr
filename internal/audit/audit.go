@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"sshr.dev/internal/fileio"
@@ -30,7 +31,9 @@ const (
 	DefaultMaxMB = 10
 	// recordMax caps one line, a long command or error is cut to fit
 	recordMax = 4 << 10
-	lockWait  = 2 * time.Second
+	// lockWait is how long a write waits for another process, a lost end
+	// record or a refused action costs more than a slow one
+	lockWait = 10 * time.Second
 )
 
 // Record is one line of the log, a start and an end share Req
@@ -69,6 +72,9 @@ type Log struct {
 	maxBytes int64
 	full     bool
 	key      []byte
+	// mu queues the writers of this process, they do not poll the file
+	// lock against each other
+	mu sync.Mutex
 	// Warn gets the end records that could not be written
 	Warn io.Writer
 }
@@ -159,6 +165,8 @@ func (l *Log) write(r Record) error {
 	if err != nil {
 		return err
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	unlock, err := fileio.WaitLock(l.path+".lock", "writing the audit log", lockWait)
 	if err != nil {
 		return err
