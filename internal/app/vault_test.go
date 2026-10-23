@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,6 +55,29 @@ func TestVaultKeyLostIsNotReplaced(t *testing.T) {
 	keyring.Set(keyringService, keyringUser, base64.StdEncoding.EncodeToString(first))
 	if got, err := VaultKey(); err != nil || string(got) != string(first) {
 		t.Fatalf("the key brought back: %v", err)
+	}
+}
+
+// a check that cannot be written does not keep an existing key from
+// working
+func TestVaultKeyCheckWriteIsBestEffort(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only folder works differently on Windows")
+	}
+	useMockKeychain(t)
+	if _, err := VaultKey(); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := keyCheckPath()
+	os.Remove(path)
+	dir := filepath.Dir(path)
+	os.Chmod(dir, 0o500)
+	defer os.Chmod(dir, 0o700)
+	vaultMu.Lock()
+	vaultKey = nil
+	vaultMu.Unlock()
+	if _, err := VaultKey(); err != nil {
+		t.Fatalf("a folder that takes no write stopped the key: %v", err)
 	}
 }
 

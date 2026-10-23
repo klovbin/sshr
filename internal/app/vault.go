@@ -151,7 +151,7 @@ func readKeyCheck() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(path)
+	b, err := ReadFileShared(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
@@ -169,15 +169,19 @@ func checkVaultKey(key []byte) error {
 	}
 	got := keyCheckValue(key)
 	if want == "" {
-		path, err := keyCheckPath()
-		if err != nil {
-			return err
+		// recording is best effort, a disk that takes no write must not
+		// keep a working key from opening the secrets, the check only
+		// starts protecting once it is written
+		if path, err := keyCheckPath(); err == nil {
+			if err := WriteFileAtomic(path, []byte(got+"\n"), 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "sshr: could not record the vault key check: %v\n", err)
+			}
 		}
-		return WriteFileAtomic(path, []byte(got+"\n"), 0o600)
+		return nil
 	}
 	if want != got {
 		path, _ := keyCheckPath()
-		return fmt.Errorf("%w: the system keychain holds another vault key than the one the saved passwords and keys here were sealed with (a reset keychain or another keychain program), bring back the keychain item sshr/vault-key, or delete %s and save the passwords and keys again", ErrVaultKeyLost, path)
+		return fmt.Errorf("%w: the system keychain holds another vault key than the one the saved passwords and keys here were sealed with (a reset keychain or another keychain program), bring back the keychain item sshr/vault-key, if that key is the right one deleting %s is enough, otherwise delete it and save the passwords and keys again", ErrVaultKeyLost, path)
 	}
 	return nil
 }
