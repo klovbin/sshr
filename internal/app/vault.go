@@ -39,14 +39,53 @@ const keyringTimeout = 5 * time.Second
 // and key files still work
 var ErrNoKeychain = errors.New("no_keychain")
 
-// KeychainError carries why the keychain could not be used
-type KeychainError struct{ Err error }
+// The states of a keychain that cannot be used, every one is ErrNoKeychain
+// too, so a caller that only knows that one still works
+var (
+	// ErrKeychainMissing means there is no keychain service to ask: no
+	// session bus, no Secret Service running, no default collection
+	ErrKeychainMissing = errors.New("keychain_missing")
+	// ErrKeychainLocked means the keychain is there and locked, its unlock
+	// prompt was dismissed
+	ErrKeychainLocked = errors.New("keychain_locked")
+	// ErrKeychainTimeout means the keychain did not answer in time, an
+	// unlock prompt nobody sees (over ssh, with no desktop)
+	ErrKeychainTimeout = errors.New("keychain_timeout")
+)
+
+// KeychainError carries why the keychain could not be used, State is one
+// of the states above when it is known
+type KeychainError struct {
+	Err   error
+	State error
+}
+
+func keychainError(err error) *KeychainError {
+	e := &KeychainError{Err: err}
+	if errors.Is(err, errKeyringTimeout) {
+		e.State = ErrKeychainTimeout
+	} else {
+		e.State = keychainState(err)
+	}
+	return e
+}
 
 func (e *KeychainError) Error() string {
+	switch e.State {
+	case ErrKeychainLocked:
+		return "the system keychain is locked (" + e.Err.Error() + "), unlock it and try again, saved passwords need it"
+	case ErrKeychainTimeout:
+		return "the system keychain did not answer in " + keyringTimeout.String() + ", it may be waiting for an unlock nobody sees (over ssh or with no desktop), unlock it on the desktop or ask for the password each time"
+	}
 	return "the system keychain is not available (" + e.Err.Error() + "), saved passwords need it, ask for the password each time or use a key file"
 }
 
-func (e *KeychainError) Unwrap() []error { return []error{ErrNoKeychain, e.Err} }
+func (e *KeychainError) Unwrap() []error {
+	if e.State != nil {
+		return []error{ErrNoKeychain, e.State, e.Err}
+	}
+	return []error{ErrNoKeychain, e.Err}
+}
 
 var (
 	vaultMu  sync.Mutex
@@ -66,9 +105,29 @@ var (
 	}
 )
 
+// errKeyringTimeout is a keychain call that did not answer in time
+var errKeyringTimeout = errors.New("no answer from the keychain, is it locked?")
+
+// keyringQuiet is how long the keychain is not asked again after a call
+// timed out, every call would wait the full timeout and leave a goroutine
+// behind, a sync of many hosts would take minutes
+const keyringQuiet = time.Minute
+
+var (
+	keyringMu        sync.Mutex
+	keyringDownUntil time.Time
+)
+
 // keyringCall runs f with keyringTimeout, the goroutine of a call that
-// timed out is left behind, it is blocked on D-Bus and holds nothing
+// timed out is left behind, it is blocked on D-Bus and holds nothing,
+// after a timeout calls fail at once for keyringQuiet
 func keyringCall(f func() (string, error)) (string, error) {
+	keyringMu.Lock()
+	down := time.Now().Before(keyringDownUntil)
+	keyringMu.Unlock()
+	if down {
+		return "", errKeyringTimeout
+	}
 	type result struct {
 		v   string
 		err error
@@ -82,7 +141,10 @@ func keyringCall(f func() (string, error)) (string, error) {
 	case r := <-ch:
 		return r.v, r.err
 	case <-time.After(keyringTimeout):
-		return "", errors.New("no answer from the keychain, is it locked?")
+		keyringMu.Lock()
+		keyringDownUntil = time.Now().Add(keyringQuiet)
+		keyringMu.Unlock()
+		return "", errKeyringTimeout
 	}
 }
 
@@ -92,11 +154,11 @@ func getVaultKey() ([]byte, bool, error) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, &KeychainError{err}
+		return nil, false, keychainError(err)
 	}
 	key, err := base64.StdEncoding.DecodeString(v)
 	if err != nil || len(key) != chacha20poly1305.KeySize {
-		return nil, false, &KeychainError{errors.New("the vault key in the keychain is damaged")}
+		return nil, false, keychainError(errors.New("the vault key in the keychain is damaged"))
 	}
 	return key, true, nil
 }
@@ -218,13 +280,13 @@ func createVaultKey() ([]byte, error) {
 	if _, err := keyringCall(func() (string, error) {
 		return "", keyring.Set(keyringService, keyringUser, enc)
 	}); err != nil {
-		return nil, &KeychainError{err}
+		return nil, keychainError(err)
 	}
 	// read back what the keychain holds, that is the key every other process
 	// will get
 	key, ok, err := getVaultKey()
 	if err == nil && !ok {
-		err = &KeychainError{errors.New("the vault key was not kept")}
+		err = keychainError(errors.New("the vault key was not kept"))
 	}
 	return key, err
 }
@@ -336,11 +398,11 @@ func SecretGet(name string) (value []byte, ok bool, err error) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, &KeychainError{err}
+		return nil, false, keychainError(err)
 	}
 	b, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
-		return nil, false, &KeychainError{fmt.Errorf("the keychain entry %s is damaged", name)}
+		return nil, false, keychainError(fmt.Errorf("the keychain entry %s is damaged", name))
 	}
 	return b, true, nil
 }
@@ -351,7 +413,7 @@ func SecretSet(name string, value []byte) error {
 	if _, err := keyringCall(func() (string, error) {
 		return "", keyring.Set(keyringService, name, enc)
 	}); err != nil {
-		return &KeychainError{err}
+		return keychainError(err)
 	}
 	return nil
 }
@@ -361,7 +423,7 @@ func SecretSet(name string, value []byte) error {
 func SecretDelete(name string) error {
 	_, err := keyringCall(func() (string, error) { return "", keyring.Delete(keyringService, name) })
 	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
-		return &KeychainError{err}
+		return keychainError(err)
 	}
 	return nil
 }

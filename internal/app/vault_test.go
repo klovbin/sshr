@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -234,5 +235,27 @@ func TestOlderSealsAreUpgraded(t *testing.T) {
 	}
 	if err := Unlock(got); err != nil || got.Password != "pw" {
 		t.Fatalf("after the upgrade: %v %q", err, got.Password)
+	}
+}
+
+// after a keychain call timed out the next ones fail at once instead of
+// waiting the full timeout each, the error names the state (#169)
+func TestKeychainQuietAfterATimeout(t *testing.T) {
+	useMockKeychain(t)
+	keyringMu.Lock()
+	keyringDownUntil = time.Now().Add(time.Minute)
+	keyringMu.Unlock()
+	t.Cleanup(func() {
+		keyringMu.Lock()
+		keyringDownUntil = time.Time{}
+		keyringMu.Unlock()
+	})
+	start := time.Now()
+	_, err := VaultKey()
+	if !errors.Is(err, ErrKeychainTimeout) || !errors.Is(err, ErrNoKeychain) || time.Since(start) > time.Second {
+		t.Fatalf("%v after %v", err, time.Since(start))
+	}
+	if !strings.Contains(err.Error(), "did not answer") {
+		t.Errorf("message %q", err)
 	}
 }
