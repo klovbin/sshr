@@ -507,9 +507,7 @@ func (c *Client) initAccount(server, name string) error {
 		return err
 	}
 	c.st = &state{Server: srv, Name: name, Entries: map[string]entryState{}}
-	if err := c.keepBackend(); err != nil {
-		return err
-	}
+	c.keepBackend()
 	self := c.self()
 	body, _ := json.Marshal(syncproto.NewAccountRequest{Device: self})
 	b, err := c.backend().CreateAccount(body)
@@ -530,7 +528,7 @@ func (c *Client) initAccount(server, name string) error {
 	if err := c.putEnvelope(self, 1, key); err != nil {
 		return err
 	}
-	if err := c.save(); err != nil {
+	if err := c.saveNew(); err != nil {
 		return err
 	}
 	return c.push(nil)
@@ -589,9 +587,7 @@ func (c *Client) join(server, code, name string) (string, error) {
 		return "", err
 	}
 	c.st = &state{Server: srv, Account: account, Name: name, Approver: approver, Entries: map[string]entryState{}}
-	if err := c.keepBackend(); err != nil {
-		return "", err
-	}
+	c.keepBackend()
 	self := c.self()
 	body, _ := json.Marshal(syncproto.NewAccountRequest{Device: self})
 	b, err := c.backend().Join(body)
@@ -608,7 +604,7 @@ func (c *Client) join(server, code, name string) (string, error) {
 		return "", fmt.Errorf("the sync store holds account %s, the invite is for %s, check the server or store", short(tr.Account, 8), short(account, 8))
 	}
 	c.st.Token, c.st.DeviceID = tr.Token, self.ID
-	return Fingerprint(self.SignPub), c.save()
+	return Fingerprint(self.SignPub), c.saveNew()
 }
 
 // Pending lists devices that joined and wait for approval

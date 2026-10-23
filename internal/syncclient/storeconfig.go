@@ -44,18 +44,31 @@ func (c *Client) openBackend() error {
 	return nil
 }
 
-// keepBackend writes the store a new account or join uses into the state
-// and its secret into the keychain
-func (c *Client) keepBackend() error {
+// keepBackend writes the store a new account or join uses into the state,
+// the secret waits for saveNew
+func (c *Client) keepBackend() {
 	if c.BackendRef == nil {
-		return nil
+		return
 	}
 	ref := *c.BackendRef
 	c.st.Backend = &ref
-	if c.StoreSecret == "" {
-		return nil
+}
+
+// saveNew writes the state of an account the store has just taken, the
+// secret of the store goes into the keychain only now, a failed init or
+// join leaves no secret that no state names
+func (c *Client) saveNew() error {
+	if c.BackendRef == nil || c.StoreSecret == "" {
+		return c.save()
 	}
-	return vault.SecretSet(c.storeSecretName(), []byte(c.StoreSecret))
+	if err := vault.SecretSet(c.storeSecretName(), []byte(c.StoreSecret)); err != nil {
+		return err
+	}
+	if err := c.save(); err != nil {
+		vault.SecretDelete(c.storeSecretName())
+		return err
+	}
+	return nil
 }
 
 // ProbeCreate checks that store refuses a second create of one name, a
