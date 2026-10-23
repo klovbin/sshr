@@ -34,6 +34,9 @@ type Options struct {
 	Version       string
 	// Audit records uploads and commands, nil keeps no record
 	Audit *audit.Log
+	// CommandsAllowed says whether run_command may run on a host, nil
+	// allows every host
+	CommandsAllowed func(*app.Host) error
 }
 
 type request struct {
@@ -377,6 +380,11 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 	}
 	if strings.TrimSpace(command) == "" {
 		return toolResult{}, errors.New("empty command")
+	}
+	if s.opts.CommandsAllowed != nil {
+		if err := s.opts.CommandsAllowed(h); err != nil {
+			return toolResult{}, err
+		}
 	}
 	if timeout <= 0 {
 		timeout = 60

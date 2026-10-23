@@ -261,6 +261,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** they integrate without parsing CLI output
 - **Why this way:** a 0600 unix socket by default, a loopback port only with a token, web pages and DNS rebinding are refused, no secrets in or out
 
+### Commands only on chosen hosts
+- **What:** `sshr commands only` limits commands from `sshr mcp` and `sshr serve` to the hosts of `sshr commands allow <host>`, `sshr commands all` goes back, `sshr commands list` shows them, `--listed-hosts-only` and `--all-hosts` for one run, off by default
+- **What for:** an assistant that may run commands on a test box should not reach production with the same switch
+- **Why it helps:** commands stay on for the servers you chose and the rest are refused with a message how to allow them
+- **Why this way:** the list is in settings.json, which never syncs, so another device cannot add a host here, each entry is bound to where the host pointed when it was allowed, a host repointed later (on another device too) is refused until it is allowed again, off by default since every host took commands before and a new server would need one more step
+
 ### Audit log of assistants and scripts
 - **What:** `sshr mcp --audit` and `sshr serve --audit` (or `"audit_log": true`) write every upload, command, host change and tunnel to `~/.sshr/audit.jsonl`, one JSON line when it starts and one when it ends, with the client, the host and the exit code, off by default
 - **What for:** an assistant or a script acts on your servers while you look elsewhere, afterwards you want to know what it did and where

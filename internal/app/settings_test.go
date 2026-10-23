@@ -104,7 +104,7 @@ func TestCloneSettingsCoversEveryList(t *testing.T) {
 		if !f.IsExported() {
 			continue
 		}
-		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" {
+		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" {
 			t.Errorf("Settings.%s is a %s, copy it in cloneSettings and list it here", f.Name, k)
 		}
 	}
@@ -180,5 +180,39 @@ func TestSettingsKeepKeysItDoesNotKnow(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(path); string(b) != newer {
 		t.Errorf("settings.json changed: %s", b)
+	}
+}
+
+// with the list on, only an allowed host that still points where it did
+// takes commands, the list survives a save (#101)
+func TestCommandHosts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	h := &Host{ID: "0123456789abcdef0123456789abcdef", Name: "web", Host: "10.0.0.1", User: "u"}
+	st, _ := LoadSettings()
+	if st.CommandsAllowed(h) != nil {
+		t.Fatal("the list is off, every host takes commands")
+	}
+	st.CommandsListedOnly = true
+	if !errors.Is(st.CommandsAllowed(h), ErrCommandsNotAllowed) {
+		t.Fatal("an unlisted host took commands")
+	}
+	st.AllowCommands(h)
+	if err := SaveSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = LoadSettings()
+	if err := st.CommandsAllowed(h); err != nil {
+		t.Fatalf("an allowed host: %v", err)
+	}
+	moved := *h
+	moved.Host = "evil.example"
+	if !errors.Is(st.CommandsAllowed(&moved), ErrCommandsNotAllowed) {
+		t.Fatal("a host that points elsewhere kept its permission")
+	}
+	st.DenyCommands(h.ID)
+	if st.CommandsAllowed(h) == nil {
+		t.Fatal("a denied host took commands")
 	}
 }

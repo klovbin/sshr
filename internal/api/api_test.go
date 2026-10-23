@@ -200,3 +200,13 @@ func TestAPIRunLogQuoted(t *testing.T) {
 		t.Fatalf("control characters reach the log: %q", out)
 	}
 }
+
+// a host the command policy refuses gets 403 (#101)
+func TestAPIRunPolicy(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	srv := New(s, Options{AllowCommands: true, CommandsAllowed: func(*app.Host) error { return app.ErrCommandsNotAllowed }})
+	if code, out := do(t, srv, "POST", "/v1/hosts/web/run", `{"command":"id"}`, nil); code != 403 {
+		t.Fatalf("run = %d %s", code, out)
+	}
+}

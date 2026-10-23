@@ -119,6 +119,8 @@ func runCLI(args []string) {
 		cmdComplete(store, args[1:])
 	case "vault":
 		cmdVault(args[1:])
+	case "commands":
+		cmdCommands(store, args[1:])
 	case "ext":
 		cmdExt(store, args[1:])
 	case "help", "--help", "-h":
@@ -1168,6 +1170,74 @@ func cmdVault(args []string) {
 	default:
 		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
 		os.Exit(1)
+	}
+}
+
+const commandsUsage = "Usage: sshr commands list|only|all|allow <host>|deny <host>"
+
+// cmdCommands keeps the list of hosts assistants and scripts may run
+// commands on through sshr mcp and sshr serve
+func cmdCommands(store *app.Store, args []string) {
+	if len(args) == 0 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, commandsUsage)
+		os.Exit(1)
+	}
+	st, err := app.LoadSettings()
+	if err != nil {
+		fatal(err)
+	}
+	switch {
+	case args[0] == "list" && len(args) == 1:
+		if !st.CommandsListedOnly {
+			fmt.Println("every host takes commands when they are on, sshr commands only limits them to the hosts below")
+		} else {
+			fmt.Println("only the hosts below take commands")
+		}
+		hosts, err := store.List()
+		if err != nil {
+			fatal(err)
+		}
+		for i := range hosts {
+			if _, ok := st.CommandHosts[hosts[i].ID]; !ok {
+				continue
+			}
+			state := "allowed"
+			if st.CommandsAllowed(&hosts[i]) != nil && st.CommandsListedOnly {
+				state = "points elsewhere since it was allowed, allow it again"
+			}
+			fmt.Printf("  %s (%s): %s\n", hosts[i].Name, hosts[i].Dest(), state)
+		}
+		return
+	case args[0] == "only" && len(args) == 1:
+		st.CommandsListedOnly = true
+	case args[0] == "all" && len(args) == 1:
+		st.CommandsListedOnly = false
+	case args[0] == "allow" && len(args) == 2:
+		st.AllowCommands(findHost(store, "commands allow", args[1]))
+	case args[0] == "deny" && len(args) == 2:
+		st.DenyCommands(findHost(store, "commands deny", args[1]).ID)
+	default:
+		fmt.Fprintln(os.Stderr, commandsUsage)
+		os.Exit(1)
+	}
+	if err := app.SaveSettings(st); err != nil {
+		fatal(err)
+	}
+}
+
+// commandPolicy checks a host before a command from sshr mcp or sshr
+// serve, it reads the settings each time so sshr commands allow works
+// without a restart, a settings file that does not read refuses
+func commandPolicy(listedOnly *bool) func(*app.Host) error {
+	return func(h *app.Host) error {
+		st, err := app.LoadSettings()
+		if err != nil {
+			return fmt.Errorf("settings.json does not read, commands are refused: %v", err)
+		}
+		if listedOnly != nil {
+			st.CommandsListedOnly = *listedOnly
+		}
+		return st.CommandsAllowed(h)
 	}
 }
 

@@ -320,3 +320,17 @@ func TestRunCommandAudited(t *testing.T) {
 		t.Fatal("ssh ran without a record in the audit log")
 	}
 }
+
+// a host the command policy refuses gets no command, ssh does not run
+// (#101)
+func TestRunCommandPolicy(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	t.Setenv("PATH", t.TempDir())
+	opts := Options{AllowCommands: true, CommandsAllowed: func(*app.Host) error { return app.ErrCommandsNotAllowed }}
+	got := exchange(t, s, opts, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"host":"web","command":"id"}}}`)
+	b, _ := json.Marshal(got["1"])
+	if !strings.Contains(string(b), "not allowed") {
+		t.Fatalf("not refused: %s", b)
+	}
+}

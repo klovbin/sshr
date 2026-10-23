@@ -36,6 +36,9 @@ type Options struct {
 	// Client names the caller of a request for the audit log, the remote
 	// address when nil
 	Client func(*http.Request) string
+	// CommandsAllowed says whether a command may run on a host, nil allows
+	// every host
+	CommandsAllowed func(*app.Host) error
 }
 
 // begin writes the start of an action to the audit log and answers 503
@@ -359,6 +362,12 @@ func (a *api) run(w http.ResponseWriter, r *http.Request) {
 	h := a.findHost(w, r)
 	if h == nil {
 		return
+	}
+	if a.opts.CommandsAllowed != nil {
+		if err := a.opts.CommandsAllowed(h); err != nil {
+			fail(w, http.StatusForbidden, err)
+			return
+		}
 	}
 	var in struct {
 		Command        string `json:"command"`

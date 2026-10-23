@@ -19,7 +19,7 @@ import (
 	"sshr.dev/internal/audit"
 )
 
-const serveUsage = "Usage: sshr serve [--listen unix:<path>|127.0.0.1:<port>] [--allow-commands|--no-commands] [--audit|--no-audit]"
+const serveUsage = "Usage: sshr serve [--listen unix:<path>|127.0.0.1:<port>] [--allow-commands|--no-commands] [--listed-hosts-only|--all-hosts] [--audit|--no-audit]"
 
 // cmdServe runs the REST API until Ctrl+C or SIGTERM
 func cmdServe(store *app.Store, args []string) {
@@ -27,6 +27,7 @@ func cmdServe(store *app.Store, args []string) {
 	opts := api.Options{AllowCommands: st.APICommands}
 	listen := ""
 	auditOn := st.AuditLog
+	var listedOnly *bool
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; {
 		case a == "--listen" && i+1 < len(args):
@@ -38,6 +39,9 @@ func cmdServe(store *app.Store, args []string) {
 			opts.AllowCommands = true
 		case a == "--no-commands":
 			opts.AllowCommands = false
+		case a == "--listed-hosts-only" || a == "--all-hosts":
+			only := a == "--listed-hosts-only"
+			listedOnly = &only
 		case a == "--audit":
 			auditOn = true
 		case a == "--no-audit":
@@ -48,6 +52,7 @@ func cmdServe(store *app.Store, args []string) {
 		}
 	}
 	opts.Audit, opts.Client = openAudit(st, auditOn), peerName
+	opts.CommandsAllowed = commandPolicy(listedOnly)
 	ln, where, err := apiListener(listen, &opts)
 	if err != nil {
 		fatal(err)

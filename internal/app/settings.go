@@ -79,6 +79,14 @@ type Settings struct {
 	// keeps their length, first word and a keyed hash, a command may carry
 	// a password
 	AuditCommands string `json:"audit_commands,omitempty"`
+	// CommandsListedOnly limits commands from sshr mcp and sshr serve to
+	// the hosts in CommandHosts, off by default: every host stays usable
+	// as before, on it one more step is needed for each new server
+	CommandsListedOnly bool `json:"commands_listed_only,omitempty"`
+	// CommandHosts are the hosts allowed with sshr commands allow, host ID
+	// to a hash of where it pointed then, settings never sync so another
+	// device cannot add a host here
+	CommandHosts map[string]string `json:"command_hosts,omitempty"`
 
 	// base is the file as LoadSettings read it, SaveSettings writes only
 	// the fields that differ from it, copies of the value share it
@@ -139,6 +147,12 @@ func cloneSettings(s Settings) Settings {
 	if s.OPAccounts != nil {
 		c.OPAccounts = make([]OPLinkedAccount, len(s.OPAccounts))
 		copy(c.OPAccounts, s.OPAccounts)
+	}
+	if s.CommandHosts != nil {
+		c.CommandHosts = make(map[string]string, len(s.CommandHosts))
+		for k, v := range s.CommandHosts {
+			c.CommandHosts[k] = v
+		}
 	}
 	return c
 }
