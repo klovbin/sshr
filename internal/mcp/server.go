@@ -367,9 +367,10 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 	if err != nil {
 		return toolResult{}, err
 	}
+	name, _ := dataText(h.Name)
 	return toolResult{
 		Content:           []content{{Type: "text", Text: remote}},
-		StructuredContent: map[string]any{"host": h.Name, "path": remote},
+		StructuredContent: map[string]any{"host": name, "path": remote},
 	}, nil
 }
 
