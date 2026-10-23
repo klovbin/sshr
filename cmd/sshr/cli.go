@@ -496,66 +496,52 @@ func cmdConnect(store *app.Store, args []string) {
 	if unsaved {
 		fmt.Fprintf(os.Stderr, "sshr: %s is not saved, connecting once\n", query)
 	}
-	sshOpts, err := store.ConnectArgs(h)
+	var fwds []app.Forward
+	if len(fwdNames) > 0 {
+		if fwds, err = app.FindForwards(h.Forwards, fwdNames); err != nil {
+			fatal(err)
+		}
+	}
+	plan, err := store.PlanSession(h, app.LaunchOptions{Forwards: fwds, Mosh: useMosh, Plain: plain})
 	if err != nil {
 		fatal(err)
 	}
+	for _, note := range plan.Notes {
+		fmt.Fprintln(os.Stderr, "sshr: "+note)
+	}
 	dest := h.Dest()
-	if len(fwdNames) > 0 {
-		fs, err := app.FindForwards(h.Forwards, fwdNames)
+	if plan.Tool == "mosh" {
+		cmd, cleanup, err := plan.Command()
 		if err != nil {
 			fatal(err)
 		}
-		// mosh carries no port forwards at all
-		if useMosh {
-			fmt.Fprintln(os.Stderr, "sshr: mosh cannot forward ports, using ssh")
-			useMosh = false
-		}
-		for _, f := range fs {
-			sshOpts = append(sshOpts, f.Args()...)
-		}
-	}
-	session := h.Session
-	if plain {
-		session = ""
-	}
-
-	// mosh needs a direct UDP path to the server, which a bastion does not
-	// give, and its --ssh cannot carry a quoted ProxyCommand
-	if useMosh && h.Via() != "" {
-		fmt.Fprintln(os.Stderr, "sshr: mosh does not work through jump hosts, using ssh")
-		useMosh = false
-	}
-	if useMosh {
-		if code, ok := runMosh(h, sshOpts, dest, session); ok {
+		fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
+		started := time.Now()
+		code := runAttached(cmd, cleanup)
+		if !app.MoshStartFailed(code, time.Since(started)) {
 			markConnected(store, h, code)
 			os.Exit(code)
 		}
+		fmt.Fprintln(os.Stderr, "sshr: mosh did not start, falling back to ssh")
+		plan = plan.Fallback
 	}
 
-	sshBin, err := exec.LookPath("ssh")
+	cmd, cleanup, err := plan.Command()
 	if err != nil {
-		fatal(fmt.Errorf("ssh not found in PATH"))
+		fatal(err)
 	}
 	via := ""
-	if h.Via() != "" {
-		via = " via " + h.Via()
+	if plan.Via != "" {
+		via = " via " + plan.Via
 	}
-	if h.Jump == "" && h.Via() != "" {
+	if h.Jump == "" && plan.Via != "" {
 		via += " (no answer directly)"
 	}
-	if session != "" {
-		via += ", " + session + " session " + app.SessionName
+	if plan.Session != "" {
+		via += ", " + plan.Session + " session " + app.SessionName
 	}
 	fmt.Printf("Connecting to %s (%s:%d)%s...\n", h.Name, dest, h.Port, via)
-	if session != "" {
-		// A remote command gets no terminal unless asked, and tmux or
-		// zellij need one
-		sshOpts = append(sshOpts, "-t", "--", dest, app.SessionCommand(session))
-	} else {
-		sshOpts = append(sshOpts, "--", dest)
-	}
-	code := run(h, sshBin, sshOpts...)
+	code := runAttached(cmd, cleanup)
 	markConnected(store, h, code)
 	os.Exit(code)
 }
@@ -635,51 +621,22 @@ func cmdProxy(store *app.Store, args []string) {
 	}
 }
 
-// moshStartup is how long a failing mosh run still counts as "could not
-// start" (no mosh-server, UDP blocked) rather than a session that ended.
-const moshStartup = 20 * time.Second
-
-// runMosh connects with mosh. ok=false means mosh is unusable here or did not
-// start, and the caller should fall back to plain ssh.
-func runMosh(h *app.Host, sshOpts []string, dest, session string) (code int, ok bool) {
-	moshBin, err := exec.LookPath("mosh")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "sshr: mosh is not installed, using ssh")
-		return 0, false
-	}
-	// mosh splits --ssh on whitespace, any option with a space (a key or
-	// agent path, the sshr path in ProxyCommand) would be cut in two
-	for _, o := range sshOpts {
-		if strings.ContainsAny(o, " \t") {
-			fmt.Fprintf(os.Stderr, "sshr: the ssh option %q has spaces, mosh cannot pass it, using ssh\n", o)
-			return 0, false
-		}
-	}
-	fmt.Printf("Connecting to %s (%s:%d) with mosh...\n", h.Name, dest, h.Port)
-	started := time.Now()
-	moshArgs := []string{"--ssh=ssh " + strings.Join(sshOpts, " "), "--", dest}
-	if script := app.SessionScript(session); script != "" {
-		// mosh-server runs the command itself, without a shell in between
-		moshArgs = append(moshArgs, "sh", "-c", script)
-	}
-	code = run(h, moshBin, moshArgs...)
-	if code != 0 && time.Since(started) < moshStartup {
-		fmt.Fprintln(os.Stderr, "sshr: mosh did not start, falling back to ssh")
-		return 0, false
-	}
-	return code, true
-}
-
 // run starts a terminal program attached to ours and returns its exit code.
 func run(h *app.Host, bin string, args ...string) int {
 	cmd := exec.Command(bin, args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cleanup, err := app.AttachAuth(cmd, h)
 	if err != nil {
 		fatal(err)
 	}
+	return runAttached(cmd, cleanup)
+}
+
+// runAttached runs cmd on our terminal and returns its exit code, cleanup
+// runs after it ends
+func runAttached(cmd *exec.Cmd, cleanup func()) int {
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	defer cleanup()
 	if err := cmd.Start(); err != nil {
 		fatal(err)
@@ -688,7 +645,7 @@ func run(h *app.Host, bin string, args ...string) int {
 	// leave ssh running, a tunnel would keep its port, it goes to the child
 	// and sshr waits for it, Ctrl+C reaches both through the process group
 	stop := forwardSignals(cmd.Process)
-	err = cmd.Wait()
+	err := cmd.Wait()
 	stop()
 	if err != nil {
 		var exitErr *exec.ExitError
