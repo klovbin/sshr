@@ -610,6 +610,11 @@ func (s *Store) importHost(in Host) (*Host, error) {
 		}
 	}
 	in.PlainPassword, in.PasswordSealed = "", ""
+	// jump hosts win over a gateway, as in Update, refusing the host would
+	// repeat the same sync error on every run
+	if strings.TrimSpace(in.Jump) != "" {
+		in.Gateway = ""
+	}
 	h, err := cleanHost(in)
 	if err != nil {
 		return nil, err

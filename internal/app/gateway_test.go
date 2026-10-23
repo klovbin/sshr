@@ -208,3 +208,14 @@ func TestDirectArgsSkipsTheCheck(t *testing.T) {
 		t.Fatalf("DirectArgs went through the gateway: %v, %v", args, err)
 	}
 }
+
+// a host from another device with both jump hosts and a gateway is taken
+// with the jump hosts, not refused on every sync
+func TestImportDropsGatewayOfJumpHost(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	in := Host{ID: "0123456789abcdef0123456789abcdef", Name: "db", Host: "10.0.0.5", Port: 22, User: "u", PasswordMode: PasswordAsk, Jump: "gw", Gateway: "gw2"}
+	got, err := s.Import(in)
+	if err != nil || got.Jump != "gw" || got.Gateway != "" {
+		t.Fatalf("import: %+v, %v", got, err)
+	}
+}
