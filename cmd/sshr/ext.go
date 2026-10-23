@@ -1,19 +1,41 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 
+	"golang.org/x/term"
+
+	"sshr.dev/internal/app"
 	"sshr.dev/internal/ext"
 )
 
-// cmdExt lists and removes the installed extensions
+// hiddenCommands are the commands of sshr that are not in sshr help
+var hiddenCommands = []string{"op-accounts", app.ProxyCommandName, completeCommand, "--help", "-h"}
+
+// isBuiltinCommand tells whether name is a command of sshr, an extension
+// cannot take such a name, it would never run
+func isBuiltinCommand(name string) bool {
+	if findCommand(name) != nil {
+		return true
+	}
+	for _, h := range hiddenCommands {
+		if name == h {
+			return true
+		}
+	}
+	return false
+}
+
+// cmdExt installs, lists and removes extensions
 func cmdExt(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: sshr ext list | sshr ext remove <name>")
+		fmt.Fprintln(os.Stderr, "Usage: sshr ext install <git url or folder> [--yes] | sshr ext list | sshr ext remove <name>")
 		os.Exit(1)
 	}
 	reg, err := ext.DefaultRegistry()
@@ -21,6 +43,8 @@ func cmdExt(args []string) {
 		fatal(err)
 	}
 	switch args[0] {
+	case "install":
+		extInstall(reg, args[1:])
 	case "list", "ls":
 		if len(args) != 1 {
 			fmt.Fprintln(os.Stderr, "Usage: sshr ext list")
@@ -40,8 +64,82 @@ func cmdExt(args []string) {
 		}
 		fmt.Printf("Removed extension %s\n", args[1])
 	default:
-		fmt.Fprintf(os.Stderr, "sshr ext: unknown command %q, use list or remove\n", args[0])
+		fmt.Fprintf(os.Stderr, "sshr ext: unknown command %q, use install, list or remove\n", args[0])
 		os.Exit(1)
+	}
+}
+
+// extInstall fetches an extension, shows what it is and what it will be
+// allowed to do, and installs it after a yes
+func extInstall(reg *ext.Registry, args []string) {
+	yes := false
+	var source string
+	for _, a := range args {
+		switch {
+		case a == "--yes" || a == "-y":
+			yes = true
+		case source == "" && !strings.HasPrefix(a, "-"):
+			source = a
+		default:
+			fmt.Fprintln(os.Stderr, "Usage: sshr ext install <git url or folder> [--yes]")
+			os.Exit(1)
+		}
+	}
+	if source == "" {
+		fmt.Fprintln(os.Stderr, "Usage: sshr ext install <git url or folder> [--yes]")
+		os.Exit(1)
+	}
+	st, err := ext.Prepare(source)
+	if err != nil {
+		fatal(err)
+	}
+	// fatal exits without running defers
+	die := func(err error) {
+		st.Discard()
+		fatal(err)
+	}
+	defer st.Discard()
+	if isBuiltinCommand(st.Name) {
+		die(fmt.Errorf("%s is a command of sshr, an extension cannot have that name", st.Name))
+	}
+	argv, _ := st.Argv(runtime.GOOS)
+	fmt.Printf("Extension %s %s\n", st.Name, st.Version)
+	fmt.Printf("  does:   %s\n", st.Description)
+	fmt.Printf("  kinds:  %s\n", strings.Join(st.Kinds, ", "))
+	if argv != nil {
+		fmt.Printf("  runs:   %s\n", shellLine(argv))
+	} else {
+		fmt.Printf("  runs:   nothing on %s, it has no command for this system\n", runtime.GOOS)
+	}
+	from := st.Lock.Source
+	if st.Lock.Commit != "" {
+		from += " at " + st.Lock.Commit
+	}
+	fmt.Printf("  from:   %s\n", from)
+	fmt.Printf("  files:  %d, hash %s\n", st.Files, st.Lock.Tree[:16])
+	if old, err := reg.Find(st.Name); err == nil {
+		fmt.Printf("  it replaces version %s, installed from %s\n", old.Version, old.Lock.Source)
+	}
+	fmt.Println()
+	fmt.Println("An extension runs as you and can do anything you can do. sshr gives it no password,")
+	fmt.Println("key or secret reference, but it is a program on your machine, read its code first.")
+	if !yes {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			die(errors.New("install asks for a yes and there is no terminal to ask in, add --yes"))
+		}
+		fmt.Print("Install it? [y/N]: ")
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			fmt.Println("Not installed")
+			return
+		}
+	}
+	if err := reg.Install(st); err != nil {
+		die(err)
+	}
+	fmt.Printf("Installed extension %s\n", st.Name)
+	if st.Has(ext.KindCommand) {
+		fmt.Printf("Run it with: sshr %s\n", st.Name)
 	}
 }
 

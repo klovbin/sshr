@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -147,5 +148,76 @@ func TestExitCodeOf(t *testing.T) {
 	}
 	if got := exitCodeOf(errors.New("other")); got != 1 {
 		t.Errorf("an error without a code gives %d", got)
+	}
+}
+
+// every word the switch of runCLI answers to is a command of sshr, so an
+// extension cannot be installed under it, a new case without help or without
+// an entry in hiddenCommands fails here
+func TestBuiltinNamesCoverTheSwitch(t *testing.T) {
+	src, err := os.ReadFile("cli.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	start := strings.Index(body, "func runCLI(")
+	if start < 0 {
+		t.Fatal("runCLI is not in cli.go")
+	}
+	body = body[start:]
+	if end := strings.Index(body[1:], "\nfunc "); end >= 0 {
+		body = body[:end+1]
+	}
+	labels := regexp.MustCompile(`(?m)^\tcase ([^:\n]+):$`).FindAllStringSubmatch(body, -1)
+	if len(labels) < 20 {
+		t.Fatalf("found only %d case labels, the pattern no longer matches cli.go", len(labels))
+	}
+	for _, l := range labels {
+		for _, w := range regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(l[1], -1) {
+			if !isBuiltinCommand(w[1]) {
+				t.Errorf("%q answers in runCLI but an extension could take the name, add it to the help or hiddenCommands", w[1])
+			}
+		}
+	}
+}
+
+func TestExtInstallAsksAndInstalls(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the extension is a shell script")
+	}
+	home := t.TempDir()
+	src := t.TempDir()
+	os.WriteFile(filepath.Join(src, ext.ManifestFile), []byte(`{"protocol":1,"name":"greet","version":"0.2.0","description":"says hi","command":{"default":["./run.sh","--loud"]},"kinds":["command"]}`), 0o600)
+	os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh\necho \"hi $*\"\n"), 0o700)
+	// no terminal and no --yes: the details are shown and nothing is installed
+	out, errOut, code := sshrIn(t, home, "ext", "install", src)
+	if code != 1 || !strings.Contains(out, "Extension greet 0.2.0") || !strings.Contains(out, "./run.sh --loud") || !strings.Contains(errOut, "add --yes") {
+		t.Fatalf("code %d, out %q, err %q", code, out, errOut)
+	}
+	if out, _, _ := sshrIn(t, home, "ext", "list"); !strings.Contains(out, "no extensions installed") {
+		t.Errorf("an unconfirmed install left something: %q", out)
+	}
+	if out, _, code = sshrIn(t, home, "ext", "install", src, "--yes"); code != 0 || !strings.Contains(out, "Installed extension greet") || !strings.Contains(out, "Run it with: sshr greet") {
+		t.Fatalf("install: code %d, %q", code, out)
+	}
+	if out, _, code = sshrIn(t, home, "greet", "there"); code != 0 || !strings.Contains(out, "hi --loud there") {
+		t.Errorf("run: code %d, %q", code, out)
+	}
+	if out, _, _ = sshrIn(t, home, "ext", "install", src, "--yes"); !strings.Contains(out, "it replaces version 0.2.0") {
+		t.Errorf("a second install does not say what it replaces: %q", out)
+	}
+}
+
+func TestExtInstallRefusesABuiltinName(t *testing.T) {
+	src := t.TempDir()
+	os.WriteFile(filepath.Join(src, ext.ManifestFile), []byte(`{"protocol":1,"name":"list","version":"1","description":"x","command":{"default":["./run.sh"]},"kinds":["command"]}`), 0o600)
+	os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh\n"), 0o700)
+	home := t.TempDir()
+	_, errOut, code := sshrIn(t, home, "ext", "install", src, "--yes")
+	if code != 1 || !strings.Contains(errOut, "is a command of sshr") {
+		t.Fatalf("code %d, stderr %q", code, errOut)
+	}
+	if out, _, _ := sshrIn(t, home, "ext", "list"); !strings.Contains(out, "no extensions installed") {
+		t.Errorf("a refused install left something: %q", out)
 	}
 }

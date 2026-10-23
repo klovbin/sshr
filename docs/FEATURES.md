@@ -230,6 +230,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 
 ## For other programs
 
+### Extensions
+- **What:** `sshr ext install <git url or folder>` shows what an extension is and asks, then `sshr <name>` runs it, `sshr ext list` and `sshr ext remove` manage them, an extension is a program in `~/.sshr/extensions/<name>/` with a manifest `sshr-ext.json`, written in any language
+- **What for:** your own commands under the same word `sshr` without a fork or a change of sshr, a deploy helper, a report of your hosts, a wrapper for your cloud
+- **Why it helps:** the tools around your hosts live in one place, a built-in command never changes whatever you install, and the extension can read your hosts back with `sshr list --json`
+- **Why this way:** an executable with a fixed protocol, not a Go plugin or WASM, so any language works and a crash stays in its own process, sshr asks before it installs and shows the manifest, the command, the commit and a hash, every file of the folder is pinned and a changed file stops the run until you install it again, the extension never gets a password, key or secret reference or the askpass and password manager variables of sshr, it is still a program that runs as you, which is said in `sshr ext install` and in [SECURITY.md](SECURITY.md)
+
 ### MCP server for AI assistants
 - **What:** `sshr mcp` gives Claude Code, Codex or Cursor the tools list_hosts, upload_file and run_command, setup and limits in [MCP.md](MCP.md)
 - **What for:** assistants asked to read logs or check a server

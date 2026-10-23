@@ -243,6 +243,36 @@ sshr-sync --plain-http --trust-proxy --listen 127.0.0.1:8080 --data ./data      
 
 TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-256 is stored), 10 new accounts or joins an hour per address, behind a proxy every client has the proxy's address unless `--trust-proxy` takes the last `X-Forwarded-For` entry of requests from this machine (off by default, the proxy must set that header), pushes are compare-and-swap so two devices cannot overwrite each other, unused blobs go after a day, one server per data folder
 
+## Extensions
+
+```sh
+sshr ext install https://github.com/someone/sshr-hello.git   # shows what it is and asks
+sshr ext install ./my-extension --yes                        # a folder, no question, for scripts
+sshr hello a b                                               # runs the extension called hello
+sshr ext list
+sshr ext remove hello
+```
+
+An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+
+```json
+{
+  "protocol": 1,
+  "name": "hello",
+  "version": "0.1.0",
+  "description": "says hello to a host",
+  "command": { "default": ["./hello.sh"], "windows": ["hello.exe"] },
+  "kinds": ["command"]
+}
+```
+
+- `name` is lower case letters, digits and `-`, it is the word after `sshr`, an extension cannot take the name of a command of sshr
+- `command` is a list of arguments per system (`linux`, `darwin`, `windows`, `default` for the rest), the first one is a file of the folder, no shell is involved, the arguments you type after the name are added
+- the program gets the terminal of the user and its exit code is the exit code of sshr
+- sshr passes `SSHR_EXT_PROTOCOL` (1), `SSHR_EXT_KIND` (`command`), `SSHR_EXT_DIR` (its folder) and `SSHR_BIN` (the sshr binary), `"$SSHR_BIN" list --json` gives it the hosts
+- passwords, keys, secret references and the variables of ssh askpass, Bitwarden and 1Password are never in its environment
+- `sshr ext install` pins every file of the folder, changing one (a `git pull` in the folder, an edit) stops the extension until you install it again, how that is checked and what it does not cover is in [SECURITY.md](SECURITY.md#extensions)
+
 ## AI assistants (MCP)
 
 ```sh

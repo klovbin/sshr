@@ -204,16 +204,28 @@ macOS, run it again after an update
 
 Options:
   --remove   take it out of the menu`},
-	{name: "ext", usage: `sshr ext list
-sshr ext remove <name>`, short: "list and remove extensions",
-		details: `An extension is a program you installed into ~/.sshr/extensions/<name>/
-that sshr runs as sshr <name> when no command of sshr has that name, a
-built-in command always wins
+	{name: "ext", usage: `sshr ext install <git url or folder> [--yes]
+sshr ext list
+sshr ext remove <name>`, short: "install, list and remove extensions",
+		details: `An extension is a program in ~/.sshr/extensions/<name>/ that sshr runs
+as sshr <name> when no command of sshr has that name, a built-in command
+always wins
 
-list shows the installed ones, remove deletes one, sshr runs an extension
-only while its files are the ones that were installed
+install takes an https or ssh git address or a folder, shows the manifest,
+the command it will run, the commit and a hash of the files, and asks
+before it installs, an extension runs as you and can do anything you can,
+sshr gives it no password, key or secret reference, installing it again
+is how you trust files you changed
+
+sshr runs an extension only while its files are the ones that were
+installed, a git pull in its folder stops it until you install it again
+
+Options:
+  --yes   install: do not ask, for scripts
 
 Examples:
+  sshr ext install https://github.com/someone/sshr-hello.git
+  sshr ext install ./my-extension --yes
   sshr ext list
   sshr ext remove hello`},
 	{name: "completion", usage: "sshr completion bash|zsh|fish", short: "Tab completion for your shell",

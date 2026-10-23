@@ -50,6 +50,15 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - `sshr serve` listens on a 0600 unix socket by default, a TCP port only on loopback and only with the token from `~/.sshr/api-token`, requests with an `Origin` header (web pages) or a non-loopback `Host` (DNS rebinding) are refused
 - running commands is off by default in both
 
+## Extensions
+
+- sshr runs nothing you did not install: an extension runs only from `~/.sshr/extensions/<name>/`, only when no command of sshr has its name, never from PATH, and a built-in command always wins
+- `sshr ext install` shows the manifest, the command, the commit and a hash of the files and asks, a git address is fetched with a shallow clone over https or ssh only, nothing of the clone is run, links and special files are refused
+- every file of the folder is hashed at install (paths, executable bit, content) and checked before every run, a `git pull` in the folder, a hand edit or an added file stops the run until you install it again
+- an extension never receives a secret from sshr: `SSH_ASKPASS`, `SSH_ASKPASS_REQUIRE`, `BW_SESSION` and the other `BW_` credentials, `OP_SESSION_*`, the 1Password service account and connect tokens and every `SSHR_` variable of a running sshr are removed from its environment, it is given no password, key or secret reference, only a fixed list of host fields reaches it
+- limits: an extension runs as you and can do anything you can, including reading `~/.ssh` and `SSH_AUTH_SOCK`, the hash protects against a changed file and not against a bad extension, read the code before you install it, the check and the run are two steps, so someone who can already write to your `~/.sshr` could swap a file between them
+- nothing about extensions syncs and neither MCP nor the REST API lists or runs one
+
 ## Export to ssh config
 
 - passwords and keys kept in sshr or 1Password are not exported

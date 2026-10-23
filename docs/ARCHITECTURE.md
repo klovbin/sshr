@@ -85,6 +85,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/sync/run.lock` | lock of a sync run, holds the pid of the holder | `syncclient.run` |
 | `~/.sshr/sync/state.json` | the sync state: chain head, trusted devices, entry states, skipped entries, a pending key rotation | `syncclient.save` through `WriteFileAtomic` |
 | keychain, service `sshr`, entries `sync-device`, `sync-key-<epoch>`, `sync-key-pending` | device seed, vault keys per epoch, a key not delivered yet | `syncclient` |
+| `~/.sshr/extensions/<name>/` | an installed extension: its files, `sshr-ext.json` by the author, `sshr-ext.lock` by sshr (source, commit, hash of every file) | `sshr ext install`, `ext.Registry.Install` |
 | `~/.sshr/api-token` | token of the REST API on a TCP port | `apiToken` through `WriteFileAtomic` |
 | `$XDG_RUNTIME_DIR/sshr` or `~/.sshr/cm` | ControlMaster sockets, askpass and agent sockets, `api.sock` | ssh, `sshauth`, `vaultkey`, `sshr serve` |
 | sync server data folder | accounts, devices, envelopes, manifests, blobs, all ciphertext but the device list | `syncserver`, its own copy of the atomic write |
@@ -94,6 +95,8 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 ## Flows
 
 **Connect.** `Store.Find` (exact ID, then name, address, ID prefix, an ambiguous query is refused) → `ConnectArgs` (key, agent, jump hosts as `-J` or a quoted ProxyCommand through `sshr __proxy`, reuse) → `cmd/sshr` adds forwards, `-t` and the session, or wraps it in mosh with a fallback to ssh → `AttachAuth` (`Unlock` opens the sealed password or asks 1Password or Bitwarden, on failure the terminal prompt stays, an askpass socket gives the password to the right token once, a key kept in sshr goes through a private agent) → `ssh` runs as a child, `forwardSignals` passes signals on, its exit code is sshr's.
+
+**Run an extension.** a word that is no case of the command switch → `ext.Registry.Find` (the name is checked first, so it cannot leave `~/.sshr/extensions`) → `Verify` (hash of every file against the lock, a mismatch stops here) → `Command` (the program of the folder by its full path, no PATH, no shell, the environment of the caller without secrets plus `SSHR_EXT_*` and `SSHR_BIN`) → the child gets the terminal, `forwardSignals` passes signals on, its exit code is sshr's. **Install.** `Prepare` (folder, or a shallow https or ssh clone, copied without `.git`, plain files only) → the manifest, the command and the hash are shown → a yes → `Install` builds the folder beside the old one, checks the copy against the hash, writes the lock and swaps it in.
 
 **Sync pull.** finish a key delivery left from before → fetch every manifest after the last counter → verify each (counter, previous hash, signature of a trusted device, the MAC only on the newest) → apply the newest one entry by entry: download, read the local host again, decide by Lamport stamp and device, keep the losing side of a conflict as a copy, skip a host this version cannot take or a local file that does not load → finish a key delivery → save the state. A pull that fails puts the chain back and keeps the entry state of hosts already applied.
 
@@ -125,7 +128,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | packages | few packages, `app` split only once its seams are stable | many small packages early |
 | settings | JSON | TOML: one format, a handful of fields |
 | conflicts | keep both, the later change keeps the name | last writer wins per field: host, user and jump must never be picked silently |
-| extensions | executables with a fixed protocol | Go plugins or WASM |
+| extensions | executables with a fixed protocol, installed with a pinned hash (#105) | Go plugins or WASM |
 | updates | GitHub releases with a pinned signing key | the sync server: anyone can run one |
 
 ## Rules for new code

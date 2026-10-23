@@ -29,6 +29,7 @@ Moving hosts in and out
 
 For other programs
 
+- extensions: programs installed with `sshr ext install` and run as `sshr <name>`, files pinned, no secrets in their environment ([#105](https://github.com/klovbin/sshr/issues/105))
 - MCP server for AI assistants, `sshr mcp`, commands off by default ([#4](https://github.com/klovbin/sshr/issues/4))
 - local REST API, `sshr serve` ([#3](https://github.com/klovbin/sshr/issues/3))
 
