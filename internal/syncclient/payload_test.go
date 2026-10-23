@@ -119,3 +119,38 @@ func readRaw(t *testing.T, s *app.Store, id string) map[string]json.RawMessage {
 	must(t, json.Unmarshal(b, &m))
 	return m
 }
+
+// a host of a newer format comes as skipped to a device that cannot
+// write it, it is named as left out and its file here stays (#97)
+func TestSyncSkipsANewerHostFormat(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	host, err := app.HostPayloadJSON(app.Host{ID: web.ID, Name: "web", Host: "10.0.0.1", User: "u"})
+	must(t, err)
+	if strings.Contains(string(host), "version") {
+		t.Fatalf("a host of today's format carries a version: %s", host)
+	}
+	writeRaw(t, w.a.Store, web.ID, func(m map[string]any) { m["version"] = 7 })
+	before := readRaw(t, w.b.Store, web.ID)
+	// a reads the newer file and its next push carries it with its version
+	h, _ := w.a.Store.Find(web.ID)
+	p, err := payloadOf(*h)
+	must(t, err)
+	if !strings.Contains(string(p), `"version":7`) {
+		t.Fatalf("the payload lost the version: %s", p)
+	}
+	w.a.st = nil
+	must(t, w.a.load())
+	e := w.a.st.Entries[web.ID]
+	e.Local = "changed"
+	w.a.st.Entries[web.ID] = e
+	must(t, w.a.save())
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	if _, ok := w.b.LeftOut[web.ID]; !ok {
+		t.Fatalf("b did not leave the newer host out: %v\n%s", w.b.LeftOut, w.log.String())
+	}
+	if after := readRaw(t, w.b.Store, web.ID); string(after["host"]) != string(before["host"]) || after["version"] != nil {
+		t.Fatalf("b wrote the newer host: %v", after)
+	}
+}

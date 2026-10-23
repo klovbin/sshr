@@ -123,6 +123,17 @@ func HostPayloadJSON(h Host) ([]byte, error) {
 			keys = append(keys, k)
 		}
 	}
+	extra := h.extra
+	if h.format > 1 {
+		// a host of a newer format says so on the wire too, a device that
+		// does not know it carries it as skipped instead of writing it
+		extra = maps.Clone(h.extra)
+		if extra == nil {
+			extra = map[string]json.RawMessage{}
+		}
+		extra["version"] = json.RawMessage(fmt.Sprint(h.format))
+		keys = append(keys, "version")
+	}
 	if len(keys) == 0 {
 		return b, nil
 	}
@@ -135,7 +146,7 @@ func HostPayloadJSON(h Host) ([]byte, error) {
 			return nil, err
 		}
 		var v bytes.Buffer
-		if err := json.Compact(&v, h.extra[k]); err != nil {
+		if err := json.Compact(&v, extra[k]); err != nil {
 			return nil, err
 		}
 		out.WriteByte(',')
