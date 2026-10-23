@@ -12,15 +12,16 @@ import (
 // and Cyrillic (#101)
 func TestDataText(t *testing.T) {
 	for in, want := range map[string]string{
-		"a\r\nb\rc":                  "a\nb\nc",
-		"\x00x\x1b[31mred\x1b[0m":    "xred",
-		"\x1b]0;title\x07after":      "after",
-		"\x1b]8;;http://e\x1b\\link": "link",
-		"‮evil\U000E0041​ok":         "evilok",
-		"привет\tмир\n":              "привет\tмир\n",
-		"cut \xd0":                   "cut �",
-		"\u009b31mc1":                "31mc1",
-		"\x1b":                       "",
+		"a\r\nb\rc":                                       "a\nb\nc",
+		"\x00x\x1b[31mred\x1b[0m":                         "xred",
+		"\x1b]0;title\x07after":                           "after",
+		"\x1b]8;;http://e\x1b\\link":                      "link",
+		"\u202eevil\U000E0041\u200bok":                    "evilok",
+		"a\ufe0fb\U000E0100c\u00add\u3164e\u2028f\u206ag": "abcdefg",
+		"привет\tмир\n":                                   "привет\tмир\n",
+		"cut \xd0":                                        "cut \uFFFD",
+		"\u009b31mc1":                                     "31mc1",
+		"\x1b":                                            "",
 	} {
 		got, _ := dataText(in)
 		if got != want {

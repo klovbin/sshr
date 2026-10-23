@@ -73,9 +73,17 @@ func hidden(r rune) bool {
 	case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
 		return true
 	case r == 0x061c, r >= 0x200b && r <= 0x200f, r >= 0x202a && r <= 0x202e,
-		r >= 0x2060 && r <= 0x2069, r == 0xfeff:
+		r >= 0x2060 && r <= 0x206f, r == 0xfeff:
 		return true
 	case r >= 0xe0000 && r <= 0xe007f:
+		return true
+	// variation selectors carry hidden text too, fillers and format
+	// characters show nothing
+	case r >= 0xfe00 && r <= 0xfe0f, r >= 0xe0100 && r <= 0xe01ef:
+		return true
+	case r == 0x00ad, r == 0x034f, r >= 0x180b && r <= 0x180e, r == 0x115f, r == 0x1160,
+		r == 0x3164, r == 0xffa0, r == 0x2028, r == 0x2029, r >= 0xfff9 && r <= 0xfffc,
+		r >= 0x1d173 && r <= 0x1d17a:
 		return true
 	}
 	return false
