@@ -52,6 +52,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - neither returns or accepts passwords, private keys or 1Password and Bitwarden references, a host linked to a password manager is added in the app or the CLI
 - `sshr mcp` listens on nothing, the assistant runs it as a child process over stdin and stdout, every command is logged to stderr quoted, so control characters in it cannot forge lines, `sshr serve` logs its commands the same way
 - `sshr serve` listens on a 0600 unix socket by default and refuses a client that runs as another user (the socket names its uid on Linux and macOS, Windows has the ACL of the socket only), a TCP port only on loopback and only with the token from `~/.sshr/api-token`, requests with an `Origin` header (web pages) or a non-loopback `Host` (DNS rebinding) are refused
+- what `sshr mcp` hands the model from outside is marked as data: remote output sits between markers with a nonce of the call, ssh errors, banners and the text of hosts (names, tags, sessions written on another device) lose escape sequences, control, bidi, zero-width and tag characters, so a server or a stolen device cannot hide instructions in them, the REST API returns raw bytes to programs
 - running commands is off by default in both, each runs at most 8 uploads, commands and tunnel starts at once, an upload holds its body in memory
 
 ## Extensions

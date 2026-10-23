@@ -181,7 +181,9 @@ func toolError(err error) string {
 	if errors.Is(err, app.ErrAsksPassword) {
 		return "this host asks for its password on every connect and there is no terminal to type it in, save its password in sshr or log in with a key"
 	}
-	return err.Error()
+	// ssh errors carry the stderr and the banner of the server
+	text, _ := dataText(err.Error())
+	return text
 }
 
 func (s *server) tools() []map[string]any {
@@ -264,7 +266,7 @@ func (s *server) listHosts() (toolResult, error) {
 	}
 	out := make([]app.HostSummary, 0, len(hosts))
 	for i := range hosts {
-		out = append(out, hosts[i].Summary())
+		out = append(out, dataSummary(hosts[i].Summary()))
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return toolResult{
@@ -354,15 +356,23 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 	if err != nil {
 		return toolResult{}, err
 	}
-	text := fmt.Sprintf("exit code %d\n--- stdout\n%s\n--- stderr\n%s", res.ExitCode, res.Stdout, res.Stderr)
+	// the output is the remote host's, it reaches the model as data
+	stdout, n1 := dataText(string(res.Stdout))
+	stderr, n2 := dataText(string(res.Stderr))
+	nonce := newNonce()
+	text := fmt.Sprintf("exit code %d\n%s\n%s", res.ExitCode, fenced("stdout", stdout, nonce), fenced("stderr", stderr, nonce))
+	if n := n1 + n2; n > 0 {
+		text += fmt.Sprintf("\n(%d control characters and escape sequences removed)", n)
+	}
 	if res.Truncated {
 		text += "\n(output cut at 64 KiB)"
 	}
+	name, _ := dataText(h.Name)
 	return toolResult{
 		Content: []content{{Type: "text", Text: text}},
 		StructuredContent: map[string]any{
-			"host": h.Name, "exit_code": res.ExitCode,
-			"stdout": string(res.Stdout), "stderr": string(res.Stderr), "truncated": res.Truncated,
+			"host": name, "exit_code": res.ExitCode,
+			"stdout": stdout, "stderr": stderr, "truncated": res.Truncated,
 		},
 		IsError: res.ExitCode != 0,
 	}, nil
