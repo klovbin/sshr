@@ -379,17 +379,20 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 	if !filepath.IsAbs(path) {
 		return toolResult{}, errors.New("path must be absolute")
 	}
-	if err := checkUploadPath(path); err != nil {
+	// the file read is the one checked, a link swapped after the check
+	// does not reach a hidden file
+	real, err := checkUploadPath(path)
+	if err != nil {
 		return toolResult{}, err
 	}
-	info, err := os.Stat(path)
+	info, err := os.Stat(real)
 	if err != nil {
 		return toolResult{}, err
 	}
 	if !info.Mode().IsRegular() || info.Size() > uploadMax {
 		return toolResult{}, fmt.Errorf("%s is not a regular file of at most %d MiB", path, uploadMax>>20)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(real)
 	if err != nil {
 		return toolResult{}, err
 	}
@@ -479,26 +482,26 @@ func (s *server) runCommand(h *app.Host, command string, timeout int) (toolResul
 // checkUploadPath refuses files in hidden folders of the home folder and
 // hidden files there, ~/.ssh keys, ~/.sshr tokens and sync state, cloud
 // credentials, the path is resolved first so a link cannot point there
-func checkUploadPath(path string) error {
+func checkUploadPath(path string) (string, error) {
 	real, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if h, err := filepath.EvalSymlinks(home); err == nil {
 		home = h
 	}
 	rel, err := filepath.Rel(home, real)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil
+		return real, nil
 	}
 	for _, part := range strings.Split(rel, string(filepath.Separator)) {
 		if strings.HasPrefix(part, ".") {
-			return fmt.Errorf("%s is hidden in the home folder (keys, tokens, settings), upload_file does not send such files, copy it elsewhere first if it is meant to go", path)
+			return "", fmt.Errorf("%s is hidden in the home folder (keys, tokens, settings), upload_file does not send such files, copy it elsewhere first if it is meant to go", path)
 		}
 	}
-	return nil
+	return real, nil
 }

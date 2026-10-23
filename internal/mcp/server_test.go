@@ -145,14 +145,21 @@ func TestUploadRefusesHiddenFiles(t *testing.T) {
 		paths = append(paths, link)
 	}
 	for _, p := range paths {
-		if err := checkUploadPath(p); err == nil || !strings.Contains(err.Error(), "hidden") {
+		if _, err := checkUploadPath(p); err == nil || !strings.Contains(err.Error(), "hidden") {
 			t.Errorf("checkUploadPath(%s) = %v", p, err)
 		}
 	}
 	ok := filepath.Join(home, "shot.png")
 	os.WriteFile(ok, []byte("png"), 0o600)
-	if err := checkUploadPath(ok); err != nil {
+	if _, err := checkUploadPath(ok); err != nil {
 		t.Errorf("a plain file was refused: %v", err)
+	}
+	// the path to read is the one checked, not the link (#214)
+	if link := filepath.Join(home, "shot-link.png"); os.Symlink(ok, link) == nil {
+		want, _ := filepath.EvalSymlinks(ok)
+		if got, err := checkUploadPath(link); err != nil || got != want {
+			t.Errorf("checkUploadPath(link) = %q %v, want %q", got, err, want)
+		}
 	}
 }
 
