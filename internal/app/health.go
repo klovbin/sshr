@@ -9,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"sshr.dev/internal/settings"
 )
 
 // Health states of a host
@@ -30,7 +32,7 @@ const HealthTimeout = 3 * time.Second
 
 // DefaultHealthInterval is how often the app checks the hosts when the
 // check is on and the interval is not set
-const DefaultHealthInterval = 5 * time.Minute
+const DefaultHealthInterval = settings.DefaultHealthInterval
 
 // Health is the result of one check
 type Health struct {

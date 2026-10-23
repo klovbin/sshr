@@ -23,9 +23,10 @@ How sshr is built, which package may use which, where data lives and how the mai
 | Package | Does | May import (sshr packages) |
 |----|----|----|
 | `internal/audit` | the audit log of MCP and REST actions | `fileio` |
+| `internal/settings` | `~/.sshr/settings.json`: load, save of the changed fields only, the command list, never synced | `fileio`, `record` |
 | `internal/record` | keeps files readable across versions: unknown keys kept and written back, the `version` of a file | nothing |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
-| `internal/app` | the core: hosts and their store, secrets, ssh command lines, ssh config import and export, health, settings | `fileio`, `record` |
+| `internal/app` | the core: hosts and their store, secrets, ssh command lines, ssh config import and export, health | `fileio`, `record`, `settings` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation | `app`, `syncproto` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
@@ -45,7 +46,7 @@ Rules that follow:
 - `internal/syncserver` never imports the core or the client, it cannot decrypt what it stores by construction
 - `internal/ui` changes only through its owner (`.github/CODEOWNERS` asks for their review), a need of the app becomes a function in `app` and an issue for the GUI
 - the GUI, `mcp`, the sync packages, `fileio`, `i18n` and `assets` do not import `os/exec`, only the core, the CLI, `api`, `ext`, `desktop` and `clip` start programs
-- `syncproto`, `fileio`, `record`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, the core joins the list after #103
+- `syncproto`, `fileio`, `record`, `settings`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, the core joins the list after #103
 - Gio is imported only by `internal/ui`
 - `internal/archtest` checks all of these
 
@@ -60,7 +61,7 @@ Rules that follow:
 | ssh command lines | `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `forward.go`, `copy.go`, `remote.go` |
 | reachability | `health.go`, a TCP connect and the SSH banner in process, no ssh |
 | ssh config | `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`) |
-| settings | `settings.go` |
+| settings | `settings.go` (aliases of package settings) |
 | platform | `files.go` (`WriteFileAtomic`, `LockFile`, `WaitLock` over `fileio`), `tty_*.go`, `agentsock_*.go` |
 
 The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp` and remote commands. A session is planned in the core too: `Store.PlanSession` (`internal/app/launch.go`) turns a host and `LaunchOptions` (forwards, mosh, plain, tunnel, batch) into the ssh or mosh command line on a copy of the host, with the route through a gateway, the notes for the user and the ssh fallback of a mosh plan, `SessionPlan.Command` attaches the host's secrets. `sshr connect`, `sshr tunnel` and the tunnels of the REST API use it. Running the process, waiting for it, forwarding signals and printing stay with the caller, a GUI must not forward a terminal's signals.
@@ -85,8 +86,8 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/vault/hosts/.lock` | lock for changing hosts, holds the pid of the holder | `Store.locked` |
 | keychain, service `sshr`, entry `vault-key` | the vault key that seals the secrets | `VaultKey` |
 | 1Password items | a password saved with `--store 1password` | `opStorePassword` |
-| `~/.sshr/settings.json` | settings, fields it does not know are lost on save | `SaveSettings` through `WriteFileAtomic` |
-| `~/.sshr/settings.json.lock` | lock for saving settings, holds the pid of the holder | `SaveSettings` |
+| `~/.sshr/settings.json` | settings, fields a newer sshr wrote are kept, never synced | `settings.Save` through `fileio.WriteFile` |
+| `~/.sshr/settings.json.lock` | lock for saving settings, holds the pid of the holder | `settings.Save` |
 | `~/.sshr/ssh_config` | the export | `refreshSSHConfig` through `WriteFileAtomic` |
 | `~/.ssh/config` | the user's own file, sshr adds or removes one Include line, a link is left alone | `editUserConfig` through `WriteFileAtomic`, its mode kept |
 | `~/.sshr/sync/run.lock` | lock of a sync run, holds the pid of the holder | `syncclient.run` |
