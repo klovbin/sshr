@@ -2,14 +2,12 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -50,16 +48,10 @@ const (
 	argonMaxThreads = 16
 	// passphraseFileMax is more than a wrapped key ever needs
 	passphraseFileMax = 4096
-	// askpassWait bounds a SSHR_ASKPASS helper that never answers
-	askpassWait = time.Minute
 	// passphraseMin is the shortest passphrase taken, the file can be
 	// attacked offline
 	passphraseMin = 12
 )
-
-// NoTerminalPrompts is set by front ends that own stdin and stdout (mcp),
-// the passphrase is then only taken from SSHR_ASKPASS
-var NoTerminalPrompts bool
 
 // wrappedKey is ~/.sshr/vault/vault-key.json
 type wrappedKey struct {
@@ -157,30 +149,9 @@ func readWrappedKey() (*wrappedKey, error) {
 	return &w, nil
 }
 
-// askPassphrase gets the passphrase: from the program in SSHR_ASKPASS
-// (the app or a script), else on the terminal, never on stdin
-var askPassphrase = func(prompt string) (string, error) {
-	if prog := os.Getenv("SSHR_ASKPASS"); prog != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), askpassWait)
-		defer cancel()
-		var stderr bytes.Buffer
-		cmd := exec.CommandContext(ctx, prog, prompt)
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		if err != nil {
-			return "", fmt.Errorf("%w: SSHR_ASKPASS failed: %v %s", ErrNoPassphrase, err, strings.TrimSpace(stderr.String()))
-		}
-		return strings.TrimRight(string(out), "\r\n"), nil
-	}
-	if NoTerminalPrompts {
-		return "", fmt.Errorf("%w: the vault needs its passphrase and there is no terminal here, set SSHR_ASKPASS to a program that prints it", ErrNoPassphrase)
-	}
-	p, err := AskTerminal(prompt)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrNoPassphrase, err)
-	}
-	return p, nil
-}
+// askPassphrase gets the passphrase, promptPassphrase asks the user, a
+// test answers it itself
+var askPassphrase = promptPassphrase
 
 // passphraseVaultKey opens the vault key file with the passphrase
 func passphraseVaultKey() ([]byte, error) {
