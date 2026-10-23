@@ -56,7 +56,7 @@ Rules that follow:
 | settings | `settings.go` |
 | platform | `lock_*.go`, `tty_*.go`, `agentsock_*.go` |
 
-The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp` and remote commands. Starting the interactive session is not in the core yet: `cmd/sshr` adds `-t`, the session command and the mosh wrapper, `internal/api` adds the tunnel options itself (planned change 2).
+The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp` and remote commands. A session is planned in the core too: `Store.PlanSession` (`internal/app/launch.go`) turns a host and `LaunchOptions` (forwards, mosh, plain, tunnel, batch) into the ssh or mosh command line on a copy of the host, with the route through a gateway, the notes for the user and the ssh fallback of a mosh plan, `SessionPlan.Command` attaches the host's secrets. `sshr connect`, `sshr tunnel` and the tunnels of the REST API use it. Running the process, waiting for it, forwarding signals and printing stay with the caller, a GUI must not forward a terminal's signals.
 
 ## Processes
 
@@ -150,7 +150,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 In this order, each one its own issue and commits:
 
 1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is fixed by #106 and #107
-2. (#96) move starting a session (`cmdConnect`, `runMosh`, `cmdProxy`, `forwardSignals`, the tunnel options in `api`) into `app`, so the app can connect (#90) and the API stops repeating it
+2. (#96) done: `PlanSession` and `SessionPlan.Command` in `app` plan connect, tunnel and the API tunnels, the CLI keeps running the process and its signals, the app can build its connect on it (#90)
 3. (#97) a versioned host record on disk and a sync payload that keeps fields it does not know, before any release, so an older device does not erase what a newer one wrote
 4. (#98) a secrets provider type: keychain, 1Password, Bitwarden and a passphrase fallback for machines without a keychain, `cleanHost` stops calling `op` and `bw`, clear-text passwords of old files are sealed once the keychain works
 5. (#99) move `LockFile`, `WriteFileAtomic` into a small leaf package, so `cmd/sshr-sync` and `syncserver` stop linking or copying the core, `.pub` files through it too

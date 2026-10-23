@@ -353,33 +353,22 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, err)
 		return
 	}
-	if h.PasswordMode == app.PasswordAsk {
-		fail(w, http.StatusBadRequest, app.ErrAsksPassword)
-		return
-	}
-	args, err := a.store.ConnectArgs(h)
+	plan, err := a.store.PlanSession(h, app.LaunchOptions{Forwards: fs, Tunnel: true, Batch: true})
 	if err != nil {
 		fail(w, http.StatusBadRequest, err)
 		return
 	}
-	if !h.PasswordFromSshr() {
-		args = append(args, "-o", "BatchMode=yes")
-	}
-	args = append(args, "-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30")
 	t := &tunnel{Host: h.Name, Started: time.Now().UTC().Format(time.RFC3339)}
 	for _, f := range fs {
-		args = append(args, f.Args()...)
 		t.Forwards = append(t.Forwards, f.String())
 	}
-	cmd := exec.Command("ssh", append(args, "--", h.Dest())...)
-	cmd.Env = append(os.Environ(), "SSHR_BATCH=1")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stop, err := app.AttachAuth(cmd, h)
+	cmd, stop, err := plan.Command()
 	if err != nil {
 		fail(w, http.StatusBadGateway, err)
 		return
 	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		stop()
 		fail(w, http.StatusInternalServerError, err)

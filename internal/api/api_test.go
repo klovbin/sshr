@@ -5,6 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -108,5 +111,33 @@ func TestAPIUploadAndTunnelChecks(t *testing.T) {
 	}
 	if code, body := do(t, srv, "POST", "/v1/hosts/web/tunnels", "", nil); code != 400 || !strings.Contains(body, "no saved forwards") {
 		t.Errorf("tunnel of a host without forwards = %d %s", code, body)
+	}
+}
+
+// a tunnel opened through the API runs ssh in batch mode with the options
+// it has always had, an ssh that fails at once is reported with its error
+func TestAPITunnelCommandLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	bin := t.TempDir()
+	log := filepath.Join(bin, "ssh.log")
+	script := "#!/bin/sh\necho \"batch=$SSHR_BATCH $*\" > " + log + "\necho 'bind: Address already in use' >&2\nexit 255\n"
+	if err := os.WriteFile(filepath.Join(bin, "ssh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := &app.Store{Dir: t.TempDir()}
+	if _, err := s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u", Key: "/k", Forwards: []app.Forward{{Name: "db", Kind: "L", Spec: "5432:localhost:5432"}}}); err != nil {
+		t.Fatal(err)
+	}
+	code, body := do(t, New(s, Options{}), "POST", "/v1/hosts/web/tunnels", "", nil)
+	if code != 502 || !strings.Contains(body, "did not open: bind: Address already in use") {
+		t.Errorf("tunnel = %d %s", code, body)
+	}
+	got, _ := os.ReadFile(log)
+	want := "batch=1 -i /k -p 22 -o BatchMode=yes -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L 5432:localhost:5432 -- u@10.0.0.1\n"
+	if string(got) != want {
+		t.Errorf("ssh ran\n%q\nwant\n%q", got, want)
 	}
 }
