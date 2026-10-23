@@ -2,6 +2,21 @@
 
 What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how to use each feature, [WHY.md](WHY.md) says why it was built this way (Russian)
 
+## Threat model
+
+| Who | What they can do | What sshr does | What is left |
+|----|----|----|----|
+| someone with the disk (a stolen laptop, a backup) | read `~/.sshr` | passwords and stored keys are sealed with a vault key kept in the system keychain, or in a file under an Argon2id passphrase | the host list, addresses and users are in clear, the passphrase file can be guessed offline when the passphrase is weak |
+| another user of the machine | open files and sockets | `~/.sshr` and the sockets are 0600 in 0700 folders, the API socket refuses peers of another user | root sees everything |
+| a program running as you | everything you can | nothing hides secrets from it, extensions get no secret from sshr in their environment | it can read the keychain the way sshr does, attach to sshr, edit the audit log |
+| the sync server | store, drop, hold back and reorder what devices upload | hosts are encrypted and signed per device, manifests are chained and MAC'd, a new device is trusted only after comparing fingerprints | it sees the number of hosts, push times and device names, it can show two devices different histories, compare the state fingerprint |
+| a stolen or hostile sync device | push hosts signed by a trusted device | it never gets private keys stored on other devices, 1Password and Bitwarden references, key files and agents do not follow a host that moved, permissions for commands live in settings that never sync | until it is removed it can rename hosts and point new ones anywhere, remove it with `sshr sync remove-device` |
+| a hostile ssh server | answer with anything | the host key is checked by ssh, a saved password is tried once and only at a password prompt, its output reaches an assistant marked as data | it gets the password of that host, a login it was meant to get |
+| an AI assistant or a script | call `sshr mcp` or `sshr serve` | commands are off by default, can be limited to chosen hosts, asked about one by one, logged, no secret goes in or out | an assistant allowed commands on a host can do there what that login can |
+| a web page | send requests to localhost | requests with an `Origin` and a non-loopback `Host` are refused, a TCP port needs a token | none known |
+| a tampered release file | replace a download | install.sh checks `sha256sums.txt`, releases carry a build attestation | the checksum list comes from the same release, a signature with a pinned key is #146 |
+| an extension you install | run as you | it is pinned by hash and shown before install, it gets no secret from sshr | it can do anything you can, read the code first |
+
 ## Saved passwords and keys
 
 - a saved password or a key kept in sshr is sealed in the host file with XChaCha20-Poly1305, the host ID and field name as associated data, so a value copied to another host or field does not open, a password and a stored key also carry their address, user, port, jump hosts and gateway, so an address changed in the file outside sshr does not open them, an edit in sshr seals them again, a host moved on another device takes the synced password with it but not the key stored here, which waits to be pasted again, as a 1Password reference is dropped, passwords and keys saved by an older version are sealed again this way on the next start
