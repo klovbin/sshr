@@ -132,7 +132,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What:** a host goes through saved bastions or `user@host:port` hops, chains included
 - **What for:** servers in private networks reachable only through a bastion
 - **Why it helps:** one command instead of two logins, keys stay on your machine, forwards, copies, `run` and paste follow the same path
-- **Why this way:** saved hops run through sshr as `ProxyCommand` so each logs in with its own key or password, a host with a saved password never uses `-J`, so a plain hop cannot see that password
+- **Why this way:** saved hops run through sshr as `ProxyCommand` so each logs in with its own key or password, a host with a saved password or a key kept in sshr never uses `-J`, so a plain hop cannot see that password or be offered that key
 
 ### Gateway when the host does not answer
 - **What:** a host can name a gateway, sshr connects directly and goes through the gateway only when the host does not answer, off by default per host, `sshr add --gateway` or `sshr gateway <host> <gateway>`

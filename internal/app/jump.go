@@ -117,10 +117,11 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 		}
 		anySaved = anySaved || saved
 	}
-	// with -J the ssh for each hop inherits the askpass of this host, a
-	// bastion that asks for a password would get this host's saved one,
-	// sshr as ProxyCommand starts each hop with that environment removed
-	if !anySaved && !h.PasswordFromSshr() {
+	// with -J the ssh for each hop inherits the askpass and the agent of
+	// this host, a bastion that asks for a password would get this host's
+	// saved one, and every hop would be offered a key kept in sshr, sshr as
+	// ProxyCommand starts each hop with that environment removed
+	if !anySaved && !h.PasswordFromSshr() && !h.agentKey() {
 		return []string{"-J", strings.Join(parts, ",")}, nil
 	}
 	exe, err := os.Executable()

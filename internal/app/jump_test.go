@@ -82,3 +82,21 @@ func TestAddressRefusesShellCharacters(t *testing.T) {
 		t.Error("ConnectArgs used a bad address from disk")
 	}
 }
+
+// a plain hop must not be offered a key the sshr agent serves for the
+// host behind it (#134)
+func TestAgentKeyHostAvoidsDashJ(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	for _, mode := range []string{KeyVault, KeyOnePassword, KeyBitwarden} {
+		args, err := s.JumpArgs(&Host{Jump: "ops@gw:2222", KeyMode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line := strings.Join(args, " "); strings.Contains(line, "-J") || !strings.Contains(line, "ProxyCommand=") {
+			t.Errorf("%s key host = %v", mode, args)
+		}
+	}
+	if args, _ := s.JumpArgs(&Host{Jump: "ops@gw:2222", Key: "/k"}); strings.Join(args, " ") != "-J ops@gw:2222" {
+		t.Errorf("a key file host = %v", args)
+	}
+}
