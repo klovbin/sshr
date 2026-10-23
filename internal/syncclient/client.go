@@ -22,8 +22,11 @@ import (
 	"time"
 	"unicode"
 
-	"sshr.dev/internal/app"
+	"sshr.dev/internal/fileio"
+	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/record"
 	"sshr.dev/internal/syncproto"
+	"sshr.dev/internal/vault"
 )
 
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
@@ -91,7 +94,7 @@ type pushPlan struct {
 
 // Client syncs one Store
 type Client struct {
-	Store *app.Store
+	Store *hosts.Store
 	// Dir holds state.json, ~/.sshr/sync
 	Dir string
 	// KeyPrefix names the keychain entries of this device, tests give two
@@ -135,7 +138,7 @@ func (c *Client) run(fn func() error) error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	unlock, err := app.WaitLock(filepath.Join(c.Dir, "run.lock"), "running a sync", 0)
+	unlock, err := fileio.WaitLock(filepath.Join(c.Dir, "run.lock"), "running a sync", 0)
 	if err != nil {
 		return err
 	}
@@ -190,7 +193,7 @@ func (c *Client) statePath() string { return filepath.Join(c.Dir, "state.json") 
 // would be missed
 func SecretNames(dir string) ([]string, error) {
 	names := []string{"sync-device", "sync-key-pending"}
-	b, err := app.ReadFileShared(filepath.Join(dir, "state.json"))
+	b, err := fileio.ReadFileShared(filepath.Join(dir, "state.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return names, nil
 	}
@@ -213,7 +216,7 @@ func (c *Client) load() error {
 	if c.st != nil {
 		return nil
 	}
-	b, err := app.ReadFileShared(c.statePath())
+	b, err := fileio.ReadFileShared(c.statePath())
 	if os.IsNotExist(err) {
 		return ErrNotSetUp
 	}
@@ -222,24 +225,24 @@ func (c *Client) load() error {
 	}
 	var st state
 	if err := json.Unmarshal(b, &st); err != nil {
-		if _, format, ferr := app.RecordExtra(b, reflect.TypeOf(state{})); ferr == nil && format > stateFormat {
-			return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", app.ErrNewerFormat, format)
+		if _, format, ferr := record.Extra(b, reflect.TypeOf(state{})); ferr == nil && format > stateFormat {
+			return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", record.ErrNewerFormat, format)
 		}
 		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
 	}
 	var format int
-	if st.extra, format, err = app.RecordExtra(b, reflect.TypeOf(state{})); err != nil {
+	if st.extra, format, err = record.Extra(b, reflect.TypeOf(state{})); err != nil {
 		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
 	}
 	if format > stateFormat {
 		// the state holds the counter and the head of the chain, a sync
 		// that does not understand it all would break the history
-		return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", app.ErrNewerFormat, format)
+		return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", record.ErrNewerFormat, format)
 	}
 	if st.Entries == nil {
 		st.Entries = map[string]entryState{}
 	}
-	seed, ok, err := app.SecretGet(c.prefix() + "device")
+	seed, ok, err := vault.SecretGet(c.prefix() + "device")
 	if err != nil {
 		return err
 	}
@@ -258,7 +261,7 @@ func (c *Client) load() error {
 func (c *Client) save() error {
 	b, err := json.MarshalIndent(c.st, "", "  ")
 	if err == nil {
-		b, err = app.AppendRecordKeys(b, c.st.extra)
+		b, err = record.AppendKeys(b, c.st.extra)
 	}
 	if err != nil {
 		return err
@@ -266,7 +269,7 @@ func (c *Client) save() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	return app.WriteFileAtomic(c.statePath(), b, 0o600)
+	return fileio.WriteFile(c.statePath(), b, 0o600)
 }
 
 // checkServer refuses plain HTTP except to this machine
@@ -330,7 +333,7 @@ func (c *Client) self() syncproto.Device { return c.keys.device(c.st.Name) }
 
 func (c *Client) vaultKey(epoch int) ([]byte, error) {
 	name := c.prefix() + "key-" + strconv.Itoa(epoch)
-	key, ok, err := app.SecretGet(name)
+	key, ok, err := vault.SecretGet(name)
 	if err != nil {
 		return nil, err
 	}
@@ -338,14 +341,14 @@ func (c *Client) vaultKey(epoch int) ([]byte, error) {
 		return key, nil
 	}
 	if c.st.Rotation != nil && c.st.Rotation.Epoch == epoch {
-		if key, ok, err := app.SecretGet(c.prefix() + "key-pending"); err != nil || ok {
+		if key, ok, err := vault.SecretGet(c.prefix() + "key-pending"); err != nil || ok {
 			return key, err
 		}
 	}
 	if key, err = c.envelopeKey(epoch); err != nil {
 		return nil, err
 	}
-	return key, app.SecretSet(name, key)
+	return key, vault.SecretSet(name, key)
 }
 
 func (c *Client) markKey(epoch int) {
@@ -393,7 +396,7 @@ func (c *Client) checkKey(epoch int, key []byte) ([]byte, error) {
 		if err := verifyMAC(&sm, fresh); err != nil {
 			return nil, fmt.Errorf("the vault key on this device does not open the account, pair it again: %v", err)
 		}
-		if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(epoch), fresh); err != nil {
+		if err := vault.SecretSet(c.prefix()+"key-"+strconv.Itoa(epoch), fresh); err != nil {
 			return nil, err
 		}
 		key = fresh
@@ -434,7 +437,7 @@ func (c *Client) newSeed() error {
 	if _, err := rand.Read(seed); err != nil {
 		return err
 	}
-	if err := app.SecretSet(c.prefix()+"device", seed); err != nil {
+	if err := vault.SecretSet(c.prefix()+"device", seed); err != nil {
 		return err
 	}
 	var err error
@@ -491,7 +494,7 @@ func (c *Client) initAccount(server, name string) error {
 	c.st.Trusted = []syncproto.Device{self}
 	key := make([]byte, 32)
 	rand.Read(key)
-	if err := app.SecretSet(c.prefix()+"key-1", key); err != nil {
+	if err := vault.SecretSet(c.prefix()+"key-1", key); err != nil {
 		return err
 	}
 	if err := c.putEnvelope(self, 1, key); err != nil {
@@ -668,8 +671,8 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 // with the vault key of the receiving machine, a private key stored in sshr
 // does not travel
 type payload struct {
-	Host     app.Host `json:"host"`
-	Password string   `json:"password,omitempty"`
+	Host     hosts.Host `json:"host"`
+	Password string     `json:"password,omitempty"`
 }
 
 // payloadJSON is the payload on the wire, the host is written and read by
@@ -679,7 +682,7 @@ type payloadJSON struct {
 	Password string          `json:"password,omitempty"`
 }
 
-func payloadOf(h app.Host) ([]byte, error) {
+func payloadOf(h hosts.Host) ([]byte, error) {
 	p := payload{Host: h}
 	p.Host.PasswordSealed, p.Host.PlainPassword, p.Host.KeySealed = "", "", ""
 	// when this machine last connected stays here, it would make every
@@ -688,17 +691,17 @@ func payloadOf(h app.Host) ([]byte, error) {
 	// the save counter is per machine, Import sets its own
 	p.Host.Rev = 0
 	// references to secrets of this machine stay here, the other devices
-	// do not take them anyway (app.FromOtherDevice)
+	// do not take them anyway (hosts.FromOtherDevice)
 	p.Host.PasswordRef, p.Host.KeyRef = "", ""
 	// the host part first, a host this build does not send (a newer
 	// format) is refused before its password is opened
-	host, err := app.HostPayloadJSON(p.Host)
+	host, err := hosts.HostPayloadJSON(p.Host)
 	if err != nil {
 		return nil, err
 	}
 	// only a password saved in sshr is read, one in 1Password stays there
-	if h.PasswordMode == app.PasswordSaved {
-		if err := app.Unlock(&h); err != nil {
+	if h.PasswordMode == hosts.PasswordSaved {
+		if err := hosts.UnlockSaved(&h); err != nil {
 			return nil, err
 		}
 		p.Password = h.Password
@@ -821,7 +824,7 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		// saved, its key still waits as key-pending and verifies the
 		// manifest, the delivery is taken up again
 		if c.st.Rotation == nil {
-			if pending, ok, _ := app.SecretGet(c.prefix() + "key-pending"); ok && verifyMAC(sm, pending) == nil {
+			if pending, ok, _ := vault.SecretGet(c.prefix() + "key-pending"); ok && verifyMAC(sm, pending) == nil {
 				c.st.Rotation = &rotation{Epoch: m.Epoch, Devices: m.Devices}
 			}
 		}
@@ -837,7 +840,7 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 			if ferr != nil || verifyMAC(sm, fresh) != nil {
 				return nil, err
 			}
-			if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(m.Epoch), fresh); err != nil {
+			if err := vault.SecretSet(c.prefix()+"key-"+strconv.Itoa(m.Epoch), fresh); err != nil {
 				return nil, err
 			}
 		}
@@ -964,7 +967,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			continue
 		}
 		delete(c.st.Skipped, id)
-		var dup *app.Host
+		var dup *hosts.Host
 		conflict := false
 		known, seen := c.st.Entries[id]
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
@@ -998,7 +1001,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		// from reading the host here to writing the remote version no other
 		// sshr process saves hosts, an edit saved before is seen as a local
 		// change, one saved after waits and comes after the remote version
-		err = c.Store.Locked(func(store *app.Store) error {
+		err = c.Store.Locked(func(store *hosts.Store) error {
 			if applyLocked != nil {
 				applyLocked(id)
 			}
@@ -1009,7 +1012,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				if now, err := payloadOf(*h); err == nil {
 					local[id] = now
 				}
-			} else if errors.Is(err, app.ErrNotFound) {
+			} else if errors.Is(err, hosts.ErrNotFound) {
 				delete(local, id)
 			}
 			if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
@@ -1027,7 +1030,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 						p.Host.ID = ""
 						p.Host.Name = conflictName(p.Host.Name, e.Device)
 						var notes []string
-						p.Host, notes = app.FromOtherDevice(p.Host, nil)
+						p.Host, notes = hosts.FromOtherDevice(p.Host, nil)
 						cp, err := store.Add(p.Host)
 						if err != nil {
 							c.st.Skipped[id] = e
@@ -1066,7 +1069,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			}
 			if e.Deleted {
 				if _, ok := local[id]; ok {
-					if err := store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
+					if err := store.Delete(id); err != nil && !errors.Is(err, hosts.ErrNotFound) {
 						return err
 					}
 					c.logf("removed %s", short(id, 8))
@@ -1075,11 +1078,11 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				return nil
 			}
 			p.Host.Password = p.Password
-			var cur *app.Host
+			var cur *hosts.Host
 			if h, err := store.Find(id); err == nil && h.ID == id {
 				cur = h
 			}
-			_, notes := app.FromOtherDevice(p.Host, cur)
+			_, notes := hosts.FromOtherDevice(p.Host, cur)
 			h, err := store.Import(p.Host)
 			if err != nil {
 				// one host this version cannot take must not stop the others,
@@ -1160,7 +1163,7 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 	if err := json.Unmarshal(plain, &wire); err != nil {
 		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
 	}
-	host, err := app.HostFromPayloadJSON(wire.Host)
+	host, err := hosts.HostFromPayloadJSON(wire.Host)
 	if err != nil {
 		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
 	}
@@ -1188,7 +1191,7 @@ func conflictName(name, device string) string {
 // localHosts returns the payload of every host here and the IDs of host
 // files that do not load, those are neither deleted nor overwritten
 func (c *Client) localHosts() (map[string][]byte, map[string]string, error) {
-	hosts, unreadable, err := c.Store.ListAll()
+	list, unreadable, err := c.Store.ListAll()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1200,9 +1203,9 @@ func (c *Client) localHosts() (map[string][]byte, map[string]string, error) {
 		broken[id] = "its host file " + id + ".json here does not load, fix it, removing it deletes the host on every device"
 	}
 	out := map[string][]byte{}
-	for _, h := range hosts {
+	for _, h := range list {
 		p, err := payloadOf(h)
-		if errors.Is(err, app.ErrNewerFormat) {
+		if errors.Is(err, record.ErrNewerFormat) {
 			broken[h.ID] = err.Error()
 			continue
 		}
@@ -1453,7 +1456,7 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 		if _, err := rand.Read(key); err != nil {
 			return pushPlan{}, err
 		}
-		if err := app.SecretSet(c.prefix()+"key-pending", key); err != nil {
+		if err := vault.SecretSet(c.prefix()+"key-pending", key); err != nil {
 			return pushPlan{}, err
 		}
 		epoch := c.st.Epoch + 1
@@ -1461,7 +1464,7 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	}
 	if err := c.push(plan); err != nil {
 		if c.st.Rotation == nil {
-			app.SecretDelete(c.prefix() + "key-pending")
+			vault.SecretDelete(c.prefix() + "key-pending")
 		}
 		return nil, fmt.Errorf("the token of the device is revoked, it is still listed, run sshr sync remove-device again: %v", err)
 	}
@@ -1514,19 +1517,19 @@ func (c *Client) finishRotation() error {
 	if r == nil {
 		return nil
 	}
-	key, ok, err := app.SecretGet(c.prefix() + "key-pending")
+	key, ok, err := vault.SecretGet(c.prefix() + "key-pending")
 	if err != nil {
 		return err
 	}
 	if !ok {
-		if key, ok, err = app.SecretGet(c.prefix() + "key-" + strconv.Itoa(r.Epoch)); err != nil {
+		if key, ok, err = vault.SecretGet(c.prefix() + "key-" + strconv.Itoa(r.Epoch)); err != nil {
 			return err
 		}
 		if !ok {
 			return fmt.Errorf("the key of epoch %d is lost on this device, remove and pair the other devices again", r.Epoch)
 		}
 	}
-	if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(r.Epoch), key); err != nil {
+	if err := vault.SecretSet(c.prefix()+"key-"+strconv.Itoa(r.Epoch), key); err != nil {
 		return err
 	}
 	for _, d := range r.Devices {
@@ -1534,7 +1537,7 @@ func (c *Client) finishRotation() error {
 			return err
 		}
 	}
-	app.SecretDelete(c.prefix() + "key-pending")
+	vault.SecretDelete(c.prefix() + "key-pending")
 	c.st.Rotation = nil
 	return c.save()
 }
@@ -1576,7 +1579,7 @@ func (c *Client) Leave(force bool) error {
 }
 
 func (c *Client) leave(force bool) error {
-	b, err := app.ReadFileShared(c.statePath())
+	b, err := fileio.ReadFileShared(c.statePath())
 	if err == nil {
 		var st state
 		if json.Unmarshal(b, &st) == nil {
@@ -1591,12 +1594,12 @@ func (c *Client) leave(force bool) error {
 				}
 			}
 			for e := 1; e <= st.Epoch; e++ {
-				app.SecretDelete(c.prefix() + "key-" + strconv.Itoa(e))
+				vault.SecretDelete(c.prefix() + "key-" + strconv.Itoa(e))
 			}
 		}
 	}
-	app.SecretDelete(c.prefix() + "key-pending")
-	app.SecretDelete(c.prefix() + "device")
+	vault.SecretDelete(c.prefix() + "key-pending")
+	vault.SecretDelete(c.prefix() + "device")
 	if err := os.Remove(c.statePath()); err != nil && !os.IsNotExist(err) {
 		return err
 	}

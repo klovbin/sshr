@@ -34,7 +34,7 @@ var allowed = map[string][]string{
 	"internal/clip":       {},
 	"internal/i18n":       {},
 	"internal/archtest":   {},
-	"internal/syncclient": {"internal/app", "internal/syncproto"},
+	"internal/syncclient": {"internal/fileio", "internal/record", "internal/vault", "internal/hosts", "internal/syncproto"},
 	"internal/syncserver": {"internal/syncproto", "internal/fileio"},
 	"internal/api":        {"internal/app", "internal/audit"},
 	"internal/mcp":        {"internal/app", "internal/audit"},
@@ -53,7 +53,7 @@ var noExec = []string{"internal/ui", "internal/mcp", "internal/syncserver", "int
 
 // phoneCore lists the packages a phone build links, os/exec is not in
 // them even through another package, what runs ssh stays in app
-var phoneCore = []string{"internal/syncproto", "internal/fileio", "internal/record", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/i18n", "internal/syncserver", "cmd/sshr-sync"}
+var phoneCore = []string{"internal/syncproto", "internal/syncclient", "internal/fileio", "internal/record", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/i18n", "internal/syncserver", "cmd/sshr-sync"}
 
 // gioOnly is the one package that may import Gio
 const gioOnly = "internal/ui"

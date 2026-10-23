@@ -113,12 +113,7 @@ func HostFromPayloadJSON(b []byte) (Host, error) { return hosts.HostFromPayloadJ
 // struct type typ and its "version", for a file of another package that
 // keeps what a newer sshr wrote
 func RecordExtra(b []byte, typ reflect.Type) (map[string]json.RawMessage, int, error) {
-	format, err := record.FormatOf(b)
-	if err != nil {
-		return nil, 0, err
-	}
-	extra, err := record.UnknownKeys(b, record.JSONKeys(typ))
-	return extra, format, err
+	return record.Extra(b, typ)
 }
 
 // AppendRecordKeys writes the kept keys extra into the JSON object b,

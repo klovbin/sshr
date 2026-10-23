@@ -32,7 +32,7 @@ func cmdSync(store *app.Store, args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	c := &syncclient.Client{Store: store, Dir: dir, Log: os.Stdout, KeyPrefix: os.Getenv("SSHR_SYNC_KEYS")}
+	c := &syncclient.Client{Store: store.Hosts(), Dir: dir, Log: os.Stdout, KeyPrefix: os.Getenv("SSHR_SYNC_KEYS")}
 	sub := "push"
 	if len(args) > 0 {
 		sub, args = args[0], args[1:]

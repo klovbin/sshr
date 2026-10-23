@@ -13,11 +13,14 @@ How sshr is built, which package may use which, where data lives and how the mai
 ## Layers
 
 ```
-          cmd/sshr (CLI, composition root)                cmd/sshr-sync
-         /       |       |        |          \                  |
-  internal/ui   api     mcp   syncclient   desktop, clip    syncserver
-         \       |       |      /     \                         |
-          internal/app (core)          syncproto <--------------+
+          cmd/sshr (CLI, composition root)                  cmd/sshr-sync
+         /       |       |        |          \                    |
+  internal/ui   api     mcp   syncclient   desktop, clip      syncserver
+         \       |       |        |   \                           |
+          internal/app (runs ssh,  |    syncproto <---------------+
+          op, bw, the keychain)    |
+                  \                |
+       hosts, health, vault, settings, record, fileio (no programs)
 ```
 
 | Package | Does | May import (sshr packages) |
@@ -31,7 +34,7 @@ How sshr is built, which package may use which, where data lives and how the mai
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
 | `internal/app` | the core: the Store facade over package hosts, ssh command lines, password managers, ssh config import and export | `fileio`, `record`, `settings`, `vault`, `hosts`, `health` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
-| `internal/syncclient` | device keys, pull, push, conflicts, key rotation | `app`, `syncproto` |
+| `internal/syncclient` | device keys, pull, push, conflicts, key rotation, runs no program | `fileio`, `record`, `vault`, `hosts`, `syncproto` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
 | `internal/api` | local REST API over the core | `app`, `audit` |
 | `internal/mcp` | MCP server over the core | `app`, `audit` |
@@ -49,7 +52,7 @@ Rules that follow:
 - `internal/syncserver` never imports the core or the client, it cannot decrypt what it stores by construction
 - `internal/ui` changes only through its owner (`.github/CODEOWNERS` asks for their review), a need of the app becomes a function in `app` and an issue for the GUI
 - the GUI, `mcp`, the sync packages, `fileio`, `i18n` and `assets` do not import `os/exec`, only the core, the CLI, `api`, `ext`, `desktop` and `clip` start programs
-- `syncproto`, `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, what runs ssh stays in `app`
+- `syncproto`, `syncclient`, `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, what runs ssh stays in `app`
 - Gio is imported only by `internal/ui`
 - `internal/archtest` checks all of these
 

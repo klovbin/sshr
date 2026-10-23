@@ -11,13 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/zalando/go-keyring"
-
-	"sshr.dev/internal/app"
+	"sshr.dev/internal/fileio"
+	"sshr.dev/internal/hosts"
 	"sshr.dev/internal/syncserver"
+	"sshr.dev/internal/vault"
 )
 
 type world struct {
@@ -29,8 +30,50 @@ type world struct {
 	counter int
 }
 
+// memKeychain keeps secrets in memory, the tests never reach the system
+// keychain
+type memKeychain struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func (k *memKeychain) Get(name string) (string, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	v, ok := k.m[name]
+	if !ok {
+		return "", vault.ErrSecretNotFound
+	}
+	return v, nil
+}
+
+func (k *memKeychain) Set(name, value string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.m[name] = value
+	return nil
+}
+
+func (k *memKeychain) Delete(name string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if _, ok := k.m[name]; !ok {
+		return vault.ErrSecretNotFound
+	}
+	delete(k.m, name)
+	return nil
+}
+
+// useMemKeychain gives the test an empty keychain in memory and a fresh
+// vault with its files in a folder of the test
+func useMemKeychain(t *testing.T) {
+	t.Helper()
+	vault.SetKeychain(&memKeychain{m: map[string]string{}})
+	vault.ResetForTest(filepath.Join(t.TempDir(), ".lock"))
+}
+
 func newWorld(t *testing.T) *world {
-	keyring.MockInit()
+	useMemKeychain(t)
 	// the vault keeps a check of its key in the home folder, the mock
 	// keychain must not leave one in the real home
 	t.Setenv("HOME", t.TempDir())
@@ -48,7 +91,7 @@ func newWorld(t *testing.T) *world {
 }
 
 func (w *world) client(prefix string) *Client {
-	return &Client{Store: &app.Store{Dir: w.t.TempDir()}, Dir: w.t.TempDir(), KeyPrefix: prefix, Log: &w.log}
+	return &Client{Store: &hosts.Store{Dir: w.t.TempDir()}, Dir: w.t.TempDir(), KeyPrefix: prefix, Log: &w.log}
 }
 
 func must(t *testing.T, err error) {
@@ -59,12 +102,12 @@ func must(t *testing.T, err error) {
 }
 
 // pair sets up a with two hosts and joins b to it
-func (w *world) pair() (web, db *app.Host) {
+func (w *world) pair() (web, db *hosts.Host) {
 	t := w.t
 	var err error
-	web, err = w.a.Store.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u", PasswordMode: app.PasswordSaved, Password: " pw 1 "})
+	web, err = w.a.Store.Add(hosts.Host{Name: "web", Host: "10.0.0.1", User: "u", PasswordMode: hosts.PasswordSaved, Password: " pw 1 "})
 	must(t, err)
-	db, err = w.a.Store.Add(app.Host{Name: "db", Host: "10.0.0.2", User: "u", Jump: "web"})
+	db, err = w.a.Store.Add(hosts.Host{Name: "db", Host: "10.0.0.2", User: "u", Jump: "web"})
 	must(t, err)
 	must(t, w.a.Init(w.srv.URL, "laptop"))
 	code, err := w.a.Invite()
@@ -93,7 +136,7 @@ func TestSyncTwoDevices(t *testing.T) {
 	if got.Name != "web" {
 		t.Fatalf("b has %+v", got)
 	}
-	must(t, app.Unlock(got))
+	must(t, hosts.UnlockSaved(got))
 	if got.Password != " pw 1 " {
 		t.Errorf("password on b = %q", got.Password)
 	}
@@ -151,17 +194,17 @@ func TestSyncConflict(t *testing.T) {
 	must(t, w.b.Push())
 	must(t, w.a.Pull())
 	for _, c := range []*Client{w.a, w.b} {
-		hosts, _ := c.Store.List()
+		list, _ := c.Store.List()
 		ports := map[int]bool{}
 		copies := 0
-		for _, h := range hosts {
+		for _, h := range list {
 			ports[h.Port] = true
 			if strings.Contains(h.Name, "(conflict ") {
 				copies++
 			}
 		}
 		if !ports[3000] || !ports[3001] || copies != 1 {
-			t.Errorf("hosts after the conflict: %+v", hosts)
+			t.Errorf("hosts after the conflict: %+v", list)
 		}
 	}
 }
@@ -169,19 +212,19 @@ func TestSyncConflict(t *testing.T) {
 func TestConflictKeepsPasswordAndKey(t *testing.T) {
 	w := newWorld(t)
 	w.pair()
-	h, err := w.a.Store.Add(app.Host{Name: "k", Host: "10.0.0.7", User: "u", KeyData: testKeyPEM(t)})
+	h, err := w.a.Store.Add(hosts.Host{Name: "k", Host: "10.0.0.7", User: "u", KeyData: testKeyPEM(t)})
 	must(t, err)
 	cp, err := w.a.Store.Duplicate(h.ID, "k copy")
 	must(t, err)
 	if cp.ID == h.ID || cp.KeySealed == "" || cp.KeyPub != h.KeyPub {
 		t.Errorf("duplicate = %+v", cp)
 	}
-	p, err := w.a.Store.Add(app.Host{Name: "p", Host: "10.0.0.8", User: "u", PasswordMode: app.PasswordSaved, Password: "pw x"})
+	p, err := w.a.Store.Add(hosts.Host{Name: "p", Host: "10.0.0.8", User: "u", PasswordMode: hosts.PasswordSaved, Password: "pw x"})
 	must(t, err)
 	cp, err = w.a.Store.Duplicate(p.ID, "p copy")
 	must(t, err)
 	got, _ := w.a.Store.Find(cp.ID)
-	must(t, app.Unlock(got))
+	must(t, hosts.UnlockSaved(got))
 	if got.Password != "pw x" {
 		t.Errorf("duplicate password = %q", got.Password)
 	}
@@ -192,7 +235,7 @@ func TestSyncVaultKeyStaysLocal(t *testing.T) {
 	w.pair()
 	// a host with a key stored in sshr on a
 	key := testKeyPEM(t)
-	h, err := w.a.Store.Add(app.Host{Name: "k", Host: "10.0.0.3", User: "u", KeyData: key})
+	h, err := w.a.Store.Add(hosts.Host{Name: "k", Host: "10.0.0.3", User: "u", KeyData: key})
 	must(t, err)
 	must(t, w.a.Push())
 	must(t, w.b.Pull())
@@ -333,13 +376,13 @@ func mustPending(t *testing.T, c *Client) string {
 func TestSyncOnePasswordRefsStayLocal(t *testing.T) {
 	w := newWorld(t)
 	w.pair()
-	h, err := w.a.Store.Add(app.Host{Name: "op", Host: "10.0.0.9", User: "u", PasswordMode: app.PasswordOnePassword, PasswordRef: "op://Private/Bank/password"})
+	h, err := w.a.Store.Add(hosts.Host{Name: "op", Host: "10.0.0.9", User: "u", PasswordMode: hosts.PasswordOnePassword, PasswordRef: "op://Private/Bank/password"})
 	must(t, err)
 	must(t, w.a.Push())
 	must(t, w.b.Pull())
 	got, err := w.b.Store.Find(h.ID)
 	must(t, err)
-	if got.PasswordMode != app.PasswordAsk || got.PasswordRef != "" {
+	if got.PasswordMode != hosts.PasswordAsk || got.PasswordRef != "" {
 		t.Fatalf("b took the reference: mode %q ref %q", got.PasswordMode, got.PasswordRef)
 	}
 	if !strings.Contains(w.log.String(), "set its reference here") {
@@ -348,7 +391,7 @@ func TestSyncOnePasswordRefsStayLocal(t *testing.T) {
 
 	// b links its own item, a later edit from a keeps it
 	in := *got
-	in.PasswordMode, in.PasswordRef = app.PasswordOnePassword, "op://Mine/server/password"
+	in.PasswordMode, in.PasswordRef = hosts.PasswordOnePassword, "op://Mine/server/password"
 	_, err = w.b.Store.Update(h.ID, in)
 	must(t, err)
 	must(t, w.b.Push())
@@ -376,14 +419,14 @@ func TestSyncOnePasswordRefsStayLocal(t *testing.T) {
 	must(t, w.a.Push())
 	must(t, w.b.Pull())
 	got, _ = w.b.Store.Find(h.ID)
-	if got.Port != 2200 || got.PasswordRef != "" || got.PasswordMode != app.PasswordAsk {
+	if got.Port != 2200 || got.PasswordRef != "" || got.PasswordMode != hosts.PasswordAsk {
 		t.Fatalf("b after a moved the host: port %d ref %q mode %q", got.Port, got.PasswordRef, got.PasswordMode)
 	}
 
 	// a forged payload with a reference, as an old or hostile client sends it
-	forged := app.Host{ID: "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0", Name: "evil", Host: "attacker.example", User: "u",
-		PasswordMode: app.PasswordOnePassword, PasswordRef: "op://Private/Bank/password",
-		KeyMode: app.KeyOnePassword, KeyRef: "op://Private/key/private key", KeyPub: "ssh-ed25519 AAAA"}
+	forged := hosts.Host{ID: "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0", Name: "evil", Host: "attacker.example", User: "u",
+		PasswordMode: hosts.PasswordOnePassword, PasswordRef: "op://Private/Bank/password",
+		KeyMode: hosts.KeyOnePassword, KeyRef: "op://Private/key/private key", KeyPub: "ssh-ed25519 AAAA"}
 	ev, err := w.b.Store.Import(forged)
 	must(t, err)
 	if ev.PasswordRef != "" || ev.KeyRef != "" || ev.KeyMode != "" {
@@ -409,14 +452,14 @@ func TestSyncWonConflictMakesOneCopy(t *testing.T) {
 	}
 	must(t, x.Push())
 	must(t, y.Pull())
-	_, err := x.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	_, err := x.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
 	must(t, err)
 	must(t, x.Push())
 	must(t, y.Pull())
 	copies := func(c *Client) int {
-		hosts, _ := c.Store.List()
+		list, _ := c.Store.List()
 		n := 0
-		for _, h := range hosts {
+		for _, h := range list {
 			if strings.Contains(h.Name, "(conflict ") {
 				n++
 			}
@@ -440,7 +483,7 @@ func TestSyncUnreadableHostIsNotDeleted(t *testing.T) {
 	_, db := w.pair()
 	path := filepath.Join(w.b.Store.Dir, db.ID+".json")
 	must(t, os.WriteFile(path, []byte("{broken"), 0o600))
-	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	_, err := w.b.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
 	must(t, err)
 	must(t, w.b.Push())
 	must(t, w.a.Pull())
@@ -462,7 +505,7 @@ func TestSyncUnsealableHostDoesNotStopTheOthers(t *testing.T) {
 	w := newWorld(t)
 	web, _ := w.pair()
 	writeRaw(t, w.b.Store, web.ID, func(m map[string]any) { m["host"] = "203.0.113.66" })
-	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	_, err := w.b.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
 	must(t, err)
 	must(t, w.b.Pull())
 	must(t, w.b.Push())
@@ -488,7 +531,7 @@ func TestSyncUnsealableHostDoesNotStopTheOthers(t *testing.T) {
 
 // writeRaw edits a host file behind the Store, the way a newer sshr would
 // write a field this one does not know
-func writeRaw(t *testing.T, s *app.Store, id string, edit func(map[string]any)) {
+func writeRaw(t *testing.T, s *hosts.Store, id string, edit func(map[string]any)) {
 	t.Helper()
 	path := filepath.Join(s.Dir, id+".json")
 	b, err := os.ReadFile(path)
@@ -524,8 +567,8 @@ func TestSyncImportErrorSkipsOneHost(t *testing.T) {
 	if h, _ := w.b.Store.Find(web.ID); h == nil || h.Port != 2222 {
 		t.Fatalf("web did not sync past the host that failed: %+v\n%s", h, w.log.String())
 	}
-	hosts, _ := w.b.Store.List()
-	for _, h := range hosts {
+	list, _ := w.b.Store.List()
+	for _, h := range list {
 		if strings.Contains(h.Name, "(conflict ") {
 			t.Fatalf("a copy was left for a host that was not imported: %s", h.Name)
 		}
@@ -534,7 +577,7 @@ func TestSyncImportErrorSkipsOneHost(t *testing.T) {
 		t.Errorf("no word about the skipped host:\n%s", w.log.String())
 	}
 	// a push from b keeps the version of a on the server
-	_, err = w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	_, err = w.b.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
 	must(t, err)
 	must(t, w.b.Push())
 	must(t, w.a.Pull())
@@ -676,7 +719,7 @@ func TestRemoveDeviceGivesUpCleanly(t *testing.T) {
 	if w.a.st.Epoch != 1 || w.a.st.Rotation != nil {
 		t.Fatalf("epoch %d, rotation %+v", w.a.st.Epoch, w.a.st.Rotation)
 	}
-	if _, ok, _ := app.SecretGet(w.a.prefix() + "key-pending"); ok {
+	if _, ok, _ := vault.SecretGet(w.a.prefix() + "key-pending"); ok {
 		t.Error("key-pending left in the keychain")
 	}
 	w.a.HTTP = nil
@@ -721,7 +764,7 @@ func TestRemoveDeviceFinishesAfterACrash(t *testing.T) {
 	if w.b.st.Epoch != 2 {
 		t.Fatalf("b is on epoch %d", w.b.st.Epoch)
 	}
-	if _, ok, _ := app.SecretGet(w.a.prefix() + "key-pending"); ok {
+	if _, ok, _ := vault.SecretGet(w.a.prefix() + "key-pending"); ok {
 		t.Error("key-pending left in the keychain")
 	}
 }
@@ -807,9 +850,9 @@ func TestSyncReplacesAWrongCachedKey(t *testing.T) {
 	w := newWorld(t)
 	web, _ := w.pair()
 	name := w.b.prefix() + "key-1"
-	good, _, err := app.SecretGet(name)
+	good, _, err := vault.SecretGet(name)
 	must(t, err)
-	must(t, app.SecretSet(name, bytes.Repeat([]byte{7}, 32)))
+	must(t, vault.SecretSet(name, bytes.Repeat([]byte{7}, 32)))
 	h, err := w.a.Store.Find(web.ID)
 	must(t, err)
 	h.Port = 2222
@@ -819,7 +862,7 @@ func TestSyncReplacesAWrongCachedKey(t *testing.T) {
 	if err := w.b.Pull(); err != nil {
 		t.Fatalf("pull with a wrong cached key: %v", err)
 	}
-	if got, _, _ := app.SecretGet(name); !bytes.Equal(got, good) {
+	if got, _, _ := vault.SecretGet(name); !bytes.Equal(got, good) {
 		t.Error("the wrong key is still cached")
 	}
 }
@@ -828,9 +871,9 @@ func TestSyncKeepsTheCachedKeyWhenTheEnvelopeFails(t *testing.T) {
 	w := newWorld(t)
 	w.pair()
 	name := w.b.prefix() + "key-1"
-	good, _, err := app.SecretGet(name)
+	good, _, err := vault.SecretGet(name)
 	must(t, err)
-	_, err = w.a.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	_, err = w.a.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
 	must(t, err)
 	must(t, w.a.Push())
 	// the manifest is damaged on the way and the envelope read fails
@@ -857,7 +900,7 @@ func TestSyncKeepsTheCachedKeyWhenTheEnvelopeFails(t *testing.T) {
 	if err := w.b.Pull(); err == nil {
 		t.Fatal("a manifest with a bad MAC was accepted")
 	}
-	if got, ok, _ := app.SecretGet(name); !ok || !bytes.Equal(got, good) {
+	if got, ok, _ := vault.SecretGet(name); !ok || !bytes.Equal(got, good) {
 		t.Fatal("the good cached key was dropped")
 	}
 }
@@ -911,7 +954,7 @@ func TestLeaveDeliversAPendingKey(t *testing.T) {
 	if w.b.st.Epoch != 2 {
 		t.Fatalf("b is on epoch %d", w.b.st.Epoch)
 	}
-	if _, ok, _ := app.SecretGet(w.a.prefix() + "key-pending"); ok {
+	if _, ok, _ := vault.SecretGet(w.a.prefix() + "key-pending"); ok {
 		t.Error("key-pending left after leave")
 	}
 }
@@ -976,9 +1019,9 @@ func TestSyncConflictCopyAfterAFailedDownload(t *testing.T) {
 	// the next run of sshr starts from the state on disk
 	x2 := &Client{Store: x.Store, Dir: x.Dir, KeyPrefix: x.KeyPrefix, Log: &w.log}
 	must(t, x2.Pull())
-	hosts, _ := x.Store.List()
+	list, _ := x.Store.List()
 	copies := 0
-	for _, h := range hosts {
+	for _, h := range list {
 		if strings.Contains(h.Name, "(conflict ") {
 			copies++
 		}
@@ -1015,8 +1058,8 @@ func TestSyncPullCutShortMakesNoCopies(t *testing.T) {
 	b2 := &Client{Store: w.b.Store, Dir: w.b.Dir, KeyPrefix: w.b.KeyPrefix, Log: &w.log}
 	must(t, b2.Pull())
 	must(t, b2.Push())
-	hosts, _ := w.b.Store.List()
-	for _, h := range hosts {
+	list, _ := w.b.Store.List()
+	for _, h := range list {
 		if strings.Contains(h.Name, "(conflict ") || h.Port != 2200 {
 			t.Fatalf("host after the cut pull: %s port %d\n%s", h.Name, h.Port, w.log.String())
 		}
@@ -1075,8 +1118,8 @@ func TestSyncPushChecksTheCachedKey(t *testing.T) {
 	w.pair()
 	name := w.b.prefix() + "key-1"
 	b2 := &Client{Store: w.b.Store, Dir: w.b.Dir, KeyPrefix: w.b.KeyPrefix, Log: &w.log}
-	must(t, app.SecretSet(name, bytes.Repeat([]byte{7}, 32)))
-	_, err := w.b.Store.Add(app.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, vault.SecretSet(name, bytes.Repeat([]byte{7}, 32)))
+	_, err := w.b.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
 	must(t, err)
 	must(t, b2.Push())
 	if err := w.a.Pull(); err != nil {
@@ -1112,9 +1155,9 @@ func TestSyncEditDuringPullIsKept(t *testing.T) {
 		return nil, nil
 	}}}
 	must(t, w.b.Pull())
-	hosts, _ := w.b.Store.List()
+	list, _ := w.b.Store.List()
 	ports := map[int]int{}
-	for _, h := range hosts {
+	for _, h := range list {
 		ports[h.Port]++
 	}
 	if ports[2299] != 1 {
@@ -1133,7 +1176,7 @@ func TestSyncApplyHoldsTheHostLock(t *testing.T) {
 	must(t, w.a.Push())
 	// another sshr process (its own Store, its own lock file handle) saves
 	// db while b applies the remote version of it
-	other := &app.Store{Dir: w.b.Store.Dir}
+	other := &hosts.Store{Dir: w.b.Store.Dir}
 	saved := make(chan error, 1)
 	blocked := false
 	applyLocked = func(id string) {
@@ -1173,7 +1216,7 @@ func TestSyncSecondRunStopsAtOnce(t *testing.T) {
 	w := newWorld(t)
 	w.pair()
 	// another sshr sync of this machine holds the run lock
-	unlock, err := app.WaitLock(filepath.Join(w.a.Dir, "run.lock"), "running a sync", 0)
+	unlock, err := fileio.WaitLock(filepath.Join(w.a.Dir, "run.lock"), "running a sync", 0)
 	must(t, err)
 	start := time.Now()
 	for name, call := range map[string]func() error{
@@ -1182,7 +1225,7 @@ func TestSyncSecondRunStopsAtOnce(t *testing.T) {
 		"leave":  func() error { return w.a.Leave(false) },
 		"remove": func() error { _, err := w.a.RemoveDevice(w.b.st.DeviceID[:8]); return err },
 	} {
-		var busy *app.BusyError
+		var busy *fileio.BusyError
 		if err := call(); !errors.As(err, &busy) || !strings.Contains(err.Error(), "running a sync") {
 			t.Errorf("%s while another run holds the lock: %v", name, err)
 		}
@@ -1221,11 +1264,11 @@ func TestSyncLastConnectedStaysLocal(t *testing.T) {
 }
 
 func TestPayloadLeavesTheSaveCounterHere(t *testing.T) {
-	a, err := payloadOf(app.Host{ID: "x", Host: "h", User: "u", Rev: 1})
+	a, err := payloadOf(hosts.Host{ID: "x", Host: "h", User: "u", Rev: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := payloadOf(app.Host{ID: "x", Host: "h", User: "u", Rev: 7})
+	b, _ := payloadOf(hosts.Host{ID: "x", Host: "h", User: "u", Rev: 7})
 	if string(a) != string(b) || strings.Contains(string(a), `"rev"`) {
 		t.Errorf("Rev reaches the payload, every save would look like an edit to push: %s", a)
 	}

@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zalando/go-keyring"
-
-	"sshr.dev/internal/app"
+	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/record"
 )
 
 // The bytes of a payload in today's format, the local change check hashes
@@ -21,8 +20,8 @@ import (
 // a remote change becomes a conflict copy (#97)
 func TestPayloadBytesStayTheSame(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	h := app.Host{ID: "0123456789abcdef0123456789abcdef", Name: "web", Host: "10.0.0.5", Port: 2222, User: "u", Key: "/k", Jump: "gw", Session: "tmux",
-		Forwards: []app.Forward{{Name: "db", Kind: "L", Spec: "5432:localhost:5432"}}, Tags: []string{"prod"}, CreatedAt: now,
+	h := hosts.Host{ID: "0123456789abcdef0123456789abcdef", Name: "web", Host: "10.0.0.5", Port: 2222, User: "u", Key: "/k", Jump: "gw", Session: "tmux",
+		Forwards: []hosts.Forward{{Name: "db", Kind: "L", Spec: "5432:localhost:5432"}}, Tags: []string{"prod"}, CreatedAt: now,
 		LastConnected: &now, Rev: 3, PasswordRef: "op://x", KeyRef: "op://y"}
 	b, err := payloadOf(h)
 	if err != nil {
@@ -34,7 +33,7 @@ func TestPayloadBytesStayTheSame(t *testing.T) {
 	}
 }
 
-// Every field of app.Host has a place in sync, a new field fails here
+// Every field of hosts.Host has a place in sync, a new field fails here
 // until it is put in one: synced as it is, stripped by payloadOf, or
 // memory only (json:"-", never written)
 func TestHostFieldsAreClassified(t *testing.T) {
@@ -49,7 +48,7 @@ func TestHostFieldsAreClassified(t *testing.T) {
 		"PasswordRef": "stripped", "KeyRef": "stripped", "LastConnected": "stripped", "Rev": "stripped",
 		"KeyData": "memory", "KeyPassphrase": "memory", "AgentKey": "memory", "Password": "memory",
 	}
-	typ := reflect.TypeOf(app.Host{})
+	typ := reflect.TypeOf(hosts.Host{})
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
 		if !f.IsExported() {
@@ -57,16 +56,16 @@ func TestHostFieldsAreClassified(t *testing.T) {
 		}
 		class, ok := classes[f.Name]
 		if !ok {
-			t.Errorf("app.Host.%s has no class, decide whether it syncs, is stripped in payloadOf or is memory only", f.Name)
+			t.Errorf("hosts.Host.%s has no class, decide whether it syncs, is stripped in payloadOf or is memory only", f.Name)
 			continue
 		}
 		if memory := f.Tag.Get("json") == "-"; memory != (class == "memory") {
-			t.Errorf("app.Host.%s is classed %s but its json tag is %q", f.Name, class, f.Tag.Get("json"))
+			t.Errorf("hosts.Host.%s is classed %s but its json tag is %q", f.Name, class, f.Tag.Get("json"))
 		}
 	}
 	// the stripped ones are really gone from what syncs
 	now := time.Now()
-	h := app.Host{ID: "0123456789abcdef0123456789abcdef", Name: "w", Host: "h", User: "u",
+	h := hosts.Host{ID: "0123456789abcdef0123456789abcdef", Name: "w", Host: "h", User: "u",
 		KeySealed: "v1:x", PasswordSealed: "v2:y", PlainPassword: "z", PasswordRef: "op://p", KeyRef: "op://k", Rev: 9, LastConnected: &now}
 	b, err := payloadOf(h)
 	if err != nil {
@@ -104,7 +103,7 @@ func TestSyncCarriesUnknownFields(t *testing.T) {
 		t.Fatalf("on b: %v", onB)
 	}
 	hb, _ := w.b.Store.Find(web.ID)
-	_, err = w.b.Store.Update(web.ID, app.Host{Name: hb.Name, Host: hb.Host, Port: 2202, User: hb.User, PasswordMode: hb.PasswordMode, Rev: hb.Rev})
+	_, err = w.b.Store.Update(web.ID, hosts.Host{Name: hb.Name, Host: hb.Host, Port: 2202, User: hb.User, PasswordMode: hb.PasswordMode, Rev: hb.Rev})
 	must(t, err)
 	must(t, w.b.Push())
 	must(t, w.a.Pull())
@@ -114,7 +113,7 @@ func TestSyncCarriesUnknownFields(t *testing.T) {
 	}
 }
 
-func readRaw(t *testing.T, s *app.Store, id string) map[string]json.RawMessage {
+func readRaw(t *testing.T, s *hosts.Store, id string) map[string]json.RawMessage {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(s.Dir, id+".json"))
 	must(t, err)
@@ -133,7 +132,7 @@ func TestSyncDoesNotPushANewerHostFormat(t *testing.T) {
 	writeRaw(t, w.a.Store, web.ID, func(m map[string]any) { m["version"] = 7; m["port"] = "not a number" })
 	h, err := w.a.Store.Find(web.ID)
 	must(t, err)
-	if _, err := payloadOf(*h); !errors.Is(err, app.ErrNewerFormat) {
+	if _, err := payloadOf(*h); !errors.Is(err, record.ErrNewerFormat) {
 		t.Fatalf("payloadOf of a newer host: %v", err)
 	}
 	must(t, w.a.Push())
@@ -204,17 +203,17 @@ func readFileKeys(t *testing.T, path string) map[string]json.RawMessage {
 // (#168)
 func TestPayloadOfNewerHostOpensNoPassword(t *testing.T) {
 	// never the real keychain or home, even when the order breaks again
-	keyring.MockInit()
+	useMemKeychain(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("USERPROFILE", os.Getenv("HOME"))
 	dir := t.TempDir()
-	s := &app.Store{Dir: dir}
+	s := &hosts.Store{Dir: dir}
 	id := "0123456789abcdef0123456789abcdef"
 	raw := `{"version":2,"id":"` + id + `","name":"w","host":"h","user":"u","password_mode":"saved","password_sealed":"v2:not-a-seal"}`
 	must(t, os.WriteFile(filepath.Join(dir, id+".json"), []byte(raw), 0o600))
 	h, err := s.Find(id)
 	must(t, err)
-	if _, err := payloadOf(*h); !errors.Is(err, app.ErrNewerFormat) {
+	if _, err := payloadOf(*h); !errors.Is(err, record.ErrNewerFormat) {
 		t.Fatalf("the password was opened first: %v", err)
 	}
 }

@@ -97,3 +97,15 @@ func AppendKeys(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
 	out.WriteString("\n}")
 	return out.Bytes(), nil
 }
+
+// Extra reads the keys of the JSON object b that are no field of the
+// struct type typ, with the "version" of b, for a file that keeps what a
+// newer sshr wrote
+func Extra(b []byte, typ reflect.Type) (map[string]json.RawMessage, int, error) {
+	format, err := FormatOf(b)
+	if err != nil {
+		return nil, 0, err
+	}
+	extra, err := UnknownKeys(b, JSONKeys(typ))
+	return extra, format, err
+}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"sshr.dev/internal/hosts"
 )
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -126,6 +128,10 @@ func (s *Store) hooks() hostHooks {
 		},
 	}
 }
+
+// Hosts is the host store of s with the hooks of s, for the sync client,
+// a host it imports refreshes the ssh config export as any other change
+func (s *Store) Hosts() *hosts.Store { return s.db() }
 
 // locked runs fn under the lock of the host folder, fn gets a Store whose
 // methods do not lock again
