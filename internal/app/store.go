@@ -31,16 +31,6 @@ var (
 	ErrChanged = errors.New("host_changed")
 )
 
-// Password modes of a host, an empty mode means no password at all, the
-// key file, ssh-agent or ssh config decide
-const (
-	// PasswordSaved keeps the password sealed with the vault key in the
-	// host file, sshr hands it to ssh
-	PasswordSaved = "saved"
-	// PasswordAsk stores nothing, ssh asks on the terminal every time
-	PasswordAsk = "ask"
-)
-
 // ParsePort reads a TCP port: digits only, 1–65535.
 func ParsePort(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
@@ -1125,12 +1115,6 @@ func newID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
-}
-
-// PasswordFromSshr tells whether sshr hands the password to ssh, from the
-// vault or from 1Password
-func (h *Host) PasswordFromSshr() bool {
-	return h.Key == "" && (h.PasswordMode == PasswordSaved || h.PasswordMode == PasswordOnePassword || h.PasswordMode == PasswordBitwarden)
 }
 
 // ParseDestination reads user@host[:port] or ssh://user@host[:port] into a

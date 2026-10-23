@@ -15,10 +15,6 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-// KeyVault is the KeyMode of a host whose private key is stored sealed in
-// its host file instead of a key file on disk
-const KeyVault = "vault"
-
 // ErrKeyPassphrase means the pasted key is protected with a passphrase and
 // none was given
 var ErrKeyPassphrase = errors.New("key_passphrase")
@@ -54,16 +50,6 @@ func prepareVaultKey(h *Host) error {
 	return nil
 }
 
-// KeyFingerprint is the SHA256 fingerprint of a vault key, as ssh-keygen -l
-// shows it, empty when the host has none
-func (h *Host) KeyFingerprint() string {
-	pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(h.KeyPub))
-	if err != nil {
-		return ""
-	}
-	return ssh.FingerprintSHA256(pub)
-}
-
 // pubPath is where the public half of a vault key is written for ssh -i,
 // with IdentitiesOnly it makes ssh offer only this key from the agent
 func (s *Store) pubPath(h *Host) string {
@@ -93,12 +79,6 @@ func (s *Store) vaultKeyArgs(h *Host) []string {
 // authSockOrigEnv keeps the user's SSH_AUTH_SOCK while it points at the
 // agent of a vault key, a jump hop restores it
 const authSockOrigEnv = "SSHR_AUTH_SOCK_ORIG"
-
-// agentKey tells whether the key of h is served by an agent of sshr, a
-// key sealed in sshr or one read from 1Password
-func (h *Host) agentKey() bool {
-	return h.KeyMode == KeyVault || h.KeyMode == KeyOnePassword || h.KeyMode == KeyBitwarden
-}
 
 // loadKey returns the private key of a host that keeps it in sshr or in
 // 1Password

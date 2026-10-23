@@ -9,14 +9,6 @@ import (
 	"time"
 )
 
-// Modes for hosts whose secrets live in Bitwarden, read with the bw CLI on
-// every connect, the reference is the item ID (or a name that finds one
-// item)
-const (
-	PasswordBitwarden = "bitwarden"
-	KeyBitwarden      = "bitwarden"
-)
-
 // ErrNoBW means the Bitwarden CLI (bw) is not installed
 var ErrNoBW = errors.New("no_bw")
 

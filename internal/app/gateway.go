@@ -7,20 +7,9 @@ package app
 // and its command line stays the same, every call checks again, a Host
 // kept in memory moves between networks with its user
 func pickRoute(h *Host) {
-	h.route = ""
+	h.RouteViaGateway(false)
 	if h.Gateway == "" || h.Jump != "" {
 		return
 	}
-	if CheckHealth(h).State == HealthDown {
-		h.route = h.Gateway
-	}
-}
-
-// Via is the jump spec the connection goes through: Jump, or the Gateway
-// once ConnectArgs found the host down directly, empty for a direct one
-func (h *Host) Via() string {
-	if h.Jump != "" {
-		return h.Jump
-	}
-	return h.route
+	h.RouteViaGateway(CheckHealth(h).State == HealthDown)
 }

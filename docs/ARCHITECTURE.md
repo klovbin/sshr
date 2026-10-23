@@ -54,7 +54,7 @@ Rules that follow:
 
 | Area | Files |
 |----|----|
-| hosts and their store | `store.go` (Host, Store, Add, Update, Import, FromOtherDevice, ListAll, Find), `tags.go`, `summary.go`, `version.go` |
+| hosts and their store | `store.go` (Host, Store, Add, Update, Import, FromOtherDevice, ListAll, Find), `host.go` (the methods of Host and the password and key modes), `tags.go`, `summary.go`, `version.go` |
 | secrets | `vault.go` (vault key in the keychain, seal and unseal), `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords), `onepassword.go`, `bitwarden.go`, `manager.go`, `agent.go`, `keyfile.go` |
 | ssh command lines | `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `forward.go`, `copy.go`, `remote.go` |
 | reachability | `health.go`, a TCP connect and the SSH banner in process, no ssh |

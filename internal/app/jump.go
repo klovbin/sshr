@@ -154,7 +154,7 @@ func (s *Store) connectArgs(h *Host, check bool) ([]string, error) {
 	if err := checkAddress(h.Host); err != nil {
 		return nil, err
 	}
-	h.route = ""
+	h.RouteViaGateway(false)
 	if check {
 		pickRoute(h)
 	}

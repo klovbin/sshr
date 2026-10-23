@@ -42,14 +42,6 @@ func SSHArgs(h *Host) []string {
 	return append(args, "-p", strconv.Itoa(h.Port))
 }
 
-// Dest is the user@host argument for ssh.
-func (h *Host) Dest() string {
-	if h.User == "" {
-		return h.Host
-	}
-	return h.User + "@" + h.Host
-}
-
 // UploadImage copies data to ~/.cache/sshr/pasted/ on the host over a
 // separate ssh and returns the path there. The file is removed after
 // UploadTTL by a detached sleep; each upload also sweeps older files in case

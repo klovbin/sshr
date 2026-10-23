@@ -13,13 +13,6 @@ import (
 	"time"
 )
 
-// Modes for hosts whose secrets live in 1Password, read with the op CLI on
-// every connect and never kept on this machine
-const (
-	PasswordOnePassword = "1password"
-	KeyOnePassword      = "1password"
-)
-
 // ErrNoOP means the 1Password CLI (op) is not installed
 var ErrNoOP = errors.New("no_op")
 
