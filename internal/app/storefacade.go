@@ -1,3 +1,7 @@
+// Package app is the core the front ends use: the Store over package
+// hosts, the ssh command lines, the password managers, the ssh config
+// import and export, it sets the system keychain and the passphrase
+// prompt of package vault
 package app
 
 import (

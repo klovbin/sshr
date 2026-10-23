@@ -1,4 +1,6 @@
-// Package app holds local vault storage and app settings (no UI).
+// Package hosts holds the hosts and their files: Host, the store with its
+// lock, the checks, the records that keep fields of newer versions, it
+// runs no program, the steps that do come as Hooks
 package hosts
 
 import (
@@ -146,13 +148,13 @@ type Store struct {
 // Hooks are the steps of a change that run programs or touch other
 // files, a nil hook is skipped
 type Hooks struct {
-	// agentKey turns AgentKey into the public key, it asks the agent
+	// AgentKey turns Host.AgentKey into the public key, it asks the agent
 	AgentKey func(*Host) error
-	// keyPub reads the public half of a key kept in a password manager
+	// KeyPub reads the public half of a key kept in a password manager
 	KeyPub func(*Host) error
-	// storeSecret puts a password into 1Password before the host is saved
+	// StoreSecret puts a password into 1Password before the host is saved
 	StoreSecret func(*Host) error
-	// changed runs after a save or a removal, with the held store
+	// Changed runs after a save or a removal, with the held store
 	Changed func(tx *Store)
 }
 
