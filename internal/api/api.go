@@ -86,8 +86,8 @@ func New(store *app.Store, opts Options) *Server {
 	mux.HandleFunc("DELETE /v1/hosts/{host}", a.deleteHost)
 	mux.HandleFunc("GET /v1/hosts/{host}/connect", a.connect)
 	mux.HandleFunc("POST /v1/hosts/{host}/upload", a.limit(a.upload))
-	mux.HandleFunc("POST /v1/hosts/{host}/run", a.limit(a.run))
-	mux.HandleFunc("POST /v1/hosts/{host}/tunnels", a.limit(a.openTunnel))
+	mux.HandleFunc("POST /v1/hosts/{host}/run", a.run)
+	mux.HandleFunc("POST /v1/hosts/{host}/tunnels", a.openTunnel)
 	mux.HandleFunc("GET /v1/tunnels", a.listTunnels)
 	mux.HandleFunc("DELETE /v1/tunnels/{id}", a.closeTunnel)
 	return &Server{Handler: a.guard(mux), a: a}
@@ -117,19 +117,37 @@ type api struct {
 // would take gigabytes
 const maxRunning = 8
 
-// limit runs next in a free slot, a request waits for one until its client
-// goes away
+// limit runs next in a free slot, for an upload whose body is held in
+// memory, the slot comes before the body is read
 func (a *api) limit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case a.slots <- struct{}{}:
-		case <-r.Context().Done():
-			fail(w, http.StatusServiceUnavailable, errors.New("too many uploads and commands at once"))
+		release, ok := a.take(w, r)
+		if !ok {
 			return
 		}
-		defer func() { <-a.slots }()
+		defer release()
 		next(w, r)
 	}
+}
+
+// take waits for a free slot until the client goes away and answers 503
+// itself when it does, a client gone while it waited does not get its
+// action run, commands and tunnels take it after their small body is read
+// so a stalled body holds no slot
+func (a *api) take(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	select {
+	case a.slots <- struct{}{}:
+	case <-r.Context().Done():
+		fail(w, http.StatusServiceUnavailable, errors.New("too many uploads and commands at once"))
+		return nil, false
+	}
+	release := func() { <-a.slots }
+	if r.Context().Err() != nil {
+		release()
+		fail(w, http.StatusServiceUnavailable, errors.New("the client went away while it waited"))
+		return nil, false
+	}
+	return release, true
 }
 
 // guard checks the token and refuses requests a browser page could send:
@@ -385,6 +403,11 @@ func (a *api) run(w http.ResponseWriter, r *http.Request) {
 	}
 	// quoted, a carriage return or an escape sequence in the command cannot
 	// rewrite lines in the terminal or log
+	release, ok := a.take(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	fmt.Fprintf(logOut, "sshr serve: run on %q: %q\n", h.Name, in.Command)
 	end := a.begin(w, r, "run", h, in.Command)
 	if end == nil {
@@ -433,6 +456,11 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 	if len(in.Forwards) == 0 {
 		in.Forwards = []string{"all"}
 	}
+	release, ok := a.take(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	fs, err := app.FindForwards(h.Forwards, in.Forwards)
 	if err != nil || len(fs) == 0 {
 		if err == nil {

@@ -60,7 +60,10 @@ func cmdServe(store *app.Store, args []string) {
 	srv := api.New(store, opts)
 	defer srv.Close()
 	// a client that never finishes its headers does not keep a connection
-	hs := &http.Server{Handler: peerGuard(srv), ConnContext: peerContext, ReadHeaderTimeout: 10 * time.Second}
+	hs := &http.Server{Handler: peerGuard(srv), ConnContext: peerContext, ReadHeaderTimeout: 10 * time.Second,
+		// an upload of 100 MiB takes well under a second on loopback, a body
+		// that stalls longer does not keep its slot
+		ReadTimeout: 2 * time.Minute}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {

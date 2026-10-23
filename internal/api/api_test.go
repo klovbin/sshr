@@ -210,3 +210,15 @@ func TestAPIRunPolicy(t *testing.T) {
 		t.Fatalf("run = %d %s", code, out)
 	}
 }
+
+// a request whose client went away while it waited for a slot does not
+// run (#207)
+func TestAPIGoneClientDoesNotRun(t *testing.T) {
+	a := &api{slots: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec := httptest.NewRecorder()
+	if _, ok := a.take(rec, httptest.NewRequest("POST", "/v1/hosts/web/run", nil).WithContext(ctx)); ok || rec.Code != 503 || len(a.slots) != 0 {
+		t.Fatalf("a gone client got a slot: %v %d %d", ok, rec.Code, len(a.slots))
+	}
+}
