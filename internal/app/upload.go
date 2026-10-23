@@ -120,8 +120,8 @@ func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (strin
 	// on as the answer
 	out := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	remote := strings.TrimSpace(out[len(out)-1])
-	if err == nil && strings.HasPrefix(remote, "/") && strings.HasSuffix(remote, "/.cache/sshr/pasted/"+name) &&
-		strings.IndexFunc(remote, unicode.IsControl) < 0 {
+	if err == nil && len(remote) <= uploadPathMax && strings.HasPrefix(remote, "/") &&
+		strings.HasSuffix(remote, "/.cache/sshr/pasted/"+name) && strings.IndexFunc(remote, unicode.IsControl) < 0 {
 		return remote, nil
 	}
 	msg := strings.TrimSpace(stderr.String())
@@ -135,6 +135,10 @@ func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (strin
 	}
 	return "", fmt.Errorf("upload to %s failed: %s", h.Name, msg)
 }
+
+// uploadPathMax caps the path a server answers, a home folder is short,
+// a long answer carries something else before the file name
+const uploadPathMax = 512
 
 // uploadExtRe is what an upload's file extension may be
 var uploadExtRe = regexp.MustCompile(`^[a-z0-9]{1,10}$`)
