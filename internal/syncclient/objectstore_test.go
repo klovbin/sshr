@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"sshr.dev/internal/hosts"
 )
@@ -185,4 +186,25 @@ func TestObjectBackendEnvelopeEpochs(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), `"epoch":2`) {
 		t.Fatalf("envelope %s %v", b, err)
 	}
+}
+
+// a manifest stored under a newer name with the body of an older one ends
+// the pull with an error, it does not loop (#224)
+func TestManifestThatDoesNotMoveOn(t *testing.T) {
+	store, a, b := objWorld(t)
+	ob := ObjectBackend{Store: store}
+	last, body, err := ob.Head()
+	must(t, err)
+	must(t, store.Put(manifestName(last+1), body))
+	done := make(chan error, 1)
+	go func() { done <- b.Pull() }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "again") {
+			t.Fatalf("pull = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the pull loops on a manifest that does not move on")
+	}
+	_ = a
 }

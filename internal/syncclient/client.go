@@ -733,12 +733,24 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 		if len(page) == 0 {
 			break
 		}
-		out = append(out, page...)
-		var m syncproto.Manifest
-		if err := json.Unmarshal(page[len(page)-1].Body, &m); err != nil {
-			return nil, err
+		// every change follows the one before, a page that does not move
+		// on would be asked for again and again, a device that joins may
+		// start where the kept history starts
+		for _, sm := range page {
+			var m syncproto.Manifest
+			if err := json.Unmarshal(sm.Body, &m); err != nil {
+				return nil, err
+			}
+			joining := len(out) == 0 && after == 0 && c.st.Counter == 0 && c.st.Approver != ""
+			switch {
+			case m.Counter <= after:
+				return nil, fmt.Errorf("the server sent change %d again after %d, the history does not add up", m.Counter, after)
+			case m.Counter != after+1 && !joining:
+				return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", after+1, m.Counter-1)
+			}
+			after = m.Counter
+			out = append(out, sm)
 		}
-		after = m.Counter
 	}
 	if len(out) == 0 && c.st.Counter > 0 {
 		cur, _, err := c.backend().Head()
