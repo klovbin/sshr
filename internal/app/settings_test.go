@@ -1,6 +1,8 @@
 package app
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -132,5 +134,38 @@ func TestAnEmptyAccountListIsNoChange(t *testing.T) {
 	}
 	if got, _ := LoadSettings(); len(got.OPAccounts) != 2 || !got.Mosh {
 		t.Fatalf("accounts %+v mosh %v, want both accounts kept and mosh on", got.OPAccounts, got.Mosh)
+	}
+}
+
+// a key a newer sshr wrote into settings.json survives a save of this one,
+// a settings file of a newer format is not written (#97)
+func TestSettingsKeepKeysItDoesNotKnow(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	path, err := settingsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(path, []byte(`{"lang":"en","future":{"x":1}}`), 0o600)
+	s, err := LoadSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Mosh = true
+	if err := SaveSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveSettings(Settings{Lang: "ru"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	var m map[string]json.RawMessage
+	json.Unmarshal(b, &m)
+	if string(m["future"]) != `{"x":1}` || string(m["lang"]) != `"ru"` {
+		t.Fatalf("settings.json: %s", b)
+	}
+	os.WriteFile(path, []byte(`{"lang":"en","version":5}`), 0o600)
+	if err := SaveSettings(Settings{Lang: "ru"}); !errors.Is(err, ErrNewerFormat) {
+		t.Errorf("a newer settings file was written over: %v", err)
 	}
 }
