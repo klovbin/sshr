@@ -719,13 +719,17 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 		in.Key, in.Agent = "", ""
 		notes = append(notes, "the host now points elsewhere ("+in.Dest()+"), its key file and agent are not used for it, ssh uses its default keys, set them again here if that is right")
 	}
-	if same && local.KeyMode == in.KeyMode {
-		if local.Key != "" {
-			in.Key = local.Key
+	// for a host that keeps its destination they come from this machine,
+	// empty ones too, another device does not pick which key ssh offers
+	if same {
+		if in.KeyMode == KeyAgent && local.KeyMode != KeyAgent {
+			in.KeyMode, in.KeyPub = "", ""
+			notes = append(notes, "the host uses an ssh agent on the other device, the agent is set on each machine, until then ssh uses its default keys")
 		}
-		if local.Agent != "" {
-			in.Agent = local.Agent
+		if in.KeyMode == KeyAgent {
+			in.KeyPub = local.KeyPub
 		}
+		in.Key, in.Agent = local.Key, local.Agent
 	}
 	if name := managerName(in.PasswordMode); name != "" {
 		if same && local.PasswordMode == in.PasswordMode && local.PasswordRef != "" {

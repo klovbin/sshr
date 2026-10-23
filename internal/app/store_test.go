@@ -306,6 +306,21 @@ func TestFromOtherDeviceKeyFileAndAgent(t *testing.T) {
 	if out.Agent != "" || out.KeyMode != "" || out.KeyPub != "" {
 		t.Errorf("a moved host kept its agent: %+v", out)
 	}
+	// a host on the default keys here does not take a key file or an agent
+	// from another device (#199)
+	plain := &Host{Host: "10.0.0.5", User: "deploy", Port: 22}
+	out, _ = FromOtherDevice(Host{Host: "10.0.0.5", User: "deploy", Port: 22, Key: "~/.ssh/id_work"}, plain)
+	if out.Key != "" {
+		t.Errorf("a key file came from another device: %q", out.Key)
+	}
+	out, notes = FromOtherDevice(Host{Host: "10.0.0.5", User: "deploy", Port: 22, KeyMode: KeyAgent, Agent: "/tmp/evil.sock", KeyPub: "ssh-ed25519 CCC"}, plain)
+	if out.KeyMode != "" || out.Agent != "" || out.KeyPub != "" || len(notes) == 0 {
+		t.Errorf("an agent came from another device: %+v %v", out, notes)
+	}
+	out, _ = FromOtherDevice(Host{Host: "10.0.0.5", User: "deploy", Port: 22, KeyMode: KeyAgent, Agent: "/run/mine.sock", KeyPub: "ssh-ed25519 CCC"}, agentLocal)
+	if out.KeyPub != "ssh-ed25519 AAA" {
+		t.Errorf("the agent key came from another device: %q", out.KeyPub)
+	}
 	out, _ = FromOtherDevice(Host{Host: "10.0.0.9", User: "deploy", Port: 22, Key: "~/.ssh/id_ed25519"}, nil)
 	if out.Key != "~/.ssh/id_ed25519" {
 		t.Errorf("a new host lost its key file: %q", out.Key)
