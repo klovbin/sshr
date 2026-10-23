@@ -794,8 +794,10 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 		var m syncproto.Manifest
 		json.Unmarshal(out[0].Body, &m)
 		// a trim keeps keepHistory changes, a shorter history with a hole
-		// is a server that hides changes
-		if len(out) >= keepHistory {
+		// is a server that hides changes, so is a long one whose last
+		// change no trusted device signed, padding costs nothing
+		last := out[len(out)-1]
+		if len(out) >= keepHistory && verifySignature(&last, c.st.Trusted) == nil {
 			return nil, fmt.Errorf("the sync keeps only the last %d changes and no longer has changes %d to %d, this device fell behind, run sshr sync leave and join again", keepHistory, cut, m.Counter-1)
 		}
 		return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", cut, m.Counter-1)

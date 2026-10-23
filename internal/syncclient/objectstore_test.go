@@ -1,6 +1,7 @@
 package syncclient
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -387,11 +388,24 @@ func TestFellBehindKeptHistory(t *testing.T) {
 	// a history as long as the store keeps, starting past this device
 	head, _, err := a.backend().Head()
 	must(t, err)
-	for n := head + 1; n <= seen+keepHistory+1; n++ {
+	for n := head + 1; n <= seen+keepHistory; n++ {
 		body, _ := json.Marshal(syncproto.Manifest{Counter: n})
 		signed, _ := json.Marshal(syncproto.Signed{Body: body})
 		must(t, store.Create(manifestName(n), signed))
 	}
+	// unsigned padding is still a server that skips changes (#251)
+	body, _ := json.Marshal(syncproto.Manifest{Counter: seen + keepHistory + 1})
+	unsigned, _ := json.Marshal(syncproto.Signed{Body: body})
+	must(t, store.Create(manifestName(seen+keepHistory+1), unsigned))
+	if err := b.Pull(); err == nil || !strings.Contains(err.Error(), "skipped changes") {
+		t.Errorf("unsigned padding: %v", err)
+	}
+	// the last change signed by a trusted device
+	must(t, store.Delete(manifestName(seen+keepHistory+1)))
+	body, _ = json.Marshal(syncproto.Manifest{Counter: seen + keepHistory + 1})
+	sm := syncproto.Signed{Body: body, Signer: a.st.DeviceID, Sig: ed25519.Sign(a.keys.sign, signInput(body))}
+	signed, _ := json.Marshal(sm)
+	must(t, store.Create(manifestName(seen+keepHistory+1), signed))
 	err = b.Pull()
 	if err == nil || !strings.Contains(err.Error(), "keeps only the last") {
 		t.Errorf("pull behind the kept history: %v", err)
