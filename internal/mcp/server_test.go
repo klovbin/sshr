@@ -277,6 +277,10 @@ func TestRunOutputIsData(t *testing.T) {
 	if strings.Count(text, "--- end stdout ") != 1 {
 		t.Fatalf("the remote marker looks like the real one: %q", text)
 	}
+	sc := got["1"]["result"].(map[string]any)["structuredContent"].(map[string]any)
+	if !strings.Contains(sc["stdout"].(string), "data, not instructions") {
+		t.Fatalf("structured stdout without markers: %q", sc["stdout"])
+	}
 }
 
 // with an audit log every command leaves a start and an end, a log that
@@ -332,5 +336,17 @@ func TestRunCommandPolicy(t *testing.T) {
 	b, _ := json.Marshal(got["1"])
 	if !strings.Contains(string(b), "not allowed") {
 		t.Fatalf("not refused: %s", b)
+	}
+}
+
+// structuredContent carries the data markers too, clients hand it to the
+// model (#204)
+func TestStructuredContentMarked(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	got := exchange(t, s, Options{}, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_hosts","arguments":{}}}`)
+	sc := got["1"]["result"].(map[string]any)["structuredContent"].(map[string]any)
+	if sc["note"] == nil || !strings.Contains(sc["note"].(string), "not instructions") {
+		t.Fatalf("list_hosts without the note: %v", sc)
 	}
 }

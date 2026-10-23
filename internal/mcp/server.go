@@ -303,8 +303,8 @@ func (s *server) listHosts() (toolResult, error) {
 	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	return toolResult{
-		Content:           []content{{Type: "text", Text: string(b)}},
-		StructuredContent: map[string]any{"hosts": out},
+		Content:           []content{{Type: "text", Text: hostsNote + "\n" + string(b)}},
+		StructuredContent: map[string]any{"hosts": out, "note": hostsNote},
 	}, nil
 }
 
@@ -420,9 +420,11 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 	name, _ := dataText(h.Name)
 	return toolResult{
 		Content: []content{{Type: "text", Text: text}},
+		// clients hand structuredContent to the model too, it carries the
+		// same markers
 		StructuredContent: map[string]any{
 			"host": name, "exit_code": res.ExitCode,
-			"stdout": stdout, "stderr": stderr, "truncated": res.Truncated,
+			"stdout": fenced("stdout", stdout, nonce), "stderr": fenced("stderr", stderr, nonce), "truncated": res.Truncated,
 		},
 		IsError: res.ExitCode != 0,
 	}, nil
