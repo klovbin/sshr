@@ -52,7 +52,7 @@ func prepareVaultKey(h *Host) error {
 
 // pubPath is where the public half of a vault key is written for ssh -i,
 // with IdentitiesOnly it makes ssh offer only this key from the agent
-func (s *Store) pubPath(h *Host) string {
+func (s *hostStore) pubPath(h *Host) string {
 	return filepath.Join(s.Dir, h.ID+".pub")
 }
 
@@ -172,7 +172,7 @@ func attachAgentKey(cmd *exec.Cmd, h *Host) (func(), error) {
 
 // writePub writes the public half of a vault key next to the host file,
 // it is not secret
-func (s *Store) writePub(h *Host) error {
+func (s *hostStore) writePub(h *Host) error {
 	path := s.pubPath(h)
 	if !h.agentKey() && !(h.KeyMode == KeyAgent && h.KeyPub != "") {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

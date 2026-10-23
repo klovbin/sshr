@@ -202,7 +202,7 @@ func TestCleanHostRunsNoProgram(t *testing.T) {
 		{Name: "a", Host: "h", User: "u", KeyMode: KeyOnePassword, KeyRef: "op://v/item/private key"},
 		{Name: "b", Host: "h", User: "u", KeyMode: KeyBitwarden, KeyRef: "0123456789abcdef0123456789abcdef"},
 	} {
-		got, err := cleanHost(h)
+		got, err := cleanHost(h, prepareAgentKey)
 		if err != nil || got.KeyPub != "" {
 			t.Errorf("%s: %v, key pub %q", h.Name, err, got.KeyPub)
 		}

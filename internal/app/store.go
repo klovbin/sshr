@@ -142,9 +142,32 @@ type Store struct {
 	// turns the export off, it is rewritten on every change once installed
 	SSHConfigOut string
 
-	// held is set on the copy of the Store that locked hands out, its
+	// tx is the held host store of a Store that Locked hands out, its
 	// methods do not take the lock again
+	tx *hostStore
+}
+
+// hostStore reads and writes the host files, what a change needs from
+// the parts that run programs comes through hooks, so it runs none itself
+type hostStore struct {
+	Dir   string
+	hooks hostHooks
+	// held is set on the copy that locked hands out, its methods do not
+	// take the lock again
 	held bool
+}
+
+// hostHooks are the steps of a change that run programs or touch other
+// files, a nil hook is skipped
+type hostHooks struct {
+	// agentKey turns AgentKey into the public key, it asks the agent
+	agentKey func(*Host) error
+	// keyPub reads the public half of a key kept in a password manager
+	keyPub func(*Host) error
+	// storeSecret puts a password into 1Password before the host is saved
+	storeSecret func(*Host) error
+	// changed runs after a save or a removal, with the held store
+	changed func(tx *hostStore)
 }
 
 // hostLockWait is how long a save waits for another sshr process, a save
@@ -155,7 +178,7 @@ const hostLockWait = 30 * time.Second
 // a write of hosts by one process never interleave with another process,
 // fn gets a Store whose methods do not lock again, the lock file sits in
 // the host folder, List reads only .json files
-func (s *Store) locked(fn func(tx *Store) error) error {
+func (s *hostStore) locked(fn func(tx *hostStore) error) error {
 	if s.held {
 		return fn(s)
 	}
@@ -171,7 +194,7 @@ func (s *Store) locked(fn func(tx *Store) error) error {
 
 // Locked runs fn under the lock of the host folder, see locked, the sync
 // reads a host, decides and writes it in one go with it
-func (s *Store) Locked(fn func(tx *Store) error) error { return s.locked(fn) }
+func (s *hostStore) Locked(fn func(tx *hostStore) error) error { return s.locked(fn) }
 
 // DefaultStore creates ~/.sshr/vault/hosts if needed.
 func DefaultStore() (*Store, error) {
@@ -192,14 +215,14 @@ func DefaultStore() (*Store, error) {
 // destination (v1 to v2), until then a host file whose address is changed
 // outside sshr would still open its password, it touches the keychain only
 // when such a host exists and leaves a host as it is when that fails
-func (s *Store) upgradeSeals() {
-	s.locked(func(tx *Store) error {
+func (s *hostStore) upgradeSeals() {
+	s.locked(func(tx *hostStore) error {
 		tx.upgradeSealsLocked()
 		return nil
 	})
 }
 
-func (s *Store) upgradeSealsLocked() {
+func (s *hostStore) upgradeSealsLocked() {
 	hosts, err := s.List()
 	if err != nil {
 		return
@@ -248,20 +271,20 @@ func (s *Store) upgradeSealsLocked() {
 }
 
 // Add saves a new host, ID and CreatedAt are set here
-func (s *Store) Add(in Host) (out *Host, err error) {
-	err = s.locked(func(tx *Store) error {
+func (s *hostStore) Add(in Host) (out *Host, err error) {
+	err = s.locked(func(tx *hostStore) error {
 		out, err = tx.add(in)
 		return err
 	})
 	return out, err
 }
 
-func (s *Store) add(in Host) (*Host, error) {
-	h, err := cleanHost(in)
+func (s *hostStore) add(in Host) (*Host, error) {
+	h, err := cleanHost(in, s.hooks.agentKey)
 	if err != nil {
 		return nil, err
 	}
-	if err := fillKeyPub(&h); err != nil {
+	if err := s.keyPub(&h); err != nil {
 		return nil, err
 	}
 	if err := needSecret(&h); err != nil {
@@ -284,7 +307,7 @@ func (s *Store) add(in Host) (*Host, error) {
 var userRe = regexp.MustCompile(`^[A-Za-z0-9._@\\][A-Za-z0-9._@\\-]*$`)
 
 // cleanHost trims and checks the fields of a host before it is saved
-func cleanHost(h Host) (Host, error) {
+func cleanHost(h Host, agentKey func(*Host) error) (Host, error) {
 	h.Name = strings.TrimSpace(h.Name)
 	h.Host = strings.TrimSpace(h.Host)
 	h.User = strings.TrimSpace(h.User)
@@ -340,8 +363,13 @@ func cleanHost(h Host) (Host, error) {
 		}
 	case KeyAgent:
 		h.Key, h.KeyData, h.KeyPassphrase, h.KeySealed = "", nil, "", ""
-		if err := prepareAgentKey(&h); err != nil {
+		if err := checkAgent(&h); err != nil {
 			return h, err
+		}
+		if agentKey != nil {
+			if err := agentKey(&h); err != nil {
+				return h, err
+			}
 		}
 	case KeyOnePassword:
 		h.Key, h.KeyData, h.KeyPassphrase, h.KeySealed = "", nil, "", ""
@@ -408,14 +436,14 @@ func cleanHost(h Host) (Host, error) {
 	return h, nil
 }
 
-func (s *Store) List() ([]Host, error) {
+func (s *hostStore) List() ([]Host, error) {
 	hosts, _, err := s.ListAll()
 	return hosts, err
 }
 
 // ListAll is List that also names the IDs of host files that exist but do
 // not load, the sync must not take such a host for a deleted one
-func (s *Store) ListAll() ([]Host, []string, error) {
+func (s *hostStore) ListAll() ([]Host, []string, error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -455,7 +483,7 @@ func (s *Store) ListAll() ([]Host, []string, error) {
 // Find resolves a query by exact ID, then name, then host address, then ID
 // prefix. A tier with several matches is an error: picking one would let rm or
 // connect hit the wrong server.
-func (s *Store) Find(query string) (*Host, error) {
+func (s *hostStore) Find(query string) (*Host, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, ErrNotFound
@@ -489,11 +517,11 @@ func (s *Store) Find(query string) (*Host, error) {
 	return nil, ErrNotFound
 }
 
-func (s *Store) Delete(id string) error {
-	return s.locked(func(tx *Store) error { return tx.delete(id) })
+func (s *hostStore) Delete(id string) error {
+	return s.locked(func(tx *hostStore) error { return tx.delete(id) })
 }
 
-func (s *Store) delete(id string) error {
+func (s *hostStore) delete(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ErrNotFound
@@ -506,7 +534,7 @@ func (s *Store) delete(id string) error {
 		return err
 	}
 	os.Remove(filepath.Join(s.Dir, id+".pub"))
-	s.hostsChanged()
+	s.changed()
 	return nil
 }
 
@@ -515,8 +543,8 @@ func (s *Store) delete(id string) error {
 // Rev in in that is not the saved one returns ErrChanged and saves nothing,
 // a copy read before a sync or another save would undo it, in.Rev 0
 // overwrites without the check
-func (s *Store) Update(id string, in Host) (out *Host, err error) {
-	err = s.locked(func(tx *Store) error {
+func (s *hostStore) Update(id string, in Host) (out *Host, err error) {
+	err = s.locked(func(tx *hostStore) error {
 		out, err = tx.update(id, in, false)
 		return err
 	})
@@ -525,8 +553,8 @@ func (s *Store) Update(id string, in Host) (out *Host, err error) {
 
 // SetGateway sets the gateway of host id, empty removes it, Update keeps
 // the gateway because a form without that field would erase it
-func (s *Store) SetGateway(id, gateway string) (out *Host, err error) {
-	err = s.locked(func(tx *Store) error {
+func (s *hostStore) SetGateway(id, gateway string) (out *Host, err error) {
+	err = s.locked(func(tx *hostStore) error {
 		cur, err := tx.Find(id)
 		if err != nil {
 			return err
@@ -539,7 +567,7 @@ func (s *Store) SetGateway(id, gateway string) (out *Host, err error) {
 	return out, err
 }
 
-func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
+func (s *hostStore) update(id string, in Host, setGateway bool) (*Host, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, ErrNotFound
@@ -557,7 +585,7 @@ func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 			in.Gateway = ""
 		}
 	}
-	h, err := cleanHost(in)
+	h, err := cleanHost(in, s.hooks.agentKey)
 	if err != nil {
 		return nil, err
 	}
@@ -595,7 +623,7 @@ func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 	if h.PasswordMode == PasswordOnePassword && h.PasswordRef == "" {
 		h.PasswordRef = cur.PasswordRef
 	}
-	if err := fillKeyPub(&h); err != nil {
+	if err := s.keyPub(&h); err != nil {
 		return nil, err
 	}
 	if err := needSecret(&h); err != nil {
@@ -617,15 +645,15 @@ func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 // creation time, a password in it is sealed with this machine's vault key,
 // with no keychain the host is not written rather than written in the
 // clear, a private key stored in sshr never travels, the local one is kept
-func (s *Store) Import(in Host) (out *Host, err error) {
-	err = s.locked(func(tx *Store) error {
+func (s *hostStore) Import(in Host) (out *Host, err error) {
+	err = s.locked(func(tx *hostStore) error {
 		out, err = tx.importHost(in)
 		return err
 	})
 	return out, err
 }
 
-func (s *Store) importHost(in Host) (*Host, error) {
+func (s *hostStore) importHost(in Host) (*Host, error) {
 	id := strings.TrimSpace(in.ID)
 	if !validID(id) {
 		return nil, fmt.Errorf("bad host id %q", id)
@@ -663,7 +691,7 @@ func (s *Store) importHost(in Host) (*Host, error) {
 	if strings.TrimSpace(in.Jump) != "" {
 		in.Gateway = ""
 	}
-	h, err := cleanHost(in)
+	h, err := cleanHost(in, s.hooks.agentKey)
 	if err != nil {
 		return nil, err
 	}
@@ -751,11 +779,11 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 
 // MarkConnected records that a session to host id ended after ssh had
 // opened it, recent hosts are listed first with sshr list --recent
-func (s *Store) MarkConnected(id string) error {
-	return s.locked(func(tx *Store) error { return tx.markConnected(id) })
+func (s *hostStore) MarkConnected(id string) error {
+	return s.locked(func(tx *hostStore) error { return tx.markConnected(id) })
 }
 
-func (s *Store) markConnected(id string) error {
+func (s *hostStore) markConnected(id string) error {
 	h, err := s.Find(id)
 	if err != nil {
 		return err
@@ -853,15 +881,15 @@ func managerName(mode string) string {
 // Duplicate saves a copy of host id under a new ID and name, its saved
 // password and stored key are sealed again for the new ID, the sync keeps
 // the losing side of a conflict this way
-func (s *Store) Duplicate(id, name string) (out *Host, err error) {
-	err = s.locked(func(tx *Store) error {
+func (s *hostStore) Duplicate(id, name string) (out *Host, err error) {
+	err = s.locked(func(tx *hostStore) error {
 		out, err = tx.duplicate(id, name)
 		return err
 	})
 	return out, err
 }
 
-func (s *Store) duplicate(id, name string) (*Host, error) {
+func (s *hostStore) duplicate(id, name string) (*Host, error) {
 	cur, err := s.Find(id)
 	if err != nil {
 		return nil, err
@@ -927,6 +955,14 @@ func checkJump(jump, name string) (string, error) {
 		}
 	}
 	return jump, nil
+}
+
+// keyPub runs the keyPub hook
+func (s *hostStore) keyPub(h *Host) error {
+	if s.hooks.keyPub == nil {
+		return nil
+	}
+	return s.hooks.keyPub(h)
 }
 
 // fillKeyPub reads the public half of a key kept in 1Password or Bitwarden
@@ -1070,7 +1106,7 @@ func Unlock(h *Host) error {
 	return nil
 }
 
-func (s *Store) save(h *Host) error {
+func (s *hostStore) save(h *Host) error {
 	// a host of a newer format is refused before anything leaves the
 	// process, a 1Password item made for a file that is then not written
 	// would be left behind
@@ -1083,8 +1119,10 @@ func (s *Store) save(h *Host) error {
 	if err := sealKey(h); err != nil {
 		return err
 	}
-	if err := s.opStorePassword(h); err != nil {
-		return err
+	if s.hooks.storeSecret != nil {
+		if err := s.hooks.storeSecret(h); err != nil {
+			return err
+		}
 	}
 	b, err := encodeHost(h)
 	if err != nil {
@@ -1097,8 +1135,15 @@ func (s *Store) save(h *Host) error {
 	if err := s.writePub(h); err != nil {
 		return err
 	}
-	s.hostsChanged()
+	s.changed()
 	return nil
+}
+
+// changed runs the changed hook with this held store
+func (s *hostStore) changed() {
+	if s.hooks.changed != nil {
+		s.hooks.changed(s)
+	}
 }
 
 // hostsChanged rewrites the ssh config export when it is installed, the
@@ -1157,7 +1202,7 @@ func ParseDestination(s string) (Host, error) {
 		}
 		host, port = h, n
 	}
-	h, err := cleanHost(Host{Host: host, User: user, Port: port})
+	h, err := cleanHost(Host{Host: host, User: user, Port: port}, nil)
 	if err != nil {
 		return Host{}, err
 	}
