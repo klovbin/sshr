@@ -337,7 +337,7 @@ func SealFor(plain []byte, hostID, field, dest string) (string, error) {
 }
 
 // UnsealFor opens a value of SealFor for dest, and an older v1 value made
-// by seal without a destination
+// by Seal without a destination
 func UnsealFor(blob, hostID, field, dest string) ([]byte, error) {
 	if raw, ok := strings.CutPrefix(blob, SealPrefix2); ok {
 		return UnsealRaw(raw, sealAAD(hostID, field+"\x00"+dest))
@@ -345,7 +345,7 @@ func UnsealFor(blob, hostID, field, dest string) ([]byte, error) {
 	return Unseal(blob, hostID, field)
 }
 
-// seal encrypts plain with XChaCha20-Poly1305 under the vault key
+// Seal encrypts plain with XChaCha20-Poly1305 under the vault key
 func Seal(plain []byte, hostID, field string) (string, error) {
 	out, err := SealRaw(plain, sealAAD(hostID, field))
 	if err != nil {
@@ -375,7 +375,7 @@ func SealRaw(plain, aad []byte) (string, error) {
 // keychain was reset or the host file was copied from another machine
 var ErrSealBroken = errors.New("sealed_broken")
 
-// unseal opens a value made by seal
+// Unseal opens a value made by Seal
 func Unseal(blob, hostID, field string) ([]byte, error) {
 	raw, ok := strings.CutPrefix(blob, SealPrefix)
 	if !ok {
