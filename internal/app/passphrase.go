@@ -282,8 +282,13 @@ func UseKeychainVault(secretNames []string) error {
 	if err != nil {
 		return err
 	}
-	// another key in the keychain sealed other secrets, it is not replaced
-	if other, ok, err := getVaultKey(); err == nil && ok && !bytes.Equal(other, key) {
+	// another key in the keychain sealed other secrets, it is not replaced,
+	// a keychain that cannot say what it holds is not written either
+	other, ok, err := getVaultKey()
+	if err != nil {
+		return err
+	}
+	if ok && !bytes.Equal(other, key) {
 		return fmt.Errorf("%w: the keychain holds another vault key, it may have sealed secrets of its own, remove the keychain item sshr/vault-key first if it is not needed", ErrVaultKeyLost)
 	}
 	if err := SecretSet(keyringUser, key); err != nil {

@@ -476,3 +476,26 @@ func TestSealedSecretsHereReadsFields(t *testing.T) {
 		t.Error("a sealed password was missed")
 	}
 }
+
+// a keychain whose vault key does not read is not written over (#192)
+func TestUseKeychainKeepsKeyThatDoesNotRead(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetVaultPassphrase(pass, nil); err != nil {
+		t.Fatal(err)
+	}
+	other := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	keyring.Set(keyringService, keyringUser, other)
+	old := keychain
+	keychain = pickyKeychain{old, map[string]bool{keyringUser: true}}
+	t.Cleanup(func() { keychain = old })
+	if err := UseKeychainVault(nil); err == nil {
+		t.Fatal("the mode changed over a keychain that did not read")
+	}
+	if v, _ := keyring.Get(keyringService, keyringUser); v != other {
+		t.Error("the keychain item was written over")
+	}
+}
