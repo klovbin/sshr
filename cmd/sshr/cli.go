@@ -116,6 +116,8 @@ func runCLI(args []string) {
 		cmdCompletion(args[1:])
 	case completeCommand:
 		cmdComplete(store, args[1:])
+	case "vault":
+		cmdVault(args[1:])
 	case "ext":
 		cmdExt(store, args[1:])
 	case "help", "--help", "-h":
@@ -1120,6 +1122,43 @@ func cmdDesktopEntry(args []string) {
 }
 
 // cmdTag shows a host's tags or changes them: +x or x adds, -x removes
+// cmdVault shows where the vault key lives and moves it between the system
+// keychain and a file under a passphrase
+func cmdVault(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
+		os.Exit(1)
+	}
+	switch args[0] {
+	case "status":
+		fmt.Println(app.VaultMode())
+	case "passphrase":
+		first, err := app.AskTerminal("New vault passphrase: ")
+		if err != nil {
+			fatal(fmt.Errorf("the passphrase is asked on a terminal: %v", err))
+		}
+		again, err := app.AskTerminal("Again: ")
+		if err != nil {
+			fatal(err)
+		}
+		if first != again {
+			fatal(fmt.Errorf("the two passphrases differ, nothing is changed"))
+		}
+		if err := app.SetVaultPassphrase(first); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The vault key is now in ~/.sshr/vault/vault-key.json under the passphrase, a forgotten passphrase loses the saved passwords and keys")
+	case "keychain":
+		if err := app.UseKeychainVault(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The vault key is in the system keychain again, the passphrase file is removed")
+	default:
+		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
+		os.Exit(1)
+	}
+}
+
 // cmdGateway shows, sets or removes the host connect falls back to when
 // a host does not answer directly
 func cmdGateway(store *app.Store, args []string) {

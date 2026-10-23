@@ -50,6 +50,19 @@ sshr add db.example.com -u admin --ask-password   # nothing saved, ssh asks ever
 - no keychain (a server without a desktop, a keyring nobody unlocks within 5 s): a saved password cannot be added, ask mode and keys still work
 - a reset keychain or `~/.sshr` copied to another machine makes the password unreadable and sshr asks to save it again, plain `"password"` fields from older versions are encrypted on the next save
 
+### Without a system keychain
+
+```sh
+sshr vault passphrase    # move the vault key into a file under a passphrase
+sshr vault status        # keychain or passphrase
+sshr vault keychain      # back to the system keychain, the file is removed
+```
+
+- the vault key that seals saved passwords and stored keys lives in the system keychain, on a server or a machine without one `passphrase` wraps it into `~/.sshr/vault/vault-key.json` with Argon2id, the key stays the same, so everything saved before still opens
+- off by default: the passphrase is asked once per run, a forgotten one loses every saved secret, the file can be attacked offline with a weak passphrase (8 characters at least)
+- it is asked on the terminal, or from the program in `SSHR_ASKPASS`, `sshr mcp` never asks on its terminal, `SSHR_VAULT=keychain|passphrase` picks the mode for one run
+- the keys of the sync device stay in the system keychain for now, a machine without one syncs once they move too
+
 ## Keys stored in sshr
 
 ```sh

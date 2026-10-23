@@ -218,6 +218,18 @@ macOS, run it again after an update
 
 Options:
   --remove   take it out of the menu`},
+	{name: "vault", usage: "sshr vault status|passphrase|keychain", short: "keep the vault key in the keychain or under a passphrase",
+		details: `The vault key seals saved passwords and keys stored in sshr. It lives in
+the system keychain, passphrase moves a copy into ~/.sshr/vault/vault-key.json
+wrapped with a passphrase (Argon2id) for a machine without a keychain, off by
+default: the passphrase is asked once per run, a forgotten one loses every
+saved secret, and the file can be attacked offline, keychain moves the key
+back and removes the file, the sync device keys stay in the keychain for now
+
+Examples:
+  sshr vault status
+  sshr vault passphrase
+  sshr vault keychain`},
 	{name: "ext", usage: `sshr ext install <git url or folder> [--yes]
 sshr ext import <name> [args...]
 sshr ext list

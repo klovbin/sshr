@@ -102,6 +102,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** no key file to lose in backups or dotfile repos, a passphrase is asked once
 - **Why this way:** ssh offers only this key and agent forwarding is off, so neither other keys nor the server can reach it
 
+### Vault under a passphrase
+- **What:** `sshr vault passphrase` keeps the vault key in a file wrapped with a passphrase instead of the system keychain, `sshr vault keychain` moves it back, off by default
+- **What for:** servers, containers and minimal desktops have no Secret Service, saved passwords did not work there at all
+- **Why it helps:** saved passwords and stored keys work on such a machine, the same key as before, so nothing has to be saved again
+- **Why this way:** Argon2id with the parameters in the file makes a stolen file expensive to guess, the passphrase is asked once per run and never from stdin or in mcp, the keychain stays the default because it asks nothing and is not attackable offline
+
 ### Keys from an ssh agent
 - **What:** a host uses the system agent, the 1Password SSH agent or any agent socket, with one chosen key
 - **What for:** keys that should never be a file, in a password manager or on a hardware token

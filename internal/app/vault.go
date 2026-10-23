@@ -178,14 +178,26 @@ func VaultKey() ([]byte, error) {
 	if vaultKey != nil {
 		return vaultKey, nil
 	}
-	key, ok, err := getVaultKey()
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		if key, err = createVaultKey(); err != nil {
+	var key []byte
+	if VaultMode() == VaultPassphrase {
+		// the passphrase vault never makes a key, it opens the one its
+		// file holds or fails
+		k, err := passphraseVaultKey()
+		if err != nil {
 			return nil, err
 		}
+		key = k
+	} else {
+		k, ok, err := getVaultKey()
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			if k, err = createVaultKey(); err != nil {
+				return nil, err
+			}
+		}
+		key = k
 	}
 	if err := checkVaultKey(key); err != nil {
 		return nil, err

@@ -11,6 +11,9 @@ import (
 // cmdMCP serves the MCP protocol on stdin and stdout, an AI assistant
 // starts it, for example `claude mcp add sshr -- sshr mcp`
 func cmdMCP(store *app.Store, args []string) {
+	// stdin and stdout are the protocol, a vault passphrase comes only from
+	// SSHR_ASKPASS
+	app.NoTerminalPrompts = true
 	st, _ := app.LoadSettings()
 	opts := mcp.Options{AllowCommands: st.MCPCommands, Version: app.BuildVersion()}
 	for _, a := range args {

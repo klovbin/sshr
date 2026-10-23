@@ -63,6 +63,10 @@ type Settings struct {
 	// HealthInterval is the seconds between checks, 0 means 300, less
 	// than 60 is raised to 60
 	HealthInterval int `json:"health_interval,omitempty"`
+	// Vault is where the vault key lives: empty or "keychain" for the system
+	// keychain, "passphrase" for a file wrapped with a passphrase (#98), off
+	// by default, a forgotten passphrase loses every saved secret
+	Vault string `json:"vault,omitempty"`
 
 	// base is the file as LoadSettings read it, SaveSettings writes only
 	// the fields that differ from it, copies of the value share it

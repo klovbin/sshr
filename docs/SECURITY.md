@@ -12,6 +12,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 - a reset keychain or `~/.sshr` copied to another machine makes saved secrets unreadable, sshr asks to save them again
 - `~/.sshr/vault/key-check` holds a hash of the vault key (not the key), when the keychain lost the key or holds another one (a reset, another keychain program) sshr says so and does not make a second key over the secrets sealed with the first, bringing the item back or deleting that file and saving the secrets again ends it
 - a key with a passphrase is opened once when added and stored without it, the vault encryption takes its place
+- `sshr vault passphrase` keeps the vault key in `~/.sshr/vault/vault-key.json` instead, wrapped with XChaCha20-Poly1305 under a key from Argon2id (t=3, 64 MiB, 4 lanes, a random 16-byte salt, the parameters in the file and capped when read, so a crafted file cannot exhaust memory), off by default, the passphrase is asked once per run and never read from stdin, `sshr mcp` takes it only from `SSHR_ASKPASS`, a wrong one opens nothing and never makes a new key
 
 ## How a password reaches ssh
 
