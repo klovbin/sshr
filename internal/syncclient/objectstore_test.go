@@ -142,12 +142,17 @@ func TestObjectBackendLostRace(t *testing.T) {
 	_, err = b.Store.Add(hosts.Host{Name: "b1", Host: "10.0.0.4", User: "u"})
 	must(t, err)
 	// b pushes in the moment a is about to create its manifest
+	fired := false
 	store.beforeCreate = func(name string) {
 		if strings.HasPrefix(name, objManifests) {
+			fired = true
 			must(t, b.Push())
 		}
 	}
 	must(t, a.Push())
+	if !fired {
+		t.Fatal("the race was not run, the first create of a was not a manifest")
+	}
 	must(t, b.Pull())
 	for _, c := range []*Client{a, b} {
 		got, _ := c.Store.List()
