@@ -165,10 +165,14 @@ func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) 
 		c.st.Backend = &ref
 		if err := c.save(); err != nil {
 			c.st.Backend = prev
+			var rerr error
 			if hadOld {
-				vault.SecretSet(name, old)
+				rerr = vault.SecretSet(name, old)
 			} else {
-				vault.SecretDelete(name)
+				rerr = vault.SecretDelete(name)
+			}
+			if rerr != nil {
+				return fmt.Errorf("%v, and the keychain kept the new secret while the sync state names the old key (%v), run sshr sync store-key again", err, rerr)
 			}
 			return err
 		}

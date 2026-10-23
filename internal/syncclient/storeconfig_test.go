@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -245,4 +246,48 @@ func (s noEnvelopes) Get(name string, max int) ([]byte, error) {
 		return nil, errors.New("AccessDenied")
 	}
 	return s.memStore.Get(name, max)
+}
+
+// failSetKeychain takes sets until left runs out, then refuses them
+type failSetKeychain struct {
+	vault.Keychain
+	left *int
+}
+
+func (k failSetKeychain) Set(name, value string) error {
+	if *k.left == 0 {
+		return errors.New("keychain locked")
+	}
+	*k.left--
+	return k.Keychain.Set(name, value)
+}
+
+// a save that fails and a keychain that refuses the old secret back are
+// both reported, with what to run (#244)
+func TestReplaceStoreKeyFailedRollback(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder this user cannot write")
+	}
+	left := 1000
+	vault.SetKeychain(failSetKeychain{&memKeychain{m: map[string]string{}}, &left})
+	vault.ResetForTest(filepath.Join(t.TempDir(), ".lock"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	store := newMemStore()
+	ref := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"old"}`)}
+	a := &Client{Store: &hosts.Store{Dir: t.TempDir()}, Dir: t.TempDir(), KeyPrefix: "a-", Log: &strings.Builder{},
+		Backend: ObjectBackend{Store: store}, BackendRef: &ref, StoreSecret: "old-secret"}
+	must(t, a.Init("memory", "laptop"))
+
+	// the new secret goes in, the old one cannot go back
+	left = 1
+	must(t, os.Chmod(a.Dir, 0o500))
+	defer os.Chmod(a.Dir, 0o700)
+
+	c := &Client{Store: a.Store, Dir: a.Dir, KeyPrefix: "a-", Log: &strings.Builder{}}
+	newRef := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"new"}`)}
+	err := c.ReplaceStoreKey(ref, newRef, "new-secret", ObjectBackend{Store: store})
+	if err == nil || !strings.Contains(err.Error(), "run sshr sync store-key again") {
+		t.Errorf("a failed rollback: %v", err)
+	}
 }
