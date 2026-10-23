@@ -148,7 +148,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 - `payloadOf` strips fields from what syncs, everything else syncs, a new field that must stay on this machine has to be added there, the unknown keys of a host travel too (`app.HostPayloadJSON`), except those named `local_...`, which a newer sshr uses for what stays on one machine, a payload with no unknown keys (from an older sshr) leaves the keys here as they are
 - files are written with `app.WriteFileAtomic`, never `os.WriteFile` over the target
 - a host file is read with `decodeHost` and written with `encodeHost` (`internal/app/record.go`): a key this build does not know, a field a newer sshr wrote, is kept in `Host.extra` and written back, `Update` carries it from the file, a form that never drew the field cannot erase it, a file whose `version` is newer than `hostFormat` is read and connected to, every write of it fails with `ErrNewerFormat`, removing it works
-- secrets never reach logs, errors or output, `Host` must not be printed with `%v`, its `json:"-"` fields would show (nothing enforces this yet)
+- secrets never reach logs, errors or output, `Host.String` and `GoString` (`redact.go`) replace passwords, keys, sealed values, secret references and unknown fields, so `%v`, `%+v`, `%#v` and `%s` of a host are safe, a test checks every verb
 - a feature with a cost is off by default, with a setting, a flag and a fallback
 - tests use fake `ssh`, `op` and `bw` on PATH and a local sync server, never real hosts, `.github/e2e.sh` checks against a real sshd
 - one host that does not unseal or decode is skipped with a note, it never stops a sync or an import of the others (#144, #136)
