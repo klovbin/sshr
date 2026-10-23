@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,9 +128,7 @@ func (l *Log) Begin(r Record) (func(exit int, bytes int64, err error), error) {
 			r.Cmd = r.Command
 		} else {
 			r.CmdLen = len(r.Command)
-			if f := strings.Fields(r.Command); len(f) > 0 {
-				r.CmdProg = f[0]
-			}
+			r.CmdProg = program(r.Command)
 			m := hmac.New(sha256.New, l.key)
 			m.Write([]byte(r.Command))
 			r.CmdHMAC = hex.EncodeToString(m.Sum(nil))[:32]
@@ -208,4 +207,33 @@ func encode(r Record) ([]byte, error) {
 			*longest = strings.ToValidUTF8((*longest)[:len(*longest)/2], "") + "..."
 		}
 	}
+}
+
+// progMax caps the program name in a record
+const progMax = 64
+
+// program is the program a command starts: NAME=value words before it are
+// skipped, they often carry a password (MYSQL_PWD=...), only the base name
+// of a path is kept
+func program(cmd string) string {
+	for _, f := range strings.Fields(cmd) {
+		if i := strings.IndexByte(f, '='); i > 0 && envName(f[:i]) {
+			continue
+		}
+		p := path.Base(f)
+		if len(p) > progMax {
+			p = p[:progMax]
+		}
+		return strings.ToValidUTF8(p, "")
+	}
+	return ""
+}
+
+func envName(s string) bool {
+	for i, c := range s {
+		if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || i > 0 && c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }

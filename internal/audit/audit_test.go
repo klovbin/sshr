@@ -170,3 +170,26 @@ func TestStartFailsClosed(t *testing.T) {
 		t.Fatal("the start went through a log that cannot be written")
 	}
 }
+
+// the program of a command skips variable assignments, a password set in
+// one stays out of the log, a huge first word does not stop the action
+// (#206)
+func TestProgramSkipsAssignments(t *testing.T) {
+	for in, want := range map[string]string{
+		"MYSQL_PWD=hunter2 mysql -e 'select 1'": "mysql",
+		"TOKEN=abc A_1=x /usr/bin/curl -s":      "curl",
+		"uptime":                                "uptime",
+		"=x ls":                                 "=x",
+		"":                                      "",
+	} {
+		if got := program(in); got != want {
+			t.Errorf("program(%q) = %q, want %q", in, got, want)
+		}
+	}
+	l, _ := Open(t.TempDir(), 0, false)
+	end, err := l.Begin(Record{Action: "run_command", Command: strings.Repeat("x", 9000)})
+	if err != nil {
+		t.Fatalf("a long first word stopped the action: %v", err)
+	}
+	end(0, 0, nil)
+}
