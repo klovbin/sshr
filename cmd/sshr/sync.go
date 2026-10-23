@@ -29,6 +29,8 @@ const syncUsage = `Usage:
   sshr sync status                       server, devices, state fingerprint
   sshr sync remove-device <id|fingerprint>
                                          take a device out, the vault key changes
+  sshr sync store-key --key-id <id>      a new key of the S3 bucket of this account,
+                                         the secret from SSHR_S3_SECRET or a prompt
   sshr sync leave [--force]              stop syncing here, hosts stay`
 
 // cmdSync runs the sync subcommands
@@ -72,7 +74,7 @@ func cmdSync(store *app.Store, args []string) {
 			rest = append(rest, a)
 		}
 	}
-	if sf.given && sub != "init" && sub != "join" {
+	if sf.given && sub != "init" && sub != "join" && sub != "store-key" {
 		fatal(fmt.Errorf("--backend and the S3 flags are for sshr sync init and join, later runs read them from the sync state"))
 	}
 	switch sub {
@@ -186,6 +188,14 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Removed %s, the vault key was changed, what it already downloaded it keeps\n", d.Name)
+		if ref, err := c.StoreRef(); err == nil && ref != nil {
+			fmt.Println("This account is in a bucket and the removed device still holds the bucket key, it can delete objects and stop the sync\nMake a new key for the bucket, delete the old one, then run on every device that stays:\n  sshr sync store-key --key-id <new key id>")
+		}
+	case "store-key":
+		if err := sf.replaceKey(c); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The new bucket key is saved on this machine, delete the old key once every device has the new one")
 	case "leave":
 		if err := c.Leave(len(rest) == 1 && rest[0] == "--force"); err != nil {
 			fatal(err)

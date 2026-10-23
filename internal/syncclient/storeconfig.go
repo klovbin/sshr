@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
+	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/vault"
 )
 
@@ -102,4 +104,60 @@ func ProbeCreate(store ObjectStore) (err error) {
 		return fmt.Errorf("the store answered a second create with: %v", err)
 	}
 	return nil
+}
+
+// StoreRef is the store the sync state of this machine names, nil for an
+// account on sshr-sync, it reads the state without opening the store, so
+// it works while the secret of the store is gone
+func (c *Client) StoreRef() (*BackendRef, error) {
+	b, err := fileio.ReadFileShared(c.statePath())
+	if os.IsNotExist(err) {
+		return nil, ErrNotSetUp
+	}
+	if err != nil {
+		return nil, err
+	}
+	var st state
+	if err := json.Unmarshal(b, &st); err != nil {
+		return nil, err
+	}
+	return st.Backend, nil
+}
+
+// ReplaceStoreKey puts a new key of the same store into the state and the
+// keychain, b is that store opened with the new key, it has to read the
+// account before anything changes, a failed save puts the old secret back
+func (c *Client) ReplaceStoreKey(ref BackendRef, secret string, b Backend) error {
+	return c.run(func() error {
+		c.Backend = b
+		if err := c.load(); err != nil {
+			return err
+		}
+		if c.st.Backend == nil || c.st.Backend.Kind != ref.Kind {
+			return fmt.Errorf("this account is not in a sync store of kind %q", ref.Kind)
+		}
+		if _, _, err := b.Head(); err != nil {
+			return fmt.Errorf("the new key does not read this account: %v", err)
+		}
+		name := c.storeSecretName()
+		old, hadOld, err := vault.SecretGet(name)
+		if err != nil {
+			return err
+		}
+		if err := vault.SecretSet(name, []byte(secret)); err != nil {
+			return err
+		}
+		prev := c.st.Backend
+		c.st.Backend = &ref
+		if err := c.save(); err != nil {
+			c.st.Backend = prev
+			if hadOld {
+				vault.SecretSet(name, old)
+			} else {
+				vault.SecretDelete(name)
+			}
+			return err
+		}
+		return nil
+	})
 }

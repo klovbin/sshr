@@ -110,6 +110,48 @@ func (f *storeFlags) setup(c *syncclient.Client, server string) (string, error) 
 	return s3Address(f.s3), nil
 }
 
+// replaceKey puts a new key of the bucket of this account into the state
+// and the keychain, only --key-id may change, the bucket stays
+func (f *storeFlags) replaceKey(c *syncclient.Client) error {
+	if f.backend != "" || f.s3.Endpoint != "" || f.s3.Bucket != "" || f.s3.Prefix != "" || f.s3.Region != "" {
+		return errors.New("sshr sync store-key takes only --key-id, the bucket of the account stays")
+	}
+	if f.s3.KeyID == "" {
+		return errors.New("sshr sync store-key --key-id <id>")
+	}
+	ref, err := c.StoreRef()
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return errors.New("this account syncs through sshr-sync, it has no store key")
+	}
+	if ref.Kind != "s3" {
+		return fmt.Errorf("this sshr cannot open a sync store of kind %q", ref.Kind)
+	}
+	var cfg s3store.Config
+	if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+		return fmt.Errorf("the S3 settings in the sync state: %v", err)
+	}
+	cfg.KeyID = f.s3.KeyID
+	secret, err := s3Secret(cfg.KeyID)
+	if err != nil {
+		return err
+	}
+	store, err := s3store.New(cfg, secret, nil)
+	if err != nil {
+		return err
+	}
+	if err := syncclient.ProbeCreate(store); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return c.ReplaceStoreKey(syncclient.BackendRef{Kind: "s3", Config: raw}, secret, syncclient.ObjectBackend{Store: store})
+}
+
 // s3Address names the bucket in the status, it is not dialed
 func s3Address(cfg s3store.Config) string {
 	return "s3 " + strings.TrimRight(cfg.Endpoint, "/") + " " + strings.Trim(cfg.Bucket+"/"+cfg.Prefix, "/")

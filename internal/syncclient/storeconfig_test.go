@@ -178,3 +178,52 @@ type brokenKeychain struct{}
 func (brokenKeychain) Get(string) (string, error) { return "", errors.New("keychain locked") }
 func (brokenKeychain) Set(string, string) error   { return errors.New("keychain locked") }
 func (brokenKeychain) Delete(string) error        { return errors.New("keychain locked") }
+
+// a new store key replaces the old one in the state and the keychain, also
+// when the old secret is gone, a key that does not read the account
+// changes nothing (#128)
+func TestReplaceStoreKey(t *testing.T) {
+	useMemKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	store := newMemStore()
+	ref := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"old"}`)}
+	a := &Client{Store: &hosts.Store{Dir: t.TempDir()}, Dir: t.TempDir(), KeyPrefix: "a-", Log: &strings.Builder{},
+		Backend: ObjectBackend{Store: store}, BackendRef: &ref, StoreSecret: "old-secret"}
+	must(t, a.Init("memory", "laptop"))
+	vault.SecretDelete("a-store-secret")
+	mk := func() *Client {
+		return &Client{Store: a.Store, Dir: a.Dir, KeyPrefix: "a-", Log: &strings.Builder{}}
+	}
+
+	got, err := mk().StoreRef()
+	must(t, err)
+	if got == nil || got.Kind != "mem" {
+		t.Fatalf("store ref %+v", got)
+	}
+	newRef := BackendRef{Kind: "mem", Config: json.RawMessage(`{"key":"new"}`)}
+	if err := mk().ReplaceStoreKey(newRef, "x", ObjectBackend{Store: newMemStore()}); err == nil {
+		t.Error("a key that does not read the account was taken")
+	}
+	if _, ok, _ := vault.SecretGet("a-store-secret"); ok {
+		t.Error("a refused key reached the keychain")
+	}
+	if err := mk().ReplaceStoreKey(BackendRef{Kind: "s3"}, "x", ObjectBackend{Store: store}); err == nil {
+		t.Error("a key of another kind of store was taken")
+	}
+	must(t, mk().ReplaceStoreKey(newRef, "new-secret", ObjectBackend{Store: store}))
+
+	var opened BackendRef
+	var secret string
+	c := mk()
+	c.OpenBackend = func(r BackendRef, s string) (Backend, error) {
+		opened, secret = r, s
+		return ObjectBackend{Store: store}, nil
+	}
+	must(t, c.Push())
+	var cfg struct{ Key string }
+	json.Unmarshal(opened.Config, &cfg)
+	if cfg.Key != "new" || secret != "new-secret" {
+		t.Errorf("opened %s with %q", opened.Config, secret)
+	}
+}

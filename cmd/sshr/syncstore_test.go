@@ -141,3 +141,35 @@ func TestSyncStoreChecksBeforeSecret(t *testing.T) {
 		}
 	}
 }
+
+// store-key changes only the key and only of an account in a bucket, it
+// stops before it asks for a secret (#128)
+func TestStoreKeyMistakes(t *testing.T) {
+	home := t.TempDir()
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"sync", "store-key"}, "sshr sync store-key --key-id <id>"},
+		{[]string{"sync", "store-key", "--key-id", "K", "--bucket", "other"}, "takes only --key-id"},
+		{[]string{"sync", "store-key", "--key-id", "K"}, "not set up"},
+	} {
+		_, errOut, code := sshrIn(t, home, c.args...)
+		if code == 0 || !strings.Contains(errOut, c.want) || strings.Contains(errOut, "secret key") {
+			t.Errorf("%v: %d %q, want %q", c.args, code, errOut, c.want)
+		}
+	}
+	dir := filepath.Join(home, ".sshr", "sync")
+	noErr(t, os.MkdirAll(dir, 0o700))
+	noErr(t, os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"server":"https://sync.example"}`), 0o600))
+	if _, errOut, code := sshrIn(t, home, "sync", "store-key", "--key-id", "K"); code == 0 || !strings.Contains(errOut, "through sshr-sync") {
+		t.Errorf("store-key on an sshr-sync account: %d %q", code, errOut)
+	}
+}
+
+func noErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
