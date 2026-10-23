@@ -13,8 +13,10 @@ import (
 
 // shareWait is how long a rename or a read waits for another process that
 // has the file open, Windows refuses to replace or open a file in that
-// moment where Unix lets both go on
-const shareWait = 2 * time.Second
+// moment where Unix lets both go on, a held file is free again within
+// milliseconds, a lasting denial gives the same error, so the wait is short
+// and such an error comes back after it
+const shareWait = 500 * time.Millisecond
 
 // busyShare tells an error Windows gives for a file another process holds,
 // a read without FILE_SHARE_DELETE (Go's os.Open does not set it) blocks a

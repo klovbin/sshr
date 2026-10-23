@@ -92,7 +92,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `$XDG_RUNTIME_DIR/sshr` or `~/.sshr/cm` | ControlMaster sockets, askpass and agent sockets, `api.sock` | ssh, `sshauth`, `vaultkey`, `sshr serve` |
 | sync server data folder | accounts, devices, envelopes, manifests, blobs, all ciphertext but the device list | `syncserver`, its own copy of the atomic write |
 
-`WriteFileAtomic` writes a temp file of its own, syncs it, renames it over the target and syncs the folder, a crash leaves the old file or the new one. Windows refuses that rename, and a read during it, while another process has the file open, so there the rename and `ReadFileShared` (settings, hosts, the export, the sync state, the extension pins) retry for up to 2 s.
+`WriteFileAtomic` writes a temp file of its own, syncs it, renames it over the target and syncs the folder, a crash leaves the old file or the new one. Windows refuses that rename, and a read during it, while another process has the file open, so there the rename and `ReadFileShared` (settings, hosts, the export, the sync state, the extension pins) retry for up to 500 ms.
 
 ## Flows
 
