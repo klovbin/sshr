@@ -1,4 +1,4 @@
-package app
+package vault
 
 import (
 	"encoding/json"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"sshr.dev/internal/fileio"
 )
 
 // fileKeychain keeps the named secrets of sshr (the keys of the sync
@@ -34,7 +36,7 @@ func secretAAD(name string) []byte { return []byte("sshr\x00secret\x00" + name) 
 
 func readSecrets(path string) (*secretsFile, error) {
 	f := &secretsFile{Version: 1, Secrets: map[string]string{}}
-	b, err := ReadFileShared(path)
+	b, err := fileio.ReadFileShared(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return f, nil
 	}
@@ -61,9 +63,9 @@ func (fileKeychain) Get(name string) (string, error) {
 	}
 	sealed, ok := f.Secrets[name]
 	if !ok {
-		return "", errSecretNotFound
+		return "", ErrSecretNotFound
 	}
-	plain, err := unsealRaw(sealed, secretAAD(name))
+	plain, err := UnsealRaw(sealed, secretAAD(name))
 	if err != nil {
 		return "", err
 	}
@@ -77,7 +79,7 @@ func (fileKeychain) change(edit func(map[string]string) error) error {
 	if err != nil {
 		return err
 	}
-	unlock, err := waitLock(path+".lock", "saving a secret", secretsWait)
+	unlock, err := fileio.WaitLock(path+".lock", "saving a secret", secretsWait)
 	if err != nil {
 		return err
 	}
@@ -93,11 +95,11 @@ func (fileKeychain) change(edit func(map[string]string) error) error {
 	if err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, append(b, '\n'), 0o600)
+	return fileio.WriteFile(path, append(b, '\n'), 0o600)
 }
 
 func (k fileKeychain) Set(name, value string) error {
-	sealed, err := sealRaw([]byte(value), secretAAD(name))
+	sealed, err := SealRaw([]byte(value), secretAAD(name))
 	if err != nil {
 		return err
 	}
@@ -110,7 +112,7 @@ func (k fileKeychain) Set(name, value string) error {
 func (k fileKeychain) Delete(name string) error {
 	return k.change(func(m map[string]string) error {
 		if _, ok := m[name]; !ok {
-			return errSecretNotFound
+			return ErrSecretNotFound
 		}
 		delete(m, name)
 		return nil
@@ -121,7 +123,7 @@ func (k fileKeychain) Delete(name string) error {
 // in the system keychain (the passphrase vault has its own file), the
 // others in the file when the vault is under a passphrase
 func secretStore(name string) Keychain {
-	if name != keyringUser && VaultMode() == VaultPassphrase {
+	if name != keyringUser && Mode() == ModePassphrase {
 		return fileKeychain{}
 	}
 	return keychain
@@ -159,7 +161,7 @@ func moveSecrets(names []string, toFile bool) ([]string, error) {
 	var moved []string
 	for _, name := range names {
 		v, err := callStore(from, func(k Keychain) (string, error) { return k.Get(name) })
-		if errors.Is(err, errSecretNotFound) || (toFile && errors.Is(err, ErrKeychainMissing)) {
+		if errors.Is(err, ErrSecretNotFound) || (toFile && errors.Is(err, ErrKeychainMissing)) {
 			continue
 		}
 		if err != nil {
@@ -172,7 +174,7 @@ func moveSecrets(names []string, toFile bool) ([]string, error) {
 		if err != nil || back != v {
 			return moved, fmt.Errorf("the secret %s did not read back from its new place, it stays where it was", name)
 		}
-		if _, err := callStore(from, func(k Keychain) (string, error) { return "", k.Delete(name) }); err != nil && !errors.Is(err, errSecretNotFound) {
+		if _, err := callStore(from, func(k Keychain) (string, error) { return "", k.Delete(name) }); err != nil && !errors.Is(err, ErrSecretNotFound) {
 			return moved, err
 		}
 		moved = append(moved, name)

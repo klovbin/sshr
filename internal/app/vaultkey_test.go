@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"sshr.dev/internal/vault"
 )
 
 func testKey(t *testing.T, passphrase string) (pemData []byte, pub string) {
@@ -166,7 +167,7 @@ func TestStoredKeyBoundToDestination(t *testing.T) {
 		t.Fatalf("after an edit in sshr: %v", err)
 	}
 	// a key sealed the old way is opened and sealed for its destination
-	old, err := seal(data, h.ID, "key")
+	old, err := vault.Seal(data, h.ID, "key")
 	if err != nil {
 		t.Fatal(err)
 	}

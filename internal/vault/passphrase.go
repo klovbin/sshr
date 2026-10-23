@@ -1,4 +1,4 @@
-package app
+package vault
 
 import (
 	"bytes"
@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
+	"sshr.dev/internal/fileio"
+	"sshr.dev/internal/settings"
 )
 
 // The passphrase vault keeps the vault key in a file wrapped with a key
@@ -22,8 +24,8 @@ import (
 // by default: the passphrase is asked once per process, a forgotten one
 // loses every saved secret, and the file can be attacked offline
 const (
-	VaultKeychain   = "keychain"
-	VaultPassphrase = "passphrase"
+	ModeKeychain   = "keychain"
+	ModePassphrase = "passphrase"
 )
 
 // ErrBadPassphrase means the passphrase does not open the vault key file
@@ -74,16 +76,16 @@ func passphraseFilePath() (string, error) {
 	return filepath.Join(filepath.Dir(lock), "vault-key.json"), nil
 }
 
-// VaultMode is where the vault key lives: SSHR_VAULT, then the setting,
+// Mode is where the vault key lives: SSHR_VAULT, then the setting,
 // the keychain by default
-func VaultMode() string {
-	if m := os.Getenv("SSHR_VAULT"); m == VaultPassphrase || m == VaultKeychain {
+func Mode() string {
+	if m := os.Getenv("SSHR_VAULT"); m == ModePassphrase || m == ModeKeychain {
 		return m
 	}
-	if st, err := LoadSettings(); err == nil && st.Vault == VaultPassphrase {
-		return VaultPassphrase
+	if st, err := settings.Load(); err == nil && st.Vault == ModePassphrase {
+		return ModePassphrase
 	}
-	return VaultKeychain
+	return ModeKeychain
 }
 
 func wrapKey(key []byte, pass string) (*wrappedKey, error) {
@@ -132,7 +134,7 @@ func readWrappedKey() (*wrappedKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	b, err := ReadFileShared(path)
+	b, err := fileio.ReadFileShared(path)
 	if err == nil && len(b) > passphraseFileMax {
 		return nil, fmt.Errorf("%s is larger than a vault key file can be", path)
 	}
@@ -149,9 +151,15 @@ func readWrappedKey() (*wrappedKey, error) {
 	return &w, nil
 }
 
-// askPassphrase gets the passphrase, promptPassphrase asks the user, a
-// test answers it itself
-var askPassphrase = promptPassphrase
+// askPassphrase gets the passphrase, a front end sets how with SetPrompt,
+// a test answers it itself
+var askPassphrase = func(string) (string, error) {
+	return "", fmt.Errorf("%w: nothing here can ask for it", ErrNoPassphrase)
+}
+
+// SetPrompt sets how the passphrase of the vault is asked, the front ends
+// set SSHR_ASKPASS or the terminal at start
+func SetPrompt(ask func(prompt string) (string, error)) { askPassphrase = ask }
 
 // passphraseVaultKey opens the vault key file with the passphrase
 func passphraseVaultKey() ([]byte, error) {
@@ -166,11 +174,11 @@ func passphraseVaultKey() ([]byte, error) {
 	return unwrapKey(w, pass)
 }
 
-// SetVaultPassphrase wraps the current vault key with pass into the vault
+// SetPassphrase wraps the current vault key with pass into the vault
 // key file and turns the passphrase vault on, the key stays the same, so
 // every saved secret still opens, a key in the system keychain stays there,
 // the named secrets are moved by MoveSecrets
-func SetVaultPassphrase(pass string, secretNames []string) error {
+func SetPassphrase(pass string, secretNames []string) error {
 	// one mode change at a time, the setting and the files must agree
 	unlock, err := vaultModeLock()
 	if err != nil {
@@ -180,7 +188,7 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 	if len(pass) < passphraseMin {
 		return fmt.Errorf("the passphrase is shorter than %d characters, the file it guards can be attacked offline", passphraseMin)
 	}
-	key, err := VaultKey()
+	key, err := Key()
 	// a locked keychain or one that did not answer may hold the real key,
 	// only a keychain that is not there starts with a new one
 	if errors.Is(err, ErrNoKeychain) && !errors.Is(err, ErrKeychainLocked) && !errors.Is(err, ErrKeychainTimeout) {
@@ -212,12 +220,12 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 	}
 	undo := func() {
 		if old != nil {
-			WriteFileAtomic(path, old, 0o600)
+			fileio.WriteFile(path, old, 0o600)
 		} else {
 			os.Remove(path)
 		}
 	}
-	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
+	if err := fileio.WriteFile(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	// the named secrets move before the mode changes, the mode never points
@@ -229,10 +237,10 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 	}
 	// a settings file that does not read is not replaced with defaults, the
 	// keys this call moved go back to the keychain the mode still reads
-	st, err := LoadSettings()
+	st, err := settings.Load()
 	if err == nil {
-		st.Vault = VaultPassphrase
-		if err = SaveSettings(st); err == nil {
+		st.Vault = ModePassphrase
+		if err = settings.Save(st); err == nil {
 			return nil
 		}
 	}
@@ -242,15 +250,15 @@ func SetVaultPassphrase(pass string, secretNames []string) error {
 	return fmt.Errorf("the vault key is wrapped in %s but settings.json was not saved, the mode is not changed: %v", path, err)
 }
 
-// UseKeychainVault stores the current vault key in the system keychain,
+// UseKeychain stores the current vault key in the system keychain,
 // turns the passphrase vault off and removes the vault key file
-func UseKeychainVault(secretNames []string) error {
+func UseKeychain(secretNames []string) error {
 	unlock, err := vaultModeLock()
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	key, err := VaultKey()
+	key, err := Key()
 	if err != nil {
 		return err
 	}
@@ -284,10 +292,10 @@ func UseKeychainVault(secretNames []string) error {
 	if err != nil {
 		return fmt.Errorf("the sync keys did not move to the keychain, the passphrase vault stays: %v", err)
 	}
-	st, err := LoadSettings()
+	st, err := settings.Load()
 	if err == nil {
 		st.Vault = ""
-		err = SaveSettings(st)
+		err = settings.Save(st)
 	}
 	if err != nil {
 		// the mode still reads the file, the keys this call moved go back
@@ -333,7 +341,7 @@ func removeEmptySecrets() error {
 	if err != nil {
 		return err
 	}
-	unlock, err := waitLock(path+".lock", "saving a secret", secretsWait)
+	unlock, err := fileio.WaitLock(path+".lock", "saving a secret", secretsWait)
 	if err != nil {
 		return err
 	}
@@ -386,13 +394,13 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 }
 
 // vaultModeLock is held while the vault mode changes, it is not the lock
-// createVaultKey takes, VaultKey may create a key inside a mode change
+// createVaultKey takes, Key may create a key inside a mode change
 func vaultModeLock() (func(), error) {
 	lock, err := vaultLockPath()
 	if err != nil {
 		return nil, err
 	}
-	return waitLock(filepath.Join(filepath.Dir(lock), ".mode.lock"), "changing the vault mode", 10*time.Second)
+	return fileio.WaitLock(filepath.Join(filepath.Dir(lock), ".mode.lock"), "changing the vault mode", 10*time.Second)
 }
 
 // sealedSecretsHere tells whether any host file holds a sealed password
@@ -421,7 +429,7 @@ func sealedSecretsHere() bool {
 			return true
 		}
 		for _, v := range []string{h.PasswordSealed, h.KeySealed} {
-			if strings.HasPrefix(v, sealPrefix) || strings.HasPrefix(v, sealPrefix2) {
+			if strings.HasPrefix(v, SealPrefix) || strings.HasPrefix(v, SealPrefix2) {
 				return true
 			}
 		}
