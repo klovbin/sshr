@@ -1,4 +1,4 @@
-package app
+package health
 
 import (
 	"crypto/ed25519"
@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"sshr.dev/internal/hosts"
 )
 
 // sshServer answers the key exchange with a fresh ed25519 key and refuses
@@ -51,7 +52,7 @@ func TestCheckHostKey(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	port, key := sshServer(t)
-	h := &Host{Host: "127.0.0.1", User: "u", Port: port}
+	h := &hosts.Host{Host: "127.0.0.1", User: "u", Port: port}
 	if k := CheckHostKey(h); k.State != KeyUnknown || k.Fingerprint != ssh.FingerprintSHA256(key) {
 		t.Fatalf("no known_hosts: %+v", k)
 	}
@@ -68,7 +69,7 @@ func TestCheckHostKey(t *testing.T) {
 	if k := CheckHostKey(h); k.State != KeyChanged {
 		t.Fatalf("changed key: %+v", k)
 	}
-	if k := CheckHostKey(&Host{Host: "10.0.0.1", User: "u", Jump: "b"}); k.Fingerprint != "" || k.Err == "" {
+	if k := CheckHostKey(&hosts.Host{Host: "10.0.0.1", User: "u", Jump: "b"}); k.Fingerprint != "" || k.Err == "" {
 		t.Errorf("a host behind a jump host was checked: %+v", k)
 	}
 }

@@ -23,12 +23,13 @@ How sshr is built, which package may use which, where data lives and how the mai
 | Package | Does | May import (sshr packages) |
 |----|----|----|
 | `internal/audit` | the audit log of MCP and REST actions | `fileio` |
+| `internal/health` | whether a host answers (TCP and the SSH banner) and the key it shows against known_hosts, no login, no program | `hosts` |
 | `internal/hosts` | hosts and their files: Host, the store with its lock, checks, records across versions, forwards, tags, summaries, runs no program, the steps that do come as hooks from `app` | `fileio`, `record`, `vault` |
 | `internal/vault` | the vault key in a keychain or under a passphrase, seals bound to a host and field, named secrets of the sync device, runs no program, the system keychain and the prompt are set by `app` | `fileio`, `settings` |
 | `internal/settings` | `~/.sshr/settings.json`: load, save of the changed fields only, the command list, never synced | `fileio`, `record` |
 | `internal/record` | keeps files readable across versions: unknown keys kept and written back, the `version` of a file | nothing |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
-| `internal/app` | the core: the Store facade over package hosts, ssh command lines, password managers, ssh config import and export, health | `fileio`, `record`, `settings`, `vault`, `hosts` |
+| `internal/app` | the core: the Store facade over package hosts, ssh command lines, password managers, ssh config import and export | `fileio`, `record`, `settings`, `vault`, `hosts`, `health` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation | `app`, `syncproto` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
@@ -48,7 +49,7 @@ Rules that follow:
 - `internal/syncserver` never imports the core or the client, it cannot decrypt what it stores by construction
 - `internal/ui` changes only through its owner (`.github/CODEOWNERS` asks for their review), a need of the app becomes a function in `app` and an issue for the GUI
 - the GUI, `mcp`, the sync packages, `fileio`, `i18n` and `assets` do not import `os/exec`, only the core, the CLI, `api`, `ext`, `desktop` and `clip` start programs
-- `syncproto`, `fileio`, `record`, `settings`, `vault`, `hosts`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, what runs ssh stays in `app`
+- `syncproto`, `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, what runs ssh stays in `app`
 - Gio is imported only by `internal/ui`
 - `internal/archtest` checks all of these
 
@@ -61,7 +62,7 @@ Rules that follow:
 | hosts and their store | package `hosts` (`store.go`, `host.go`, `record.go`, `forward.go`, `tags.go`, `summary.go`, `redact.go`, `hop.go`, `refs.go`, `pub.go`), in app `storefacade.go` (Store, its hooks, DefaultStore, Unlock) and `hosts.go` (aliases), `version.go` |
 | secrets | `vault.go` (the system keychain and the passphrase prompt handed to package vault, wrappers), `keychain_system.go`, `prompt.go`, `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords), `onepassword.go`, `bitwarden.go`, `manager.go`, `agent.go`, `keyfile.go` |
 | ssh command lines | `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `forward.go`, `copy.go`, `remote.go` |
-| reachability | `health.go`, a TCP connect and the SSH banner in process, no ssh |
+| reachability | package `health`, a TCP connect and the SSH banner in process, no ssh, `hostkey.go` there reads the host key |
 | ssh config | `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`) |
 | settings | `settings.go` (aliases of package settings) |
 | platform | `files.go` (`WriteFileAtomic`, `LockFile`, `WaitLock` over `fileio`), `tty_*.go`, `agentsock_*.go` |

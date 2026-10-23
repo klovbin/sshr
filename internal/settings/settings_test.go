@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"sshr.dev/internal/record"
 )
@@ -209,5 +210,13 @@ func TestCommandHostsMergeByKey(t *testing.T) {
 	got, _ := Load()
 	if _, back := got.CommandHosts["x"]; back || got.CommandHosts["y"] != "ty" {
 		t.Fatalf("command_hosts %v", got.CommandHosts)
+	}
+}
+
+func TestHealthEvery(t *testing.T) {
+	for in, want := range map[int]time.Duration{0: 5 * time.Minute, 10: time.Minute, 600: 10 * time.Minute} {
+		if got := (Settings{HealthInterval: in}).HealthEvery(); got != want {
+			t.Errorf("%d: %v", in, got)
+		}
 	}
 }

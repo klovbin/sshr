@@ -1,4 +1,4 @@
-package app
+package health
 
 import (
 	"errors"
@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"sshr.dev/internal/hosts"
 )
 
 // Host key states against the user's known_hosts
@@ -38,11 +39,11 @@ var errGotKey = errors.New("host key read")
 // CheckHostKey runs the SSH key exchange with the host to read its key and
 // stops before any login, the key is compared with ~/.ssh/known_hosts, a
 // host behind a jump host is not checked
-func CheckHostKey(h *Host) HostKey {
+func CheckHostKey(h *hosts.Host) HostKey {
 	if h.Jump != "" {
 		return HostKey{Err: "reached through " + h.Jump}
 	}
-	port := effectivePort(h.Port)
+	port := hosts.EffectivePort(h.Port)
 	addr := net.JoinHostPort(strings.Trim(h.Host, "[]"), strconv.Itoa(port))
 	var got ssh.PublicKey
 	cfg := &ssh.ClientConfig{
@@ -81,7 +82,7 @@ func knownState(addr string, key ssh.PublicKey) string {
 	}
 	var files []string
 	for _, f := range []string{"known_hosts", "known_hosts2"} {
-		if p := filepath.Join(home, ".ssh", f); fileExists(p) {
+		if p := filepath.Join(home, ".ssh", f); isFile(p) {
 			files = append(files, p)
 		}
 	}
@@ -105,13 +106,13 @@ func knownState(addr string, key ssh.PublicKey) string {
 }
 
 // CheckHostKeyAll reads the keys of hosts eight at a time, keyed by host ID
-func CheckHostKeyAll(hosts []Host) map[string]HostKey {
-	out := make(map[string]HostKey, len(hosts))
+func CheckHostKeyAll(list []hosts.Host) map[string]HostKey {
+	out := make(map[string]HostKey, len(list))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
-	for i := range hosts {
-		h := &hosts[i]
+	for i := range list {
+		h := &list[i]
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
@@ -125,4 +126,10 @@ func CheckHostKeyAll(hosts []Host) map[string]HostKey {
 	}
 	wg.Wait()
 	return out
+}
+
+// isFile tells whether p is a file that exists
+func isFile(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
