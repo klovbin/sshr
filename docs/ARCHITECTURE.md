@@ -42,6 +42,10 @@ Rules that follow:
 - front ends do not import each other, the app does not call the CLI and the API does not call MCP
 - `internal/syncserver` never imports the core or the client, it cannot decrypt what it stores by construction
 - `internal/ui` changes only through its owner, a need of the app becomes a function in `app` and an issue for the GUI
+- the GUI, `mcp`, the sync packages, `fileio`, `i18n` and `assets` do not import `os/exec`, only the core, the CLI, `api`, `ext`, `desktop` and `clip` start programs
+- `syncproto`, `fileio`, `i18n`, `syncserver` and `cmd/sshr-sync` do not reach `os/exec` through any import, the packages a phone build links stay free of it, the core joins the list after #103
+- Gio is imported only by `internal/ui`
+- `internal/archtest` checks all of these
 
 ## Inside the core
 
