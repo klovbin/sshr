@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/zalando/go-keyring"
@@ -100,5 +101,45 @@ func TestPassphraseWithoutTerminal(t *testing.T) {
 	t.Cleanup(func() { NoTerminalPrompts = false })
 	if _, err := askPassphrase("x"); !errors.Is(err, ErrNoPassphrase) {
 		t.Fatalf("%v", err)
+	}
+}
+
+// under the passphrase vault the named secrets (the sync device keys) live
+// sealed in a file, a machine without a keychain keeps them (#98)
+func TestNamedSecretsInPassphraseMode(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SecretSet("sync-device", []byte("seed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetVaultPassphrase(pass); err != nil {
+		t.Fatal(err)
+	}
+	if err := MoveSecrets([]string{"sync-device", "sync-key-1"}, true); err != nil {
+		t.Fatal(err)
+	}
+	keyring.MockInitWithError(errors.New("no bus"))
+	t.Cleanup(keyring.MockInit)
+	forgetVaultKey()
+	v, ok, err := SecretGet("sync-device")
+	if err != nil || !ok || string(v) != "seed" {
+		t.Fatalf("%q %v %v", v, ok, err)
+	}
+	if err := SecretSet("sync-key-2", []byte("k2")); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := secretsPath()
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "seed") || strings.Contains(string(b), "azI=") {
+		t.Fatalf("a secret is in the file in clear: %s", b)
+	}
+	if err := SecretDelete("sync-key-2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := SecretGet("sync-key-2"); ok {
+		t.Error("the secret stayed")
 	}
 }

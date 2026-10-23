@@ -183,6 +183,25 @@ func (c *Client) prefix() string {
 
 func (c *Client) statePath() string { return filepath.Join(c.Dir, "state.json") }
 
+// SecretNames are the names of the secrets the sync of the default device
+// keeps (its key seed, the vault keys of every epoch, a key change still
+// to deliver), for moving them when the vault mode changes
+func SecretNames(dir string) []string {
+	names := []string{"sync-device", "sync-key-pending"}
+	b, err := app.ReadFileShared(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return names
+	}
+	var st struct {
+		Epoch int `json:"epoch"`
+	}
+	json.Unmarshal(b, &st)
+	for e := 1; e <= st.Epoch; e++ {
+		names = append(names, "sync-key-"+strconv.Itoa(e))
+	}
+	return names
+}
+
 func (c *Client) load() error {
 	if c.st != nil {
 		return nil

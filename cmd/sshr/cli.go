@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"sshr.dev/internal/app"
+	"sshr.dev/internal/syncclient"
 	"sshr.dev/internal/desktop"
 )
 
@@ -1147,8 +1148,20 @@ func cmdVault(args []string) {
 		if err := app.SetVaultPassphrase(first); err != nil {
 			fatal(err)
 		}
+		// the keys of the sync device move along, a machine without a
+		// keychain syncs from the file
+		if dir, err := syncclient.DefaultDir(); err == nil {
+			if err := app.MoveSecrets(syncclient.SecretNames(dir), true); err != nil {
+				fmt.Fprintf(os.Stderr, "sshr: the sync keys stay in the keychain: %v\n", err)
+			}
+		}
 		fmt.Println("The vault key is now in ~/.sshr/vault/vault-key.json under the passphrase, a forgotten passphrase loses the saved passwords and keys")
 	case "keychain":
+		if dir, err := syncclient.DefaultDir(); err == nil {
+			if err := app.MoveSecrets(syncclient.SecretNames(dir), false); err != nil {
+				fatal(fmt.Errorf("the sync keys could not move to the keychain, nothing is changed: %v", err))
+			}
+		}
 		if err := app.UseKeychainVault(); err != nil {
 			fatal(err)
 		}

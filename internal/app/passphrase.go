@@ -176,7 +176,8 @@ func passphraseVaultKey() ([]byte, error) {
 
 // SetVaultPassphrase wraps the current vault key with pass into the vault
 // key file and turns the passphrase vault on, the key stays the same, so
-// every saved secret still opens, a key in the system keychain stays there
+// every saved secret still opens, a key in the system keychain stays there,
+// the named secrets are moved by MoveSecrets
 func SetVaultPassphrase(pass string) error {
 	if len(pass) < 8 {
 		return errors.New("the passphrase is shorter than 8 characters")

@@ -440,12 +440,12 @@ var keychain Keychain = systemKeychain{}
 // SecretGet reads a value sshr keeps in the system keychain, ok is false
 // when there is none
 func SecretGet(name string) (value []byte, ok bool, err error) {
-	v, err := keyringCall(func() (string, error) { return keychain.Get(name) })
+	v, err := callStore(secretStore(name), func(k Keychain) (string, error) { return k.Get(name) })
 	if errors.Is(err, keyring.ErrNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, keychainError(err)
+		return nil, false, err
 	}
 	b, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
@@ -454,23 +454,33 @@ func SecretGet(name string) (value []byte, ok bool, err error) {
 	return b, true, nil
 }
 
-// SecretSet stores a value in the system keychain
+// SecretSet stores a value in the system keychain, or in the passphrase
+// vault file when the vault is under a passphrase
 func SecretSet(name string, value []byte) error {
 	enc := base64.StdEncoding.EncodeToString(value)
-	if _, err := keyringCall(func() (string, error) {
-		return "", keychain.Set(name, enc)
-	}); err != nil {
-		return keychainError(err)
+	_, err := callStore(secretStore(name), func(k Keychain) (string, error) { return "", k.Set(name, enc) })
+	return err
+}
+
+// SecretDelete removes a value, a missing one is not an error
+func SecretDelete(name string) error {
+	_, err := callStore(secretStore(name), func(k Keychain) (string, error) { return "", k.Delete(name) })
+	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return err
 	}
 	return nil
 }
 
-// SecretDelete removes a value from the system keychain, a missing one is
-// not an error
-func SecretDelete(name string) error {
-	_, err := keyringCall(func() (string, error) { return "", keychain.Delete(name) })
-	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
-		return keychainError(err)
+// callStore runs f on k, the system keychain under the time limit and its
+// error states, the passphrase vault file directly, its passphrase prompt
+// must not run into the keychain time limit
+func callStore(k Keychain, f func(Keychain) (string, error)) (string, error) {
+	if _, ok := k.(fileKeychain); ok {
+		return f(k)
 	}
-	return nil
+	v, err := keyringCall(func() (string, error) { return f(k) })
+	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return "", keychainError(err)
+	}
+	return v, err
 }
