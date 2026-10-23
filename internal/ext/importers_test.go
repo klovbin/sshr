@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+// extensionsDir is taken once at start, a test may change the working
+// directory
+var extensionsDir, _ = filepath.Abs(filepath.Join("..", "..", "extensions"))
+
 // runImporter runs an importer of extensions/ the way sshr ext import does
 // and parses what it prints
 func runImporter(t *testing.T, name string, args ...string) []ExtHost {
@@ -15,10 +19,7 @@ func runImporter(t *testing.T, name string, args ...string) []ExtHost {
 	if runtime.GOOS == "windows" {
 		t.Skip("the importer is a shell script")
 	}
-	dir, err := filepath.Abs(filepath.Join("..", "..", "extensions", name))
-	if err != nil {
-		t.Fatal(err)
-	}
+	dir := filepath.Join(extensionsDir, name)
 	m, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
 		t.Fatal(err)
@@ -148,5 +149,21 @@ func TestPuttyImporterFindsTheSessions(t *testing.T) {
 	os.WriteFile(filepath.Join(sessions, "a"), []byte("HostName=a.example\n"), 0o600)
 	if hosts := runImporter(t, "putty"); len(hosts) != 1 || hosts[0].Host != "a.example" {
 		t.Fatalf("~/.putty/sessions: %+v", hosts)
+	}
+}
+
+// a file name with a line break is skipped and never read as two names
+func TestImportersSkipNamesWithLineBreaks(t *testing.T) {
+	work := t.TempDir()
+	t.Chdir(work)
+	os.WriteFile(filepath.Join(work, "foo"), []byte("HostName=cwd.example\n[remmina]\nprotocol=SSH\nserver=cwd.example\n"), 0o600)
+	for _, c := range []struct{ name, file string }{{"remmina", "x\nfoo.remmina"}, {"putty", "x\nfoo"}} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, c.file), []byte("HostName=a.example\n[remmina]\nprotocol=SSH\nserver=a.example\n"), 0o600); err != nil {
+			t.Skip("this file system takes no line break in a name:", err)
+		}
+		if hosts := runImporter(t, c.name, dir); len(hosts) != 0 {
+			t.Errorf("%s read %+v", c.name, hosts)
+		}
 	}
 }

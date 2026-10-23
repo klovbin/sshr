@@ -24,6 +24,15 @@ for dir in "$@"; do
 		exit 1
 	}
 	for f in "$dir"/*.remmina; do
+		# a name with a line break would split into two in the list awk
+		# reads, the second half a path relative to the working directory
+		case $f in
+		*'
+'*)
+			echo "remmina: a file name with a line break is skipped" >&2
+			continue
+			;;
+		esac
 		if [ -f "$f" ]; then
 			files="$files
 $f"
