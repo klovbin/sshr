@@ -192,28 +192,28 @@ func TestCommandHosts(t *testing.T) {
 	store := &Store{Dir: t.TempDir()}
 	h := &Host{ID: "0123456789abcdef0123456789abcdef", Name: "web", Host: "10.0.0.1", User: "u"}
 	st, _ := LoadSettings()
-	if st.CommandsAllowed(h, store.CommandTarget(h)) != nil {
+	if st.CommandsAllowed(h.ID, h.Name, store.CommandTarget(h)) != nil {
 		t.Fatal("the list is off, every host takes commands")
 	}
 	st.CommandsListedOnly = true
-	if !errors.Is(st.CommandsAllowed(h, store.CommandTarget(h)), ErrCommandsNotAllowed) {
+	if !errors.Is(st.CommandsAllowed(h.ID, h.Name, store.CommandTarget(h)), ErrCommandsNotAllowed) {
 		t.Fatal("an unlisted host took commands")
 	}
-	st.AllowCommands(h, store.CommandTarget(h))
+	st.AllowCommands(h.ID, store.CommandTarget(h))
 	if err := SaveSettings(st); err != nil {
 		t.Fatal(err)
 	}
 	st, _ = LoadSettings()
-	if err := st.CommandsAllowed(h, store.CommandTarget(h)); err != nil {
+	if err := st.CommandsAllowed(h.ID, h.Name, store.CommandTarget(h)); err != nil {
 		t.Fatalf("an allowed host: %v", err)
 	}
 	moved := *h
 	moved.Host = "evil.example"
-	if !errors.Is(st.CommandsAllowed(&moved, store.CommandTarget(&moved)), ErrCommandsNotAllowed) {
+	if !errors.Is(st.CommandsAllowed(moved.ID, moved.Name, store.CommandTarget(&moved)), ErrCommandsNotAllowed) {
 		t.Fatal("a host that points elsewhere kept its permission")
 	}
 	st.DenyCommands(h.ID)
-	if st.CommandsAllowed(h, store.CommandTarget(h)) == nil {
+	if st.CommandsAllowed(h.ID, h.Name, store.CommandTarget(h)) == nil {
 		t.Fatal("a denied host took commands")
 	}
 }
@@ -253,7 +253,7 @@ func TestCommandHostsMergeByKey(t *testing.T) {
 	x := &Host{ID: "x", Name: "x"}
 	y := &Host{ID: "y", Name: "y"}
 	st, _ := LoadSettings()
-	st.AllowCommands(x, "tx")
+	st.AllowCommands(x.ID, "tx")
 	if err := SaveSettings(st); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestCommandHostsMergeByKey(t *testing.T) {
 	if err := SaveSettings(p2); err != nil {
 		t.Fatal(err)
 	}
-	p1.AllowCommands(y, "ty")
+	p1.AllowCommands(y.ID, "ty")
 	if err := SaveSettings(p1); err != nil {
 		t.Fatal(err)
 	}

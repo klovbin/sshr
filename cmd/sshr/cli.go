@@ -1214,7 +1214,7 @@ func cmdCommands(store *app.Store, args []string) {
 		st.CommandsListedOnly = false
 	case args[0] == "allow" && len(args) == 2:
 		h := findHost(store, "commands allow", args[1])
-		st.AllowCommands(h, store.CommandTarget(h))
+		st.AllowCommands(h.ID, store.CommandTarget(h))
 	case args[0] == "deny" && len(args) == 2:
 		st.DenyCommands(findHost(store, "commands deny", args[1]).ID)
 	default:
@@ -1238,7 +1238,7 @@ func commandPolicy(store *app.Store, listedOnly *bool) func(*app.Host) error {
 		if listedOnly != nil {
 			st.CommandsListedOnly = *listedOnly
 		}
-		return st.CommandsAllowed(h, store.CommandTarget(h))
+		return st.CommandsAllowed(h.ID, h.Name, store.CommandTarget(h))
 	}
 }
 
