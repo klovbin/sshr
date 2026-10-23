@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -131,6 +132,9 @@ type Host struct {
 	// route is the Gateway when the last ConnectArgs found the host down
 	// directly
 	route string
+	// extra are the keys of the host file this build does not know, a
+	// field a newer sshr wrote, kept through every save (record.go)
+	extra map[string]json.RawMessage
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -419,8 +423,8 @@ func (s *Store) ListAll() ([]Host, []string, error) {
 			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
-		var h Host
-		if err := json.Unmarshal(b, &h); err != nil {
+		h, err := decodeHost(b)
+		if err != nil {
 			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
@@ -579,6 +583,8 @@ func (s *Store) update(id string, in Host, setGateway bool) (*Host, error) {
 	h.ID, h.CreatedAt, h.Rev = cur.ID, cur.CreatedAt, cur.Rev+1
 	// only MarkConnected sets it, a host built from form fields has none
 	h.LastConnected = cur.LastConnected
+	// the fields of a newer sshr are not in a form this build drew
+	h.extra = maps.Clone(cur.extra)
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -616,6 +622,11 @@ func (s *Store) importHost(in Host) (*Host, error) {
 		}
 	}
 	in.PlainPassword, in.PasswordSealed = "", ""
+	// the fields of a newer sshr kept in the file here stay, a payload
+	// does not carry them yet
+	if cur != nil && in.extra == nil {
+		in.extra = maps.Clone(cur.extra)
+	}
 	// jump hosts win over a gateway, as in Update, refusing the host would
 	// repeat the same sync error on every run
 	if strings.TrimSpace(in.Jump) != "" {
@@ -800,6 +811,7 @@ func (s *Store) duplicate(id, name string) (*Host, error) {
 		return nil, err
 	}
 	h := *cur
+	h.extra = maps.Clone(cur.extra)
 	// only a password sealed by sshr has to be opened and sealed again, a
 	// password manager entry keeps its reference and is not read at all
 	if h.PasswordMode == PasswordSaved {
@@ -961,7 +973,7 @@ func (s *Store) save(h *Host) error {
 	if err := s.opStorePassword(h); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(h, "", "  ")
+	b, err := encodeHost(h)
 	if err != nil {
 		return err
 	}
