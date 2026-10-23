@@ -140,7 +140,7 @@ func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) 
 		}
 		// the state may have changed since StoreRef read it, a key for the
 		// store the caller saw must not land on another one
-		if !sameJSON(c.st.Backend.Config, old.Config) || c.st.Backend.Kind != old.Kind {
+		if !sameJSON(c.st.Backend.Config, old.Config) {
 			return errors.New("the sync store of this machine changed meanwhile, run sshr sync store-key again")
 		}
 		if _, _, err := b.Head(); err != nil {
@@ -158,7 +158,7 @@ func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) 
 			}
 		}
 		name := c.storeSecretName()
-		old, hadOld, err := vault.SecretGet(name)
+		oldSecret, hadOld, err := vault.SecretGet(name)
 		if err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func (c *Client) ReplaceStoreKey(old, ref BackendRef, secret string, b Backend) 
 			c.st.Backend = prev
 			var rerr error
 			if hadOld {
-				rerr = vault.SecretSet(name, old)
+				rerr = vault.SecretSet(name, oldSecret)
 			} else {
 				rerr = vault.SecretDelete(name)
 			}
