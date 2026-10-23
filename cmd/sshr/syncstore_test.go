@@ -62,6 +62,10 @@ func TestStoreFlags(t *testing.T) {
 	if s, err := (&storeFlags{}).setup(&syncclient.Client{}, "https://sync.example"); s != "https://sync.example" || err != nil {
 		t.Errorf("without --backend: %q %v", s, err)
 	}
+	// S3 flags without --backend are not dropped in silence (#238)
+	if _, err := (&storeFlags{s3: s3store.Config{Bucket: "b"}, given: true}).setup(&syncclient.Client{}, "https://sync.example"); err == nil || !strings.Contains(err.Error(), "need --backend s3") {
+		t.Errorf("S3 flags without --backend: %v", err)
+	}
 }
 
 // a new device gets the flags of the bucket and never the secret, a later

@@ -72,6 +72,9 @@ func s3Secret(keyID string) (string, error) {
 func (f *storeFlags) setup(c *syncclient.Client, server string) (string, error) {
 	switch f.backend {
 	case "":
+		if f.given {
+			return "", errors.New("--endpoint, --bucket, --prefix, --region and --key-id need --backend s3")
+		}
 		return server, nil
 	case "s3":
 	default:
