@@ -112,14 +112,19 @@ func openStore(ref syncclient.BackendRef, secret string) (syncclient.Backend, er
 	return syncclient.ObjectBackend{Store: store}, nil
 }
 
-// joinFlags are the flags a new device passes to sshr sync join, the
-// secret key travels apart from them
-func joinFlags(st *syncclient.Status) string {
-	if st.Backend == nil || st.Backend.Kind != "s3" {
-		return "--server " + st.Server
+// joinFlags are the flags a new device passes to sshr sync join for an
+// account at server or in the store ref, the secret key travels apart
+func joinFlags(server string, ref *syncclient.BackendRef) (string, error) {
+	if ref == nil {
+		return "--server " + server, nil
+	}
+	if ref.Kind != "s3" {
+		return "", fmt.Errorf("this sshr cannot open a sync store of kind %q", ref.Kind)
 	}
 	var cfg s3store.Config
-	json.Unmarshal(st.Backend.Config, &cfg)
+	if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+		return "", fmt.Errorf("the S3 settings in the sync state: %v", err)
+	}
 	out := "--backend s3 --endpoint " + cfg.Endpoint + " --bucket " + cfg.Bucket
 	if cfg.Prefix != "" {
 		out += " --prefix " + cfg.Prefix
@@ -127,5 +132,5 @@ func joinFlags(st *syncclient.Status) string {
 	if cfg.Region != "" {
 		out += " --region " + cfg.Region
 	}
-	return out + " --key-id " + cfg.KeyID
+	return out + " --key-id " + cfg.KeyID, nil
 }

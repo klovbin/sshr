@@ -55,12 +55,16 @@ func TestStoreFlags(t *testing.T) {
 func TestJoinFlagsAndOpenStore(t *testing.T) {
 	cfg, _ := json.Marshal(s3store.Config{Endpoint: "https://e.example", Bucket: "b", Prefix: "p", KeyID: "K"})
 	ref := &syncclient.BackendRef{Kind: "s3", Config: cfg}
-	got := joinFlags(&syncclient.Status{Server: "s3 https://e.example b/p", Backend: ref})
-	if got != "--backend s3 --endpoint https://e.example --bucket b --prefix p --key-id K" {
-		t.Errorf("join flags %q", got)
+	got, err := joinFlags("s3 https://e.example b/p", ref)
+	if err != nil || got != "--backend s3 --endpoint https://e.example --bucket b --prefix p --key-id K" {
+		t.Errorf("join flags %q %v", got, err)
 	}
-	if got := joinFlags(&syncclient.Status{Server: "https://sync.example"}); got != "--server https://sync.example" {
-		t.Errorf("join flags %q", got)
+	if got, err := joinFlags("https://sync.example", nil); err != nil || got != "--server https://sync.example" {
+		t.Errorf("join flags %q %v", got, err)
+	}
+	// a broken config is an error, not a join line with empty values (#234)
+	if got, err := joinFlags("", &syncclient.BackendRef{Kind: "s3", Config: json.RawMessage(`[`)}); err == nil {
+		t.Errorf("join flags of a broken config %q", got)
 	}
 	if _, err := openStore(*ref, "secret"); err != nil {
 		t.Error(err)

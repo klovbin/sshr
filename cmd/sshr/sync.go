@@ -77,16 +77,29 @@ func cmdSync(store *app.Store, args []string) {
 		if err := c.Init(server, name); err != nil {
 			fatal(err)
 		}
-		code, _ := c.Invite()
-		st, _ := c.Status()
-		fmt.Printf("Sync is on, this is the first device\nTo add another one run there:\n  sshr sync join %s %s\n", joinFlags(st), code)
+		code, err := c.Invite()
+		if err != nil {
+			fatal(fmt.Errorf("sync is on, but the invite code is not ready, run sshr sync invite: %v", err))
+		}
+		flags, err := joinFlags(server, c.BackendRef)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Sync is on, this is the first device\nTo add another one run there:\n  sshr sync join %s %s\n", flags, code)
 	case "invite":
 		code, err := c.Invite()
 		if err != nil {
 			fatal(err)
 		}
-		st, _ := c.Status()
-		fmt.Printf("On the new device run:\n  sshr sync join %s %s\n", joinFlags(st), code)
+		st, err := c.Status()
+		if err != nil {
+			fatal(err)
+		}
+		flags, err := joinFlags(st.Server, st.Backend)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("On the new device run:\n  sshr sync join %s %s\n", flags, code)
 	case "join":
 		if server, err = sf.setup(c, server); err != nil {
 			fatal(err)
