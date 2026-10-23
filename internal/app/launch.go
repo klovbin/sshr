@@ -30,8 +30,9 @@ type LaunchOptions struct {
 // for it and prints its notes
 type SessionPlan struct {
 	// Host is a copy of the host with its route decided, the caller's host
-	// is not written, the app may share it between goroutines
-	Host Host
+	// is not written, the app may share it between goroutines, a mosh plan
+	// and its Fallback share it, a password fetched for mosh serves ssh too
+	Host *Host
 	// Tool is "ssh" or "mosh", looked up on PATH when the command is made
 	Tool string
 	Args []string
@@ -76,7 +77,7 @@ func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 	if o.Plain || o.Tunnel {
 		session = ""
 	}
-	p := &SessionPlan{Host: hc, Tool: "ssh", Via: hc.Via(), Session: session, batch: o.Batch}
+	p := &SessionPlan{Host: &hc, Tool: "ssh", Via: hc.Via(), Session: session, batch: o.Batch}
 	dest := hc.Dest()
 	sshOpts := opts
 	if o.Tunnel {
@@ -107,7 +108,7 @@ func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 		p.Notes = append(p.Notes, note)
 		return p, nil
 	}
-	m := &SessionPlan{Host: hc, Tool: "mosh", Via: p.Via, Session: session, Fallback: p, batch: o.Batch}
+	m := &SessionPlan{Host: &hc, Tool: "mosh", Via: p.Via, Session: session, Fallback: p, batch: o.Batch}
 	m.Args = []string{"--ssh=ssh " + strings.Join(sshOpts, " "), "--", dest}
 	if script := SessionScript(session); script != "" {
 		// mosh-server runs the command itself, without a shell in between
@@ -153,7 +154,7 @@ func (p *SessionPlan) Command() (*exec.Cmd, func(), error) {
 		// jump hops started as separate ssh processes read it too
 		cmd.Env = append(os.Environ(), "SSHR_BATCH=1")
 	}
-	cleanup, err := AttachAuth(cmd, &p.Host)
+	cleanup, err := AttachAuth(cmd, p.Host)
 	if err != nil {
 		return nil, func() {}, err
 	}

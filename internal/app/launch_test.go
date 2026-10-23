@@ -43,6 +43,9 @@ func TestPlanSessionMoshFallback(t *testing.T) {
 	if !strings.HasPrefix(p.Args[0], "--ssh=ssh ") || !strings.Contains(ssh, "-t -- u@10.0.0.5") {
 		t.Errorf("mosh %v, ssh %v", p.Args, p.Fallback.Args)
 	}
+	if p.Host != p.Fallback.Host {
+		t.Error("mosh and its fallback hold two copies of the host, a password would be fetched twice")
+	}
 	if !MoshStartFailed(1, 0) || MoshStartFailed(0, 0) || MoshStartFailed(1, moshStartup) {
 		t.Error("MoshStartFailed")
 	}
