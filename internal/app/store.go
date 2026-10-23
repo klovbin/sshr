@@ -400,7 +400,7 @@ func (s *Store) ListAll() ([]Host, []string, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
+		b, err := ReadFileShared(filepath.Join(s.Dir, e.Name()))
 		if err != nil {
 			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue

@@ -108,7 +108,7 @@ func (r *Registry) pins() (map[string]Lock, error) {
 	if !info.Mode().IsRegular() || info.Size() > pinsMaxBytes {
 		return nil, fmt.Errorf("%s is not a plain file of a sensible size, remove it and install the extensions again", path)
 	}
-	b, err := os.ReadFile(path)
+	b, err := app.ReadFileShared(path)
 	if err != nil {
 		return nil, err
 	}

@@ -230,7 +230,7 @@ func (s *Store) SSHConfigExported() bool {
 	if s.SSHConfigOut == "" {
 		return false
 	}
-	b, err := os.ReadFile(s.SSHConfigOut)
+	b, err := ReadFileShared(s.SSHConfigOut)
 	return err == nil && bytes.HasPrefix(b, []byte(exportHeader))
 }
 
@@ -278,7 +278,7 @@ func (s *Store) refreshSSHConfig(force bool) ([]ExportItem, error) {
 	if s.SSHConfigOut == "" || (!force && !s.SSHConfigExported()) {
 		return nil, nil
 	}
-	if b, err := os.ReadFile(s.SSHConfigOut); err == nil && !bytes.HasPrefix(b, []byte(exportHeader)) {
+	if b, err := ReadFileShared(s.SSHConfigOut); err == nil && !bytes.HasPrefix(b, []byte(exportHeader)) {
 		return nil, fmt.Errorf("%s was not written by sshr, it is left as it is", s.SSHConfigOut)
 	}
 	var buf bytes.Buffer
@@ -298,7 +298,7 @@ func (s *Store) editUserConfig(add bool) error {
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%w: %s is a link, add this line at its top yourself: %s", ErrSSHConfigLink, path, s.includeLine())
 	}
-	old, err := os.ReadFile(path)
+	old, err := ReadFileShared(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -361,7 +361,9 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 		err = os.Chmod(tmp, mode)
 	}
 	if err == nil {
-		err = os.Rename(tmp, path)
+		// Windows refuses the rename for a moment while another process
+		// reads the file, renameOver waits that out
+		err = renameOver(tmp, path)
 	}
 	if err != nil {
 		os.Remove(tmp)

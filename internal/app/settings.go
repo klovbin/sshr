@@ -117,7 +117,7 @@ func readSettings() (Settings, error) {
 	if err != nil {
 		return s, err
 	}
-	b, err := os.ReadFile(path)
+	b, err := ReadFileShared(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil

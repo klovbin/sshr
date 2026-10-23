@@ -169,7 +169,7 @@ func (c *Client) load() error {
 	if c.st != nil {
 		return nil
 	}
-	b, err := os.ReadFile(c.statePath())
+	b, err := app.ReadFileShared(c.statePath())
 	if os.IsNotExist(err) {
 		return ErrNotSetUp
 	}
@@ -1458,7 +1458,7 @@ func (c *Client) Leave(force bool) error {
 }
 
 func (c *Client) leave(force bool) error {
-	b, err := os.ReadFile(c.statePath())
+	b, err := app.ReadFileShared(c.statePath())
 	if err == nil {
 		var st state
 		if json.Unmarshal(b, &st) == nil {
