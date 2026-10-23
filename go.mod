@@ -1,6 +1,6 @@
 module sshr.dev
 
-go 1.27.1
+go 1.27.3
 
 require (
 	gioui.org v0.10.3
