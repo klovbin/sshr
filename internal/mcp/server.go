@@ -86,6 +86,11 @@ func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
 			// a response is never answered, an answer to it would loop
 			continue
 		}
+		if req.Method == "initialize" {
+			// the client info it carries is needed by the calls after it
+			s.handle(req)
+			continue
+		}
 		// a command can take minutes, other requests are answered meanwhile
 		wg.Add(1)
 		go func() {
