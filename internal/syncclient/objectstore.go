@@ -423,8 +423,10 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 }
 
 // trimHistory deletes the manifests more than keepHistory changes behind
-// counter, the push is already done, a delete that fails is tried again
-// on the next push
+// counter, only when the keepHistory manifests up to counter are all in
+// the store, a planted manifest with a huge counter must not make the
+// trim delete the real history, the push is already done, a delete that
+// fails is tried again on the next push
 func (o ObjectBackend) trimHistory(counter uint64) {
 	if counter <= keepHistory {
 		return
@@ -432,6 +434,15 @@ func (o ObjectBackend) trimHistory(counter uint64) {
 	all, err := o.manifests()
 	if err != nil {
 		return
+	}
+	have := make(map[uint64]bool, len(all))
+	for _, c := range all {
+		have[c] = true
+	}
+	for c := counter - keepHistory + 1; c <= counter; c++ {
+		if !have[c] {
+			return
+		}
 	}
 	for _, c := range all {
 		if c > counter-keepHistory {

@@ -344,3 +344,28 @@ func TestObjectBackendKeepsHistory(t *testing.T) {
 		t.Errorf("head %d %v", c, err)
 	}
 }
+
+// a manifest with a counter far past the history does not make the
+// store delete the real manifests (#247)
+func TestObjectBackendTrimNeedsRealHistory(t *testing.T) {
+	store := newMemStore()
+	must(t, store.Put(objAccount, []byte("acct")))
+	o := ObjectBackend{Store: store}
+	put := func(n uint64) {
+		t.Helper()
+		body, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: n})
+		signed, _ := json.Marshal(syncproto.Signed{Body: body})
+		must(t, o.PutManifest(n-1, signed))
+	}
+	for n := uint64(1); n <= 10; n++ {
+		put(n)
+	}
+	const huge = 1_000_000_000
+	must(t, store.Create(manifestName(huge-1), []byte("{}")))
+	put(huge)
+	all, err := o.manifests()
+	must(t, err)
+	if len(all) != 12 || all[0] != 1 {
+		t.Errorf("the store kept %v", all)
+	}
+}
