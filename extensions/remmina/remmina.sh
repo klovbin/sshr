@@ -58,7 +58,8 @@ function esc(s,   out, i, c, n) {
 		if (c == "\\") out = out "\\\\"
 		else if (c == "\"") out = out "\\\""
 		else if (c == "\t") out = out "\\t"
-		else if (c < " ") continue
+		else if (c < " " || c == "\177") continue
+		else if (c == "\302" && substr(s, i + 1, 1) >= "\200" && substr(s, i + 1, 1) <= "\237") i++
 		else out = out c
 	}
 	return out

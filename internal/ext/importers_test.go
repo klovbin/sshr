@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,9 @@ import (
 // extensionsDir is taken once at start, a test may change the working
 // directory
 var extensionsDir, _ = filepath.Abs(filepath.Join("..", "..", "extensions"))
+
+// lastNotes is what the last runImporter printed on stderr
+var lastNotes string
 
 // runImporter runs an importer of extensions/ the way sshr ext import does
 // and parses what it prints
@@ -35,10 +39,13 @@ func runImporter(t *testing.T, name string, args ...string) []ExtHost {
 	}
 	cmd := exec.Command(filepath.Join(dir, argv[0]), append(argv[1:], args...)...)
 	cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
+	var notes bytes.Buffer
+	cmd.Stderr = &notes
 	out, err := Collect(cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lastNotes = notes.String()
 	hosts, warnings, err := ParseImport(out)
 	if err != nil || len(warnings) > 0 {
 		t.Fatalf("%s printed %s: %v %v", name, out, err, warnings)
@@ -201,5 +208,24 @@ func TestRemminaImporterTakesAnyBytes(t *testing.T) {
 	hosts := runImporter(t, "remmina", dir)
 	if len(hosts) != 1 || hosts[0].Port != 2222 {
 		t.Fatalf("%+v", hosts)
+	}
+}
+
+// control characters, DEL and C1 controls from a session file reach
+// neither the terminal nor the saved names
+func TestImportersDropControlCharacters(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a%1B%5B31m"), []byte("HostName=a.example\nPublicKeyFile=/k\x1b[2J\xc2\x9bx.ppk\nProxyMethod=3\n"), 0o600)
+	hosts := runImporter(t, "putty", dir)
+	if len(hosts) != 1 || strings.ContainsAny(hosts[0].Name, "\x1b\x7f\u009b") {
+		t.Fatalf("%+v", hosts)
+	}
+	if strings.ContainsAny(lastNotes, "\x1b\x7f") || strings.Contains(lastNotes, "\xc2\x9b") || !strings.Contains(lastNotes, "PuTTY key") {
+		t.Errorf("notes %q", lastNotes)
+	}
+	rdir := t.TempDir()
+	os.WriteFile(filepath.Join(rdir, "r.remmina"), []byte("[remmina]\nname=we\x7fb\xc2\x9b\x1b[0m\nprotocol=SSH\nserver=r.example\n"), 0o600)
+	if hosts := runImporter(t, "remmina", rdir); len(hosts) != 1 || hosts[0].Name != "web[0m" {
+		t.Errorf("remmina %+v", hosts)
 	}
 }

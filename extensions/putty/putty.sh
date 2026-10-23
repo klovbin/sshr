@@ -72,12 +72,25 @@ function esc(s,   out, i, c, n) {
 		if (c == "\\") out = out "\\\\"
 		else if (c == "\"") out = out "\\\""
 		else if (c == "\t") out = out "\\t"
-		else if (c < " ") continue
+		else if (c < " " || c == "\177") continue
+		else if (c == "\302" && substr(s, i + 1, 1) >= "\200" && substr(s, i + 1, 1) <= "\237") i++
 		else out = out c
 	}
 	return out
 }
 function str(k, v) { return "\"" k "\":\"" esc(v) "\"" }
+# shown is s for a note on the terminal: control characters, DEL and the
+# C1 controls a session file may carry would drive the terminal
+function shown(s,   out, i, c) {
+	out = ""
+	for (i = 1; i <= length(s); i++) {
+		c = substr(s, i, 1)
+		if (c < " " || c == "\177") continue
+		if (c == "\302" && substr(s, i + 1, 1) >= "\200" && substr(s, i + 1, 1) <= "\237") { i++; continue }
+		out = out c
+	}
+	return out
+}
 # okport tells a port sshr takes, 1 to 65535 written in digits only
 function okport(p) { return p ~ /^[0-9]+$/ && p + 0 >= 1 && p + 0 <= 65535 }
 function hexval(c) { return index("0123456789ABCDEF", toupper(c)) - 1 }
@@ -110,7 +123,7 @@ function flush(   name, host, user, port, obj, at, jump, proto) {
 	if (okport(port)) obj = obj ",\"port\":" (port + 0)
 	if (user != "") obj = obj "," str("user", user)
 	if (v["PublicKeyFile"] ~ /\.[pP][pP][kK]$/) {
-		printf "putty: %s: the key %s is a PuTTY key, convert it with puttygen key.ppk -O private-openssh -o key and set it in sshr\n", name, v["PublicKeyFile"] > "/dev/stderr"
+		printf "putty: %s: the key %s is a PuTTY key, convert it with puttygen key.ppk -O private-openssh -o key and set it in sshr\n", shown(name), shown(v["PublicKeyFile"]) > "/dev/stderr"
 	} else if (v["PublicKeyFile"] != "") {
 		obj = obj "," str("key_file", v["PublicKeyFile"])
 	}
@@ -120,7 +133,7 @@ function flush(   name, host, user, port, obj, at, jump, proto) {
 		if (okport(v["ProxyPort"]) && v["ProxyPort"] + 0 != 22) jump = jump ":" (v["ProxyPort"] + 0)
 		obj = obj "," str("jump", jump)
 	} else if (v["ProxyMethod"] != "" && v["ProxyMethod"] != "0") {
-		printf "putty: %s: its proxy (ProxyMethod %s) is not carried, sshr goes direct or through jump hosts\n", name, v["ProxyMethod"] > "/dev/stderr"
+		printf "putty: %s: its proxy (ProxyMethod %s) is not carried, sshr goes direct or through jump hosts\n", shown(name), shown(v["ProxyMethod"]) > "/dev/stderr"
 	}
 	obj = obj "}"
 	out = out (out == "" ? "" : ",") obj
