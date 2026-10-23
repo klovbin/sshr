@@ -46,7 +46,7 @@ Fixed bugs: [#14](https://github.com/klovbin/sshr/issues/14), [#15](https://gith
 Needed before a release
 
 1. Check the GUI on real Windows and macOS: window, icon, askpass, Keychain prompt ([#26](https://github.com/klovbin/sshr/issues/26))
-2. Packages for AUR, Homebrew, Scoop and nixpkgs, release binaries with `sha256sums.txt` for `install.sh` ([#17](https://github.com/klovbin/sshr/issues/17))
+2. Packages for AUR, Homebrew, Scoop and nixpkgs from the release files, the steps and files for each are in [PACKAGING.md](PACKAGING.md) ([#17](https://github.com/klovbin/sshr/issues/17))
 
 Features
 
