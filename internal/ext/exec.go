@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"sshr.dev/internal/app"
 )
 
 // secretEnv are the variables that hold or open a secret of sshr or of a
@@ -28,8 +30,11 @@ var secretEnvPrefixes = []string{"OP_SESSION_", "SSHR_"}
 // without the secrets above and with what sshr tells an extension, the
 // protocol, the kind it was started for, its folder and the sshr binary to
 // call back (sshr list --json), names are compared in upper case because
-// Windows spells them either way
+// Windows spells them either way, inside a hop of sshr SSH_AUTH_SOCK is the
+// private agent of a key kept in sshr, app.StripAuthEnv puts the user's own
+// back first
 func Env(parent []string, kind, dir, sshrBin string) []string {
+	parent = app.StripAuthEnv(parent)
 	out := make([]string, 0, len(parent)+4)
 	for _, kv := range parent {
 		name, _, _ := strings.Cut(kv, "=")

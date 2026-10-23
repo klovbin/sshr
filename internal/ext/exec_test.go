@@ -94,3 +94,17 @@ func TestCommandRefusesAProgramThatIsNotExecutable(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestEnvGivesTheUsersAgentNotTheVaultAgent(t *testing.T) {
+	parent := []string{"SSH_AUTH_SOCK=/run/sshr/vault-agent", "SSHR_AUTH_SOCK_ORIG=/run/user/1000/agent", "SSH_ASKPASS=/x"}
+	got := Env(parent, KindCommand, "/d", "/b")
+	var socks []string
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "SSH_AUTH_SOCK=") {
+			socks = append(socks, kv)
+		}
+	}
+	if len(socks) != 1 || socks[0] != "SSH_AUTH_SOCK=/run/user/1000/agent" {
+		t.Errorf("SSH_AUTH_SOCK in the environment: %v, want only the user's own agent", socks)
+	}
+}
