@@ -365,3 +365,13 @@ func TestNewerPinsTouchNoFolder(t *testing.T) {
 		t.Fatalf("install: %v", err)
 	}
 }
+
+// a pins file of a newer format whose pins changed shape says to update
+// sshr, not to remove the file (#162)
+func TestNewerPinsAreNotCalledDamaged(t *testing.T) {
+	r := &Registry{Root: t.TempDir()}
+	os.WriteFile(filepath.Join(r.Root, PinsFile), []byte(`{"version":2,"extensions":["a"]}`), 0o600)
+	if _, err := r.Find("hello"); !errors.Is(err, app.ErrNewerFormat) || strings.Contains(err.Error(), "damaged") {
+		t.Errorf("%v", err)
+	}
+}

@@ -108,13 +108,17 @@ func appendKeys(b []byte, extra map[string]json.RawMessage) ([]byte, error) {
 // field a newer sshr wrote) are kept in h.extra and written back on save
 func decodeHost(b []byte) (Host, error) {
 	var h Host
-	if err := json.Unmarshal(b, &h); err != nil {
+	// the format first: a newer sshr may have changed the type of a known
+	// field, such a host is read with what still decodes, read only,
+	// instead of showing as a broken file
+	format, err := formatOf(b)
+	if err != nil {
 		return Host{}, err
 	}
-	var err error
-	if h.format, err = formatOf(b); err != nil {
+	if err := json.Unmarshal(b, &h); err != nil && format <= hostFormat {
 		return Host{}, err
 	}
+	h.format = format
 	if h.extra, err = unknownKeys(b, hostKeys); err != nil {
 		return Host{}, err
 	}

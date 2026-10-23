@@ -196,6 +196,9 @@ func (c *Client) load() error {
 	}
 	var st state
 	if err := json.Unmarshal(b, &st); err != nil {
+		if _, format, ferr := app.RecordExtra(b, reflect.TypeOf(state{})); ferr == nil && format > stateFormat {
+			return fmt.Errorf("%w: the sync state was written by a newer sshr (format %d), update sshr on this device to sync", app.ErrNewerFormat, format)
+		}
 		return fmt.Errorf("sync state %s is damaged: %v", c.statePath(), err)
 	}
 	var format int

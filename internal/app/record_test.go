@@ -148,3 +148,18 @@ func TestNewerHostFileIsReadOnly(t *testing.T) {
 		t.Errorf("a newer host cannot be removed: %v", err)
 	}
 }
+
+// a host file of a newer format whose known field changed type is read
+// with what decodes, read only, not reported as broken (#162)
+func TestNewerHostWithChangedFieldReads(t *testing.T) {
+	h, err := decodeHost([]byte(`{"version":2,"id":"0123456789abcdef0123456789abcdef","name":"w","host":"h","user":"u","port":"22"}`))
+	if err != nil || h.Host != "h" || h.format != 2 {
+		t.Fatalf("%+v %v", h, err)
+	}
+	if _, err := encodeHost(&h); !errors.Is(err, ErrNewerFormat) {
+		t.Errorf("written: %v", err)
+	}
+	if _, err := decodeHost([]byte(`{"id":"x","port":"22"}`)); err == nil {
+		t.Error("a damaged file of today's format read")
+	}
+}

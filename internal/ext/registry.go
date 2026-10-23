@@ -117,6 +117,9 @@ func (r *Registry) pins() (map[string]Lock, error) {
 		Extensions map[string]Lock `json:"extensions"`
 	}
 	if err := json.Unmarshal(b, &file); err != nil {
+		if _, format, ferr := app.RecordExtra(b, reflect.TypeOf(pinsFile{})); ferr == nil && format > pinsFormat {
+			return nil, fmt.Errorf("%w: %s was written by a newer sshr (format %d), update sshr to use the extensions", app.ErrNewerFormat, path, format)
+		}
 		return nil, fmt.Errorf("%s is damaged, remove it and install the extensions again: %v", path, err)
 	}
 	if file.Extensions == nil {
