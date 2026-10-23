@@ -33,7 +33,13 @@ for dir in "$@"; do
 			continue
 			;;
 		esac
-		if [ -f "$f" ]; then
+		# a link in a synced folder can point at any file, a huge file
+		# would be read into awk at once
+		if [ -L "$f" ]; then
+			echo "remmina: $f is a link, it is skipped" >&2
+		elif [ -f "$f" ] && [ "$(wc -c <"$f")" -gt 1048576 ]; then
+			echo "remmina: $f is over 1 MiB, it is skipped" >&2
+		elif [ -f "$f" ]; then
 			files="$files
 $f"
 		fi

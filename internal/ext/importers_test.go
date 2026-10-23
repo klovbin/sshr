@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -164,6 +165,29 @@ func TestImportersSkipNamesWithLineBreaks(t *testing.T) {
 		}
 		if hosts := runImporter(t, c.name, dir); len(hosts) != 0 {
 			t.Errorf("%s read %+v", c.name, hosts)
+		}
+	}
+}
+
+// a link and a file over 1 MiB are skipped, a link in a synced folder can
+// point at any file
+func TestImportersSkipLinksAndHugeFiles(t *testing.T) {
+	for _, c := range []struct{ name, ext, body string }{
+		{"remmina", ".remmina", "[remmina]\nprotocol=SSH\nserver=%s\n"},
+		{"putty", "", "HostName=%s\n"},
+	} {
+		dir, other := t.TempDir(), t.TempDir()
+		target := filepath.Join(other, "target"+c.ext)
+		os.WriteFile(target, []byte(strings.ReplaceAll(c.body, "%s", "linked.example")), 0o600)
+		if err := os.Symlink(target, filepath.Join(dir, "link"+c.ext)); err != nil {
+			t.Skip("no symlinks here:", err)
+		}
+		huge := strings.ReplaceAll(c.body, "%s", "huge.example") + strings.Repeat("#", 1<<20)
+		os.WriteFile(filepath.Join(dir, "huge"+c.ext), []byte(huge), 0o600)
+		os.WriteFile(filepath.Join(dir, "ok"+c.ext), []byte(strings.ReplaceAll(c.body, "%s", "ok.example")), 0o600)
+		hosts := runImporter(t, c.name, dir)
+		if len(hosts) != 1 || hosts[0].Host != "ok.example" {
+			t.Errorf("%s: %+v", c.name, hosts)
 		}
 	}
 }
