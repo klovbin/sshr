@@ -81,7 +81,9 @@ func apiListener(listen string, opts *api.Options) (net.Listener, string, error)
 			c.Close()
 			return nil, "", fmt.Errorf("another sshr serve is already listening on %s", path)
 		}
-		os.Remove(path)
+		if err := removeStaleSocket(path); err != nil {
+			return nil, "", err
+		}
 		ln, err := net.Listen("unix", path)
 		if err != nil {
 			return nil, "", err
@@ -116,7 +118,9 @@ func apiToken() (token, path string, err error) {
 		return "", "", err
 	}
 	path = filepath.Join(home, ".sshr", "api-token")
-	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) >= 32 {
+	// a read during a rewrite by another sshr serve fails on Windows, a new
+	// token here would leave that one with a stale token
+	if b, err := app.ReadFileShared(path); err == nil && len(strings.TrimSpace(string(b))) >= 32 {
 		return strings.TrimSpace(string(b)), path, nil
 	}
 	var buf [32]byte
@@ -127,5 +131,21 @@ func apiToken() (token, path string, err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", "", err
 	}
-	return token, path, os.WriteFile(path, []byte(token+"\n"), 0o600)
+	return token, path, app.WriteFileAtomic(path, []byte(token+"\n"), 0o600)
+}
+
+// removeStaleSocket removes a socket left at path, anything else that is
+// there stays and is an error
+func removeStaleSocket(path string) error {
+	fi, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("%s exists and is not a socket, choose another path", path)
+	}
+	return os.Remove(path)
 }

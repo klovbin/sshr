@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"sshr.dev/internal/app"
 	"sshr.dev/internal/syncproto"
@@ -52,7 +53,33 @@ type state struct {
 	// trusts only it until it has verified its first manifest
 	Approver string                `json:"approver,omitempty"`
 	Entries  map[string]entryState `json:"entries"`
-	LastSync time.Time             `json:"last_sync"`
+	// Skipped are remote entries this device could not import (a mode of a
+	// newer sshr, a host that fails validation), a push carries them on
+	// unchanged and every pull tries them again
+	Skipped map[string]syncproto.Entry `json:"skipped,omitempty"`
+	// Rotation is a key change that is in the manifest but whose key has
+	// not reached every kept device yet, the next sync delivers it
+	Rotation *rotation `json:"rotation,omitempty"`
+	LastSync time.Time `json:"last_sync"`
+}
+
+// rotation is a committed vault key change still to deliver, the key waits
+// in the keychain under key-pending until every envelope is written
+type rotation struct {
+	Epoch   int                `json:"epoch"`
+	Devices []syncproto.Device `json:"devices"`
+}
+
+// pushPlan is what one push writes besides the changed hosts, a plan is
+// built again after every lost race, from the state the pull just brought
+type pushPlan struct {
+	// devices replaces the device list, nil keeps it
+	devices []syncproto.Device
+	// epoch and key start a new vault key, every host is sealed again
+	epoch int
+	key   []byte
+	// rotation is saved together with the new manifest
+	rotation *rotation
 }
 
 // Client syncs one Store
@@ -72,7 +99,44 @@ type Client struct {
 
 	st   *state
 	keys *deviceKeys
+	// keyOK are the epochs whose key verified a manifest in this run
+	keyOK map[int]bool
+	// running is set while this Client holds the run lock, calls inside
+	// the run do not take it again
+	running bool
 }
+
+// run holds the lock of the sync folder for fn, two sync runs at once
+// would load the same state, the last save would drop a key change of the
+// other and both could store their own new vault key, the second run stops
+// at once instead of waiting, the state is read again under the lock
+func (c *Client) run(fn func() error) error {
+	if c.running {
+		return fn()
+	}
+	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := app.WaitLock(filepath.Join(c.Dir, "run.lock"), "running a sync", 0)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	c.running, c.st = true, nil
+	defer func() { c.running = false }()
+	return fn()
+}
+
+// ErrKeyPending means the manifest uses a vault key whose envelope has not
+// reached this device yet, the device that changed it delivers it shortly
+var ErrKeyPending = errors.New("the device that changed the vault key has not delivered it here yet, sync again in a moment")
+
+// applyLocked is called by apply with the host lock held, before the host
+// is read again, tests use it to save a host from another Store meanwhile
+var applyLocked func(id string)
+
+// errLost means another device pushed first
+var errLost = errors.New("other devices kept pushing at the same time, try again")
 
 // ErrNotSetUp means sync init or sync join has not run on this machine
 var ErrNotSetUp = errors.New("sync is not set up here, run sshr sync init or sshr sync join")
@@ -105,7 +169,7 @@ func (c *Client) load() error {
 	if c.st != nil {
 		return nil
 	}
-	b, err := os.ReadFile(c.statePath())
+	b, err := app.ReadFileShared(c.statePath())
 	if os.IsNotExist(err) {
 		return ErrNotSetUp
 	}
@@ -143,11 +207,7 @@ func (c *Client) save() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	tmp := c.statePath() + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.statePath())
+	return app.WriteFileAtomic(c.statePath(), b, 0o600)
 }
 
 // checkServer refuses plain HTTP except to this machine
@@ -218,9 +278,80 @@ func (c *Client) vaultKey(epoch int) ([]byte, error) {
 	if ok {
 		return key, nil
 	}
+	if c.st.Rotation != nil && c.st.Rotation.Epoch == epoch {
+		if key, ok, err := app.SecretGet(c.prefix() + "key-pending"); err != nil || ok {
+			return key, err
+		}
+	}
+	if key, err = c.envelopeKey(epoch); err != nil {
+		return nil, err
+	}
+	return key, app.SecretSet(name, key)
+}
+
+func (c *Client) markKey(epoch int) {
+	if c.keyOK == nil {
+		c.keyOK = map[int]bool{}
+	}
+	c.keyOK[epoch] = true
+}
+
+// checkKey makes sure key opens the current manifest before a push seals
+// anything with it, a wrong key cached here would write a manifest no
+// other device can verify, a wrong one is replaced by the envelope's key
+func (c *Client) checkKey(epoch int, key []byte) ([]byte, error) {
+	if c.keyOK[epoch] || c.st.Counter == 0 {
+		return key, nil
+	}
+	code, b, _, err := c.call("GET", "/manifest", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if code == http.StatusNotFound {
+		return key, nil
+	}
+	if code != http.StatusOK {
+		return nil, serverError(code, b)
+	}
+	var sm syncproto.Signed
+	var m syncproto.Manifest
+	if err := json.Unmarshal(b, &sm); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(sm.Body, &m); err != nil {
+		return nil, err
+	}
+	if m.Epoch != epoch {
+		// another device changed the key meanwhile, the push loses the
+		// race on the counter and pulls first
+		return key, nil
+	}
+	if verifyMAC(&sm, key) != nil {
+		fresh, err := c.envelopeKey(epoch)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyMAC(&sm, fresh); err != nil {
+			return nil, fmt.Errorf("the vault key on this device does not open the account, pair it again: %v", err)
+		}
+		if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(epoch), fresh); err != nil {
+			return nil, err
+		}
+		key = fresh
+	}
+	c.markKey(epoch)
+	return key, nil
+}
+
+// envelopeKey reads the vault key of epoch from this device's envelope on
+// the server, without touching the keychain
+func (c *Client) envelopeKey(epoch int) ([]byte, error) {
 	code, b, _, err := c.call("GET", "/envelopes/"+c.st.DeviceID, nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	if code == http.StatusNotFound {
+		return nil, ErrKeyPending
 	}
 	if code != http.StatusOK {
 		return nil, serverError(code, b)
@@ -229,13 +360,13 @@ func (c *Client) vaultKey(epoch int) ([]byte, error) {
 	if err := json.Unmarshal(b, &env); err != nil {
 		return nil, err
 	}
+	if env.Epoch < epoch {
+		return nil, ErrKeyPending
+	}
 	if env.Epoch != epoch {
 		return nil, fmt.Errorf("no vault key of epoch %d for this device, it may have been removed, re-pair it", epoch)
 	}
-	if key, err = c.keys.openEnvelope(env, c.st.Account); err != nil {
-		return nil, err
-	}
-	return key, app.SecretSet(name, key)
+	return c.keys.openEnvelope(env, c.st.Account)
 }
 
 // newSeed makes the device key of this machine
@@ -266,6 +397,10 @@ func hostname() string {
 // Init creates an account on server with this machine as its first device
 // and pushes the hosts
 func (c *Client) Init(server, name string) error {
+	return c.run(func() error { return c.initAccount(server, name) })
+}
+
+func (c *Client) initAccount(server, name string) error {
 	if _, err := os.Stat(c.statePath()); err == nil {
 		return errors.New("sync is already set up here, see sshr sync status")
 	}
@@ -319,7 +454,9 @@ func (c *Client) putEnvelope(d syncproto.Device, epoch int, key []byte) error {
 	if err != nil {
 		return err
 	}
-	if code != http.StatusNoContent {
+	// 409 is a newer key already delivered to that device by a later
+	// rotation, writing this one over it would lock the device out
+	if code != http.StatusNoContent && code != http.StatusConflict {
 		return serverError(code, rb)
 	}
 	return nil
@@ -337,7 +474,15 @@ func (c *Client) Invite() (string, error) {
 // Join asks to add this machine to the account of code, an existing device
 // approves it with sshr sync approve after comparing the fingerprint Join
 // returns
-func (c *Client) Join(server, code, name string) (string, error) {
+func (c *Client) Join(server, code, name string) (out string, err error) {
+	err = c.run(func() error {
+		out, err = c.join(server, code, name)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) join(server, code, name string) (string, error) {
 	if _, err := os.Stat(c.statePath()); err == nil {
 		return "", errors.New("sync is already set up here, see sshr sync status")
 	}
@@ -392,6 +537,7 @@ func (c *Client) Pending() ([]syncproto.DeviceRecord, error) {
 	var out []syncproto.DeviceRecord
 	for _, d := range all {
 		if !d.Active && syncproto.DeviceID(d.SignPub) == d.ID {
+			d.Name = CleanName(d.Name)
 			out = append(out, d)
 		}
 	}
@@ -400,7 +546,15 @@ func (c *Client) Pending() ([]syncproto.DeviceRecord, error) {
 
 // Approve adds a waiting device whose ID starts with prefix, call it only
 // after the fingerprint matched the one on the new device's screen
-func (c *Client) Approve(prefix string) (*syncproto.DeviceRecord, error) {
+func (c *Client) Approve(prefix string) (out *syncproto.DeviceRecord, err error) {
+	err = c.run(func() error {
+		out, err = c.approve(prefix)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	pending, err := c.Pending()
 	if err != nil {
 		return nil, err
@@ -418,15 +572,26 @@ func (c *Client) Approve(prefix string) (*syncproto.DeviceRecord, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
+	// the list is taken from the state each attempt pulled, a device
+	// another one removed meanwhile is not written back
+	plan := func() (pushPlan, error) {
+		for _, t := range c.st.Trusted {
+			if t.ID == d.ID {
+				return pushPlan{}, nil
+			}
+		}
+		return pushPlan{devices: append(append([]syncproto.Device(nil), c.st.Trusted...), d.Device)}, nil
+	}
+	if err := c.push(plan); err != nil {
+		return nil, err
+	}
+	// the envelope is sealed for the epoch that was committed, the device
+	// cannot read anything before it is activated below
 	key, err := c.vaultKey(c.st.Epoch)
 	if err != nil {
 		return nil, err
 	}
 	if err := c.putEnvelope(d.Device, c.st.Epoch, key); err != nil {
-		return nil, err
-	}
-	devices := append(append([]syncproto.Device(nil), c.st.Trusted...), d.Device)
-	if err := c.push(devices); err != nil {
 		return nil, err
 	}
 	code, b, _, err := c.call("POST", "/devices/"+d.ID+"/activate", nil, nil)
@@ -458,6 +623,11 @@ func payloadOf(h app.Host) ([]byte, error) {
 		p.Password = h.Password
 	}
 	p.Host.PasswordSealed, p.Host.PlainPassword, p.Host.KeySealed = "", "", ""
+	// when this machine last connected stays here, it would make every
+	// connect a change to push
+	p.Host.LastConnected = nil
+	// the save counter is per machine, Import sets its own
+	p.Host.Rev = 0
 	// references to secrets of this machine stay here, the other devices
 	// do not take them anyway (app.FromOtherDevice)
 	p.Host.PasswordRef, p.Host.KeyRef = "", ""
@@ -532,8 +702,10 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 }
 
 // verify checks one manifest against what this device trusts and returns
-// it, it then becomes the trusted state
-func (c *Client) verify(sm *syncproto.Signed) (*syncproto.Manifest, error) {
+// it, it then becomes the trusted state, the MAC is checked only when
+// withMAC, the signature already vouches for a manifest in the middle of
+// the chain and the server keeps the vault key of the newest epoch only
+func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest, error) {
 	var m syncproto.Manifest
 	if err := json.Unmarshal(sm.Body, &m); err != nil {
 		return nil, err
@@ -569,12 +741,32 @@ func (c *Client) verify(sm *syncproto.Signed) (*syncproto.Manifest, error) {
 	if m.Epoch < c.st.Epoch {
 		return nil, errors.New("manifest of an old vault key epoch")
 	}
-	key, err := c.vaultKey(m.Epoch)
-	if err != nil {
-		return nil, err
-	}
-	if err := verifyMAC(sm, key); err != nil {
-		return nil, err
+	if withMAC {
+		// a key change this device committed while its state was not
+		// saved, its key still waits as key-pending and verifies the
+		// manifest, the delivery is taken up again
+		if c.st.Rotation == nil {
+			if pending, ok, _ := app.SecretGet(c.prefix() + "key-pending"); ok && verifyMAC(sm, pending) == nil {
+				c.st.Rotation = &rotation{Epoch: m.Epoch, Devices: m.Devices}
+			}
+		}
+		key, err := c.vaultKey(m.Epoch)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyMAC(sm, key); err != nil {
+			// the key cached in the keychain may be a wrong one, the key
+			// in the envelope replaces it only when it verifies, a failed
+			// read leaves the cache as it was
+			fresh, ferr := c.envelopeKey(m.Epoch)
+			if ferr != nil || verifyMAC(sm, fresh) != nil {
+				return nil, err
+			}
+			if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(m.Epoch), fresh); err != nil {
+				return nil, err
+			}
+		}
+		c.markKey(m.Epoch)
 	}
 	inside := false
 	for _, d := range m.Devices {
@@ -593,7 +785,14 @@ func (c *Client) verify(sm *syncproto.Signed) (*syncproto.Manifest, error) {
 
 // Pull applies the changes other devices pushed
 func (c *Client) Pull() error {
+	return c.run(func() error { return c.pull() })
+}
+
+func (c *Client) pull() error {
 	if err := c.load(); err != nil {
+		return err
+	}
+	if err := c.finishRotation(); err != nil {
 		return err
 	}
 	history, err := c.fetchHistory()
@@ -617,16 +816,33 @@ func (c *Client) Pull() error {
 		return errors.New("no manifest adds this device yet, approve it on a device that is already in")
 	found:
 	}
+	// a pull cut short keeps the chain where it was, so the next run
+	// verifies and applies the same manifests again, the hosts applied so
+	// far keep their entry state and are not taken for local edits
+	before := *c.st
+	rollback := func() {
+		c.st.Counter, c.st.Head, c.st.Trusted, c.st.Epoch, c.st.Approver = before.Counter, before.Head, before.Trusted, before.Epoch, before.Approver
+	}
 	var last *syncproto.Manifest
 	for i := range history {
-		if last, err = c.verify(&history[i]); err != nil {
+		// a device offline through several key rotations can open only
+		// the newest epoch, so only the manifest it applies needs the key
+		if last, err = c.verify(&history[i], i == len(history)-1); err != nil {
+			rollback()
 			return err
 		}
 	}
 	if last != nil {
 		if err := c.apply(last); err != nil {
+			rollback()
+			if serr := c.save(); serr != nil {
+				return serr
+			}
 			return err
 		}
+	}
+	if err := c.finishRotation(); err != nil {
+		return err
 	}
 	c.st.LastSync = time.Now().UTC()
 	return c.save()
@@ -639,9 +855,12 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	if err != nil {
 		return err
 	}
-	local, err := c.localHosts()
+	local, broken, err := c.localHosts()
 	if err != nil {
 		return err
+	}
+	if c.st.Skipped == nil {
+		c.st.Skipped = map[string]syncproto.Entry{}
 	}
 	ids := make([]string, 0, len(m.Entries))
 	for id := range m.Entries {
@@ -650,6 +869,13 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := m.Entries[id]
+		if broken[id] {
+			c.logf("skipped %s, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
+			continue
+		}
+		delete(c.st.Skipped, id)
+		var dup *app.Host
+		conflict := false
 		known, seen := c.st.Entries[id]
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
 		if seen && e.Lamport == known.Lamport && e.Device == known.Device {
@@ -662,160 +888,270 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		if seen && !newer(e, knownEntry) {
 			continue
 		}
-		if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
-			// neither side is lost, the later change keeps the host and
-			// the other one becomes a copy that syncs like any host
-			mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
-			if newer(mine, e) {
-				if !e.Deleted {
-					p, err := c.fetchPayload(id, e, key, m.Epoch)
-					if err != nil {
+		// the remote version is downloaded first, the local host is read
+		// again right after, so an edit saved meanwhile in the app or the
+		// CLI is seen and a failed download leaves nothing behind
+		var p *payload
+		if !e.Deleted {
+			if p, err = c.fetchPayload(id, e, key, m.Epoch); err != nil {
+				return err
+			}
+		}
+		// from reading the host here to writing the remote version no other
+		// sshr process saves hosts, an edit saved before is seen as a local
+		// change, one saved after waits and comes after the remote version
+		err = c.Store.Locked(func(store *app.Store) error {
+			if applyLocked != nil {
+				applyLocked(id)
+			}
+			// the host as it is now, not as it was when the pull started, an
+			// edit counts as a local change and goes through the conflict
+			// rules instead of being overwritten
+			if h, err := store.Find(id); err == nil && h.ID == id {
+				if now, err := payloadOf(*h); err == nil {
+					local[id] = now
+				}
+			} else if errors.Is(err, app.ErrNotFound) {
+				delete(local, id)
+			}
+			if _, ok := local[id]; !ok && seen && !known.Deleted && !e.Deleted {
+				// removed here and changed there, the change wins so nothing
+				// written on the other device is lost, the user is told
+				c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", short(id, 8), short(e.Device, 8))
+			}
+			if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
+				// neither side is lost, the later change keeps the host and
+				// the other one becomes a copy that syncs like any host
+				mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
+				if newer(mine, e) {
+					if !e.Deleted {
+						p.Host.Password = p.Password
+						p.Host.ID = ""
+						p.Host.Name = conflictName(p.Host.Name, e.Device)
+						var notes []string
+						p.Host, notes = app.FromOtherDevice(p.Host, nil)
+						cp, err := store.Add(p.Host)
+						if err != nil {
+							c.st.Skipped[id] = e
+							c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+							return nil
+						}
+						c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", short(id, 8), short(e.Device, 8), cp.Name)
+						for _, n := range notes {
+							c.logf("%s: %s", cp.Name, n)
+						}
+					}
+					// the remote version is handled, the entry moves to it
+					// and keeps the old local hash, the change made here
+					// still counts as not pushed and the next push outranks
+					// the remote one, a later pull makes no second copy
+					c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
+					return nil
+				}
+				conflict = true
+			}
+			next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
+			if conflict {
+				var name string
+				if h, err := store.Find(id); err == nil {
+					name = h.Name
+				}
+				cp, err := store.Duplicate(id, conflictName(name, c.st.DeviceID))
+				if err != nil {
+					return fmt.Errorf("keeping the local version of %s: %v", name, err)
+				}
+				dup = cp
+			}
+			if dup != nil && e.Deleted {
+				c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
+			}
+			if e.Deleted {
+				if _, ok := local[id]; ok {
+					if err := store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
 						return err
 					}
-					p.Host.Password = p.Password
-					p.Host.ID = ""
-					p.Host.Name = conflictName(p.Host.Name, e.Device)
-					var notes []string
-					p.Host, notes = app.FromOtherDevice(p.Host, nil)
-					cp, err := c.Store.Add(p.Host)
-					if err != nil {
-						return fmt.Errorf("keeping the other version of %s: %v", p.Host.Name, err)
-					}
-					c.logf("conflict on %s: kept the change made here, the one from device %s is saved as %q", id[:8], e.Device[:8], cp.Name)
-					for _, n := range notes {
-						c.logf("%s: %s", cp.Name, n)
-					}
+					c.logf("removed %s", short(id, 8))
 				}
-				continue
+				c.st.Entries[id] = next
+				return nil
 			}
-			var name string
-			if h, err := c.Store.Find(id); err == nil {
-				name = h.Name
+			p.Host.Password = p.Password
+			var cur *app.Host
+			if h, err := store.Find(id); err == nil && h.ID == id {
+				cur = h
 			}
-			cp, err := c.Store.Duplicate(id, conflictName(name, c.st.DeviceID))
+			_, notes := app.FromOtherDevice(p.Host, cur)
+			h, err := store.Import(p.Host)
 			if err != nil {
-				return fmt.Errorf("keeping the local version of %s: %v", name, err)
-			}
-			c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", id[:8], e.Device[:8], cp.Name)
-		}
-		next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted}
-		if e.Deleted {
-			if _, ok := local[id]; ok {
-				if err := c.Store.Delete(id); err != nil && !errors.Is(err, app.ErrNotFound) {
-					return err
+				// one host this version cannot take must not stop the others,
+				// the copy made for it goes too, the next pull makes it again
+				if dup != nil {
+					store.Delete(dup.ID)
 				}
-				c.logf("removed %s", id[:8])
+				c.st.Skipped[id] = e
+				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", p.Host.Name, err)
+				return nil
 			}
+			if dup != nil {
+				c.logf("conflict on %s: the change from device %s won, the one made here is saved as %q", short(id, 8), short(e.Device, 8), dup.Name)
+			}
+			for _, n := range notes {
+				c.logf("%s: %s", h.Name, n)
+			}
+			written, err := payloadOf(*h)
+			if err != nil {
+				return err
+			}
+			next.Local = c.localHash(written)
 			c.st.Entries[id] = next
-			continue
-		}
-		p, err := c.fetchPayload(id, e, key, m.Epoch)
+			c.logf("updated %s", h.Name)
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		p.Host.Password = p.Password
-		var cur *app.Host
-		if h, err := c.Store.Find(id); err == nil && h.ID == id {
-			cur = h
-		}
-		_, notes := app.FromOtherDevice(p.Host, cur)
-		h, err := c.Store.Import(p.Host)
-		if err != nil {
-			return fmt.Errorf("host %s: %v", p.Host.Name, err)
-		}
-		for _, n := range notes {
-			c.logf("%s: %s", h.Name, n)
-		}
-		written, err := payloadOf(*h)
-		if err != nil {
-			return err
-		}
-		next.Local = c.localHash(written)
-		c.st.Entries[id] = next
-		c.logf("updated %s", h.Name)
 	}
 	return nil
 }
 
-// fetchPayload downloads and opens the blob of entry id
-func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch int) (*payload, error) {
-	code, blob, _, err := c.call("GET", "/blobs/"+e.Hash, nil, nil)
+// fetchBlob downloads the blob hash of entry id and opens it
+func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
+	code, blob, _, err := c.call("GET", "/blobs/"+hash, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	if code != http.StatusOK {
 		return nil, serverError(code, blob)
 	}
-	if blobHash(blob) != e.Hash {
-		return nil, fmt.Errorf("blob of %s does not match its hash", id[:8])
+	if blobHash(blob) != hash {
+		return nil, fmt.Errorf("blob of %s does not match its hash", short(id, 8))
 	}
-	plain, err := openEntry(key, c.st.Account, id, epoch, blob)
+	return openEntry(key, c.st.Account, id, epoch, blob)
+}
+
+// putBlob seals the plain payload of entry id and uploads it
+func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string, error) {
+	blob, err := sealEntry(key, c.st.Account, id, epoch, plain)
+	if err != nil {
+		return "", err
+	}
+	h := blobHash(blob)
+	code, b, _, err := c.call("PUT", "/blobs/"+h, blob, nil)
+	if err != nil {
+		return "", err
+	}
+	if code != http.StatusNoContent {
+		return "", serverError(code, b)
+	}
+	return h, nil
+}
+
+// fetchPayload downloads and opens the blob of entry id
+func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch int) (*payload, error) {
+	plain, err := c.fetchBlob(id, e.Hash, key, epoch)
 	if err != nil {
 		return nil, err
 	}
 	var p payload
 	if err := json.Unmarshal(plain, &p); err != nil {
-		return nil, fmt.Errorf("entry %s: %v", id[:8], err)
+		return nil, fmt.Errorf("entry %s: %v", short(id, 8), err)
 	}
 	if p.Host.ID != id {
-		return nil, fmt.Errorf("entry %s holds host %s", id[:8], p.Host.ID)
+		return nil, fmt.Errorf("entry %s holds host %s", short(id, 8), p.Host.ID)
 	}
 	return &p, nil
 }
 
-// conflictName names the copy that keeps the losing side of a conflict
-func conflictName(name, device string) string {
-	return fmt.Sprintf("%s (conflict %s %s)", name, device[:6], time.Now().Format("2006-01-02 15:04"))
+// short cuts s to n characters for logs and names, ids from a manifest are
+// signed but their length is not checked
+func short(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
-func (c *Client) localHosts() (map[string][]byte, error) {
-	hosts, err := c.Store.List()
+// conflictName names the copy that keeps the losing side of a conflict
+func conflictName(name, device string) string {
+	return fmt.Sprintf("%s (conflict %s %s)", name, short(device, 6), time.Now().Format("2006-01-02 15:04"))
+}
+
+// localHosts returns the payload of every host here and the IDs of host
+// files that do not load, those are neither deleted nor overwritten
+func (c *Client) localHosts() (map[string][]byte, map[string]bool, error) {
+	hosts, unreadable, err := c.Store.ListAll()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string][]byte{}
 	for _, h := range hosts {
 		p, err := payloadOf(h)
 		if err != nil {
-			return nil, fmt.Errorf("host %s: %v", h.Name, err)
+			return nil, nil, fmt.Errorf("host %s: %v", h.Name, err)
 		}
 		out[h.ID] = p
 	}
-	return out, nil
+	broken := map[string]bool{}
+	for _, id := range unreadable {
+		broken[id] = true
+	}
+	return out, broken, nil
 }
 
 // Push sends the hosts changed here, it pulls first
 func (c *Client) Push() error {
+	return c.run(func() error { return c.pushAll() })
+}
+
+func (c *Client) pushAll() error {
 	if err := c.load(); err != nil {
 		return err
 	}
 	return c.push(nil)
 }
 
-// push uploads changed hosts and a new manifest, devices replaces the
-// device list (approve, remove), a push that loses the race to another
-// device pulls and tries again
-func (c *Client) push(devices []syncproto.Device) error {
+// push uploads changed hosts and a new manifest, plan says what else the
+// manifest changes (approve, remove), nil changes nothing else, a push that
+// loses the race to another device pulls and builds the plan again
+func (c *Client) push(plan func() (pushPlan, error)) error {
 	for try := 0; try < 5; try++ {
 		if c.st.Counter > 0 {
 			if err := c.Pull(); err != nil {
 				return err
 			}
 		}
-		done, err := c.pushOnce(devices)
+		var p pushPlan
+		if plan != nil {
+			var err error
+			if p, err = plan(); err != nil {
+				return err
+			}
+		}
+		done, err := c.pushOnce(p)
 		if err != nil || done {
 			return err
 		}
 	}
-	return errors.New("other devices kept pushing at the same time, try again")
+	return errLost
 }
 
-func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
-	key, err := c.vaultKey(c.st.Epoch)
-	if err != nil {
-		return false, err
+// pushOnce writes one manifest, it returns false when another device
+// pushed first, the state of this device changes only when it wins
+func (c *Client) pushOnce(plan pushPlan) (bool, error) {
+	devices, epoch, key := plan.devices, c.st.Epoch, plan.key
+	reseal := plan.epoch != 0 && plan.epoch != c.st.Epoch
+	if reseal {
+		epoch = plan.epoch
+	} else {
+		var err error
+		if key, err = c.vaultKey(epoch); err != nil {
+			return false, err
+		}
+		if key, err = c.checkKey(epoch, key); err != nil {
+			return false, err
+		}
 	}
-	local, err := c.localHosts()
+	local, broken, err := c.localHosts()
 	if err != nil {
 		return false, err
 	}
@@ -825,24 +1161,36 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		entries[id] = syncproto.Entry{Hash: e.Blob, Lamport: e.Lamport, Device: e.Device, Deleted: e.Deleted}
 		next[id] = e
 	}
+	// a skipped entry goes on as the other device wrote it, the host here
+	// is neither pushed over it nor deleted
+	for id, e := range c.st.Skipped {
+		entries[id] = e
+	}
 	changed := devices != nil || c.st.Counter == 0
+	fresh := map[string]bool{}
 	for id, plain := range local {
-		known, seen := c.st.Entries[id]
-		lh := c.localHash(plain)
-		if seen && !known.Deleted && known.Local == lh {
+		if _, ok := c.st.Skipped[id]; ok {
 			continue
 		}
-		blob, err := sealEntry(key, c.st.Account, id, c.st.Epoch, plain)
+		known, seen := c.st.Entries[id]
+		lh := c.localHash(plain)
+		unchanged := seen && !known.Deleted && known.Local == lh
+		if unchanged && !reseal {
+			continue
+		}
+		h, err := c.putBlob(key, id, epoch, plain)
 		if err != nil {
 			return false, err
 		}
-		h := blobHash(blob)
-		code, b, _, err := c.call("PUT", "/blobs/"+h, blob, nil)
-		if err != nil {
-			return false, err
-		}
-		if code != http.StatusNoContent {
-			return false, serverError(code, b)
+		fresh[id] = true
+		if unchanged {
+			// only the key changed, the stamp stays, so a device with its
+			// own edit of this host sees no change from here
+			entries[id] = syncproto.Entry{Hash: h, Lamport: known.Lamport, Device: known.Device}
+			known.Blob = h
+			next[id] = known
+			changed = true
+			continue
 		}
 		e := syncproto.Entry{Hash: h, Lamport: known.Lamport + 1, Device: c.st.DeviceID}
 		entries[id] = e
@@ -850,11 +1198,54 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		changed = true
 	}
 	for id, known := range c.st.Entries {
+		if _, ok := c.st.Skipped[id]; ok {
+			continue
+		}
+		if broken[id] {
+			c.logf("kept %s on other devices, its host file %s.json here does not load, fix it, removing it deletes the host on every device", short(id, 8), id)
+			continue
+		}
 		if _, ok := local[id]; !ok && !known.Deleted {
 			e := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID, Deleted: true}
 			entries[id] = e
 			next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Deleted: true}
 			changed = true
+		}
+	}
+	skipped := map[string]syncproto.Entry{}
+	for id, e := range c.st.Skipped {
+		skipped[id] = e
+	}
+	if reseal {
+		// an entry carried on without a host here to seal (skipped, or a
+		// file that does not load) is opened with the old key and sealed
+		// with the new one, a device with the new key only reads it too
+		oldKey, err := c.vaultKey(c.st.Epoch)
+		if err != nil {
+			return false, err
+		}
+		for id, e := range entries {
+			if e.Deleted || fresh[id] {
+				continue
+			}
+			plain, err := c.fetchBlob(id, e.Hash, oldKey, c.st.Epoch)
+			if err != nil {
+				return false, err
+			}
+			h, err := c.putBlob(key, id, epoch, plain)
+			if err != nil {
+				return false, err
+			}
+			if st, ok := next[id]; ok && st.Blob == e.Hash {
+				st.Blob = h
+				next[id] = st
+			}
+			if sk, ok := skipped[id]; ok {
+				sk.Hash = h
+				skipped[id] = sk
+			}
+			e.Hash = h
+			entries[id] = e
 		}
 	}
 	if !changed {
@@ -864,7 +1255,7 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		devices = c.st.Trusted
 	}
 	m := &syncproto.Manifest{
-		Version: syncproto.FormatVersion, Account: c.st.Account, Epoch: c.st.Epoch,
+		Version: syncproto.FormatVersion, Account: c.st.Account, Epoch: epoch,
 		Counter: c.st.Counter + 1, Prev: c.st.Head, Devices: devices, Entries: entries,
 	}
 	b, sm, err := c.keys.signManifest(m, key, c.st.DeviceID)
@@ -882,6 +1273,10 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 		return false, serverError(code, rb)
 	}
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
+	c.st.Epoch, c.st.Skipped = epoch, skipped
+	if plan.rotation != nil {
+		c.st.Rotation = plan.rotation
+	}
 	c.st.LastSync = time.Now().UTC()
 	return true, c.save()
 }
@@ -889,55 +1284,141 @@ func (c *Client) pushOnce(devices []syncproto.Device) (bool, error) {
 // RemoveDevice takes a device out of the account, the vault key changes,
 // every host is encrypted again with the new one and the device's token is
 // revoked, what it already downloaded it keeps
-func (c *Client) RemoveDevice(prefix string) (*syncproto.Device, error) {
+//
+// The token is revoked first, then nothing else changes before the new
+// manifest wins: the new key waits in the keychain as key-pending, the
+// envelopes of the kept devices are written only after the commit, a push
+// that loses the race leaves nothing behind and the next attempt plans
+// again from the pulled state
+func (c *Client) RemoveDevice(prefix string) (out *syncproto.Device, err error) {
+	err = c.run(func() error {
+		out, err = c.removeDevice(prefix)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
-	var target *syncproto.Device
-	var keep []syncproto.Device
-	for i, d := range c.st.Trusted {
-		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
-			if target != nil {
-				return nil, fmt.Errorf("%q matches several devices", prefix)
-			}
-			target = &c.st.Trusted[i]
-			continue
-		}
-		keep = append(keep, d)
+	target, _, err := c.matchDevice(prefix)
+	if err != nil {
+		return nil, err
 	}
 	if target == nil {
 		return nil, fmt.Errorf("no other device matches %q", prefix)
 	}
 	removed := *target
-	epoch := c.st.Epoch + 1
-	key := make([]byte, 32)
-	rand.Read(key)
-	if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(epoch), key); err != nil {
-		return nil, err
-	}
-	for _, d := range keep {
-		if err := c.putEnvelope(d, epoch, key); err != nil {
-			return nil, err
-		}
-	}
-	// every host is uploaded again under the new key, forgetting the local
-	// hashes makes the push treat all of them as changed
-	for id, e := range c.st.Entries {
-		e.Local = ""
-		c.st.Entries[id] = e
-	}
-	c.st.Epoch = epoch
-	if _, err := c.pushOnce(keep); err != nil {
-		return nil, err
-	}
+	// the token goes first, a removed device that can still push could
+	// block the others with manifests no one trusts, a rerun after a lost
+	// race finds the device still listed and gets 404 here
 	code, b, _, err := c.call("DELETE", "/devices/"+removed.ID, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	if code != http.StatusNoContent {
+	if code != http.StatusNoContent && code != http.StatusNotFound {
 		return nil, serverError(code, b)
 	}
+	gone := false
+	plan := func() (pushPlan, error) {
+		target, keep, err := c.matchDevice(removed.ID)
+		if err != nil {
+			return pushPlan{}, err
+		}
+		if target == nil {
+			// another device removed it while this one retried
+			gone = true
+			return pushPlan{}, nil
+		}
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return pushPlan{}, err
+		}
+		if err := app.SecretSet(c.prefix()+"key-pending", key); err != nil {
+			return pushPlan{}, err
+		}
+		epoch := c.st.Epoch + 1
+		return pushPlan{devices: keep, epoch: epoch, key: key, rotation: &rotation{Epoch: epoch, Devices: keep}}, nil
+	}
+	if err := c.push(plan); err != nil {
+		if c.st.Rotation == nil {
+			app.SecretDelete(c.prefix() + "key-pending")
+		}
+		return nil, fmt.Errorf("the token of the device is revoked, it is still listed, run sshr sync remove-device again: %v", err)
+	}
+	if gone {
+		return &removed, nil
+	}
+	if err := c.finishRotation(); err != nil {
+		return nil, fmt.Errorf("the device is out of the account, the new key is not delivered to every device yet, run sshr sync again: %v", err)
+	}
 	return &removed, nil
+}
+
+// CleanName drops control and format characters from a device name, the
+// name comes from whoever joined and must not move the cursor or recolor
+// the fingerprint printed next to it
+func CleanName(name string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, name)
+}
+
+// matchDevice finds the one other trusted device whose ID or fingerprint
+// starts with prefix, and the devices that stay without it
+func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Device, error) {
+	var target *syncproto.Device
+	var keep []syncproto.Device
+	for i, d := range c.st.Trusted {
+		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
+			if target != nil {
+				return nil, nil, fmt.Errorf("%q matches several devices", prefix)
+			}
+			t := c.st.Trusted[i]
+			t.Name = CleanName(t.Name)
+			target = &t
+			continue
+		}
+		keep = append(keep, d)
+	}
+	return target, keep, nil
+}
+
+// finishRotation delivers a committed vault key to every kept device and
+// moves it from key-pending to the name of its epoch, it runs again on the
+// next sync when it was cut short
+func (c *Client) finishRotation() error {
+	r := c.st.Rotation
+	if r == nil {
+		return nil
+	}
+	key, ok, err := app.SecretGet(c.prefix() + "key-pending")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		if key, ok, err = app.SecretGet(c.prefix() + "key-" + strconv.Itoa(r.Epoch)); err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("the key of epoch %d is lost on this device, remove and pair the other devices again", r.Epoch)
+		}
+	}
+	if err := app.SecretSet(c.prefix()+"key-"+strconv.Itoa(r.Epoch), key); err != nil {
+		return err
+	}
+	for _, d := range r.Devices {
+		if err := c.putEnvelope(d, r.Epoch, key); err != nil {
+			return err
+		}
+	}
+	app.SecretDelete(c.prefix() + "key-pending")
+	c.st.Rotation = nil
+	return c.save()
 }
 
 // Status describes the sync state of this machine
@@ -960,26 +1441,43 @@ func (c *Client) Status() (*Status, error) {
 	st := &Status{
 		Server: c.st.Server, Account: c.st.Account, Device: c.st.DeviceID, Name: c.st.Name,
 		Fingerprint: Fingerprint(c.self().SignPub), Counter: c.st.Counter,
-		Devices: c.st.Trusted, Waiting: c.st.Approver != "", LastSync: c.st.LastSync,
+		Waiting: c.st.Approver != "", LastSync: c.st.LastSync,
 	}
-	if len(c.st.Head) >= 8 {
-		st.State = c.st.Head[:8]
+	for _, d := range c.st.Trusted {
+		d.Name = CleanName(d.Name)
+		st.Devices = append(st.Devices, d)
 	}
+	st.State = short(c.st.Head, 8)
 	return st, nil
 }
 
 // Leave forgets sync on this machine, the hosts stay, the account and the
 // other devices are not touched
-func (c *Client) Leave() error {
-	b, err := os.ReadFile(c.statePath())
+func (c *Client) Leave(force bool) error {
+	return c.run(func() error { return c.leave(force) })
+}
+
+func (c *Client) leave(force bool) error {
+	b, err := app.ReadFileShared(c.statePath())
 	if err == nil {
 		var st state
 		if json.Unmarshal(b, &st) == nil {
+			// a key change this device committed but did not deliver yet
+			// lives only here, leaving would strand the other devices
+			if st.Rotation != nil && !force {
+				if err := c.load(); err != nil {
+					return err
+				}
+				if err := c.finishRotation(); err != nil {
+					return fmt.Errorf("the other devices still wait for the vault key this device changed and it cannot be delivered now, run sshr sync again, or leave with --force and pair them again: %v", err)
+				}
+			}
 			for e := 1; e <= st.Epoch; e++ {
 				app.SecretDelete(c.prefix() + "key-" + strconv.Itoa(e))
 			}
 		}
 	}
+	app.SecretDelete(c.prefix() + "key-pending")
 	app.SecretDelete(c.prefix() + "device")
 	if err := os.Remove(c.statePath()); err != nil && !os.IsNotExist(err) {
 		return err

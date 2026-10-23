@@ -22,10 +22,13 @@ func dataHome() (string, error) {
 }
 
 // execQuote quotes a path for the Exec key of a desktop entry, inside
-// quotes ", `, $ and \ are escaped with a backslash
+// quotes ", `, $ and \ get a backslash, then the string escape of every
+// desktop entry value doubles each backslash and % is doubled so it is
+// not a field code, a literal \ ends up as four of them, as the spec says
 func execQuote(p string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`)
-	return `"` + r.Replace(p) + `"`
+	q := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`).Replace(p)
+	q = strings.NewReplacer(`\`, `\\`, "\n", `\n`, "\t", `\t`, "\r", `\r`, `%`, `%%`).Replace(q)
+	return `"` + q + `"`
 }
 
 // Install writes sshr.desktop and the icons, the window finds its icon by

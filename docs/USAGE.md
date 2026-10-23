@@ -11,7 +11,8 @@ curl -fsSL https://raw.githubusercontent.com/klovbin/sshr/main/install.sh | sh  
 - Linux and macOS, into `~/.local/bin` (`--prefix <dir>` or `SSHR_PREFIX`), no root
 - takes the release binary `sshr_<os>_<arch>` only when it matches `sha256sums.txt`, otherwise builds from source: Go 1.21+ (go fetches the toolchain from `go.mod`), the GUI also needs a C compiler and on Linux Wayland/X11 and Vulkan headers, without them the CLI is built and the script says so, `--cli-only` skips the GUI
 - adds one line marked `# added by the sshr installer` to your shell startup file when the folder is not in `PATH` (`--no-modify-path` skips it), runs `sshr desktop-entry` when the GUI is installed
-- `--uninstall` removes the binary, the menu entry and that line, hosts in `~/.sshr` stay
+- writes Tab completion for bash and fish when they are installed (`--no-completion` skips it), for zsh it prints the line to add to `~/.zshrc`
+- `--uninstall` removes the binary, the menu entry, the completion files and that line, hosts in `~/.sshr` stay
 - Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are planned ([#17](https://github.com/klovbin/sshr/issues/17))
 
 **Icon and menu:** `sshr desktop-entry` (`--remove` undoes it) writes `sshr.desktop` and icons to `~/.local/share` on Linux and `~/Applications/sshr.app` on macOS (signed ad hoc, it holds a copy of sshr because the Dock shows a bundle icon only for a program inside it, run it again after an update, `install.sh` does), on Windows the icon is a resource of `sshr.exe`, icons are built into the binary, logo files are in `assets/icons`, `go generate ./cmd/sshr` rebuilds the Windows resources
@@ -23,9 +24,17 @@ sshr                                     # the app
 sshr add 10.0.0.7 -u app -n web          # asks how to log in
 sshr add 10.0.0.7 -u app -k ~/.ssh/id_ed25519 -p 2222 -t prod
 sshr list                                # NAME HOST USER PORT AUTH TAGS ID
+sshr list --recent                       # last connected first, LAST says how long ago
+sshr list --json                         # the same as JSON, also ping --json and run --json
 sshr connect web                         # by name or ID
+sshr connect deploy@10.0.0.7:2222        # not saved: connects once, then offers to save
+sshr show web                            # the host and the exact ssh command connect runs
+sshr key new                             # ed25519 key in ~/.ssh/sshr_ed25519, never overwrites
+sshr key install web --use               # put the public key on web and log in with it from then on
 sshr rm web
-sshr help                                # every command and flag
+sshr help                                # one line per command
+sshr help add                            # the options of one command
+sshr completion fish | source            # Tab completion, also bash and zsh
 ```
 
 ## Passwords
@@ -133,6 +142,7 @@ The spec is what ssh takes after `-L`, `-R`, `-D`, checked on save, `tunnel` use
 ```sh
 sshr ping              # every host, exits 1 when one is down
 sshr list --ping       # STATUS column, --no-ping skips it
+sshr ping --keys web   # also the server key: known, unknown or changed against ~/.ssh/known_hosts
 ```
 
 `"health_check": true` (**Settings → Connection**) shows a dot with the round trip next to each host, every 5 minutes (`"health_interval"`, 60 s at least) and after a change, off by default: each check is a TCP connect and the SSH banner without login, but sshd logs it and fail2ban in `ddos` or `aggressive` mode counts it, up means the banner came within 3 s, orange is an open port that is not ssh, hosts behind a jump host show `?`
@@ -181,11 +191,11 @@ sshr paste -f shot.png web  # a file instead of the clipboard
 ## Importing ~/.ssh/config
 
 ```sh
-sshr import-ssh-config --dry-run
-sshr import-ssh-config
+sshr import --dry-run
+sshr import
 ```
 
-- in the app: **Settings → Import**
+- in the app: **Settings → Import**, `import-ssh-config` and `export-ssh-config` are older names of `import` and `export` and keep working
 - every `Host` of `~/.ssh/config` and its `Include`s, resolved with `ssh -G`, so `Match`, `Host *` and defaults apply as in ssh, nothing goes over the network, `Match exec` runs what you wrote
 - carries `HostName`, `User`, `Port`, `IdentityFile`, `IdentityAgent` (the 1Password socket becomes `1password`), `ProxyJump` and forwards as `l1`, `r1`, `d1`
 - patterns are skipped, a `ProxyCommand` host keeps its alias as the address, hosts sshr already has are skipped, so a second run adds only new ones
@@ -193,9 +203,9 @@ sshr import-ssh-config
 ## Exporting to ~/.ssh/config
 
 ```sh
-sshr export-ssh-config               # print
-sshr export-ssh-config --install     # write ~/.sshr/ssh_config, include it, keep it current
-sshr export-ssh-config --uninstall
+sshr export               # print
+sshr export --install     # write ~/.sshr/ssh_config, include it, keep it current
+sshr export --uninstall
 ```
 
 - in the app: **Settings → Import → Export**, off by default, it edits your file
@@ -212,11 +222,13 @@ sshr sync approve <id>                                           # on a device a
 sshr sync                                                        # pull, then push
 sshr sync status                                                 # devices and a state fingerprint
 sshr sync remove-device <id>                                     # rotates the vault key
+sshr sync leave                                                  # stop syncing here, the hosts stay
 ```
 
 - end to end encrypted: per-device keys in the keychain (Ed25519, ML-KEM-768 + X25519), hosts encrypted with a shared vault key, signed and chained manifests, the server stores only ciphertext and cannot add a device or forge history
 - saved passwords sync inside the encryption, keys kept in sshr and password manager references do not, key file paths sync, the files do not
-- a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`
+- a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`, a host removed on one device and changed on another comes back with the change, the log says so
+- `leave` first delivers a vault key this device changed and has not handed to the others yet, `--force` leaves without it, then the others pair again
 - limits: sync runs when you call it, the server sees the host count, push times, addresses and device names and can hold back changes, a new device trusts the first state it sees (`--accept-reset` after a real server restore), compare the `sshr sync status` fingerprints to be sure two devices see the same history, a removed device keeps what it downloaded
 
 ## Sync server
@@ -226,9 +238,51 @@ go build -o sshr-sync ./cmd/sshr-sync
 sshr-sync --autocert sync.example.com --listen :443 --data /var/lib/sshr-sync   # Let's Encrypt
 sshr-sync --tls-cert cert.pem --tls-key key.pem --listen :8443 --data ./data
 sshr-sync --plain-http --listen 127.0.0.1:8080 --data ./data                     # behind a TLS proxy
+sshr-sync --plain-http --trust-proxy --listen 127.0.0.1:8080 --data ./data       # the proxy sets X-Forwarded-For
 ```
 
-TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-256 is stored), 10 new accounts or joins an hour per address, pushes are compare-and-swap so two devices cannot overwrite each other, unused blobs go after a day, one server per data folder
+TLS 1.3 only, plain HTTP only on loopback, one token per device (only its SHA-256 is stored), 10 new accounts or joins an hour per address, behind a proxy every client has the proxy's address unless `--trust-proxy` takes the last `X-Forwarded-For` entry of requests from this machine (off by default, the proxy must set that header), pushes are compare-and-swap so two devices cannot overwrite each other, unused blobs go after a day, one server per data folder
+
+## Extensions
+
+```sh
+sshr ext install https://github.com/someone/sshr-hello.git   # shows what it is and asks
+sshr ext install ./my-extension --yes                        # a folder, no question, for scripts
+sshr hello a b                                               # runs the extension called hello
+sshr ext import putty                                        # an extension that reads another tool's hosts
+sshr ext list
+sshr ext remove hello
+```
+
+A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+
+```json
+{
+  "protocol": 1,
+  "name": "hello",
+  "version": "0.1.0",
+  "description": "says hello to a host",
+  "command": { "default": ["./hello.sh"], "windows": ["hello.exe"] },
+  "kinds": ["command"]
+}
+```
+
+- `name` is lower case letters, digits and `-`, it is the word after `sshr`, an extension cannot take the name of a command of sshr
+- `command` is a list of arguments per system (`linux`, `darwin`, `windows`, `default` for the rest), the first one is a file of the folder, no shell is involved, the arguments you type after the name are added
+- the program gets the terminal of the user and its exit code is the exit code of sshr
+- sshr passes `SSHR_EXT_PROTOCOL` (1), `SSHR_EXT_KIND` (`command`), `SSHR_EXT_DIR` (its folder), `SSHR_EXT_DATA` (a folder it may write to, `~/.sshr/extension-data/<name>`, it stays when the extension is removed) and `SSHR_BIN` (the sshr binary), `"$SSHR_BIN" list --json` gives it the hosts
+- the files of the folder are pinned, so write state, caches and logs to `SSHR_EXT_DATA` and never into the folder, a file that appears there stops the extension, `PYTHONDONTWRITEBYTECODE=1` is set for Python ones
+- passwords, keys, secret references and the variables of ssh askpass, Bitwarden and 1Password are never in its environment
+- `"kinds": ["import"]` makes an importer, `sshr ext import <name> [args]` runs it with `SSHR_EXT_KIND=import` and the terminal for input and messages, reads what it prints on stdout (8 MiB at most, 5000 hosts) and saves the hosts:
+
+  ```json
+  {"hosts": [{"key": "putty:web", "name": "web", "host": "10.0.0.5", "port": 22, "user": "deploy",
+              "key_file": "/home/me/.ssh/id_ed25519", "jump": "gw", "session": "tmux",
+              "tags": ["prod"], "forwards": ["db -L 5432:localhost:5432"]}]}
+  ```
+
+  `key` names the host in its source and is required, the same key gives the same host on the next import, which is then skipped as already imported, so nothing you edited since is overwritten, only these fields are read, a password, a key or a secret reference an importer prints is dropped with a warning, a host that fails the checks of sshr is reported and the others are saved
+- `sshr ext install` pins every file of the folder, changing one (a `git pull` in the folder, an edit) stops the extension until you install it again, how that is checked and what it does not cover is in [SECURITY.md](SECURITY.md#extensions)
 
 ## AI assistants (MCP)
 
@@ -239,9 +293,11 @@ claude mcp add --transport stdio sshr -- sshr mcp --allow-commands   # and let i
 
 Other clients: `{"mcpServers": {"sshr": {"command": "sshr", "args": ["mcp"]}}}`
 
-- `list_hosts` (read only), `upload_file` (to `~/.cache/sshr/pasted/`, removed after 15 minutes), `run_command` (stdout and stderr up to 64 KiB each, exit code, `timeout_seconds` 60 by default, 600 at most)
+- `list_hosts` (read only), `upload_file` (to `~/.cache/sshr/pasted/`, removed after 15 minutes, hidden files and folders of your home such as `~/.ssh` and `~/.sshr` are refused), `run_command` (stdout and stderr up to 64 KiB each, exit code, `timeout_seconds` 60 by default, 600 at most)
 - `run_command` is off by default (`--allow-commands` or `"mcp_commands": true`), it is marked destructive so clients ask before each call
 - secrets never leave sshr, hosts that ask for a password cannot be used, nothing listens (stdin and stdout of a child process), every command is logged to stderr
+
+Setup for each client, every tool with its limits, the log and troubleshooting: [MCP.md](MCP.md)
 
 ## REST API
 
@@ -255,7 +311,7 @@ curl -H "Authorization: Bearer $(cat ~/.sshr/api-token)" http://127.0.0.1:7522/v
 | Method and path | |
 |----|----|
 | `GET /v1/hosts`, `GET /v1/hosts/{host}` | list, one host by name, address or ID |
-| `POST /v1/hosts` | add: `name`, `host`, `user`, `port`, `key`, `agent`, `agent_key`, `ask_password`, `op_password`, `op_key`, `bw_password`, `bw_key`, `jump`, `session`, `forwards`, `tags` |
+| `POST /v1/hosts` | add: `name`, `host`, `user`, `port`, `key`, `agent`, `agent_key`, `ask_password`, `jump`, `session`, `forwards`, `tags` |
 | `DELETE /v1/hosts/{host}` | remove |
 | `GET /v1/hosts/{host}/connect` | the ssh command line as `{"argv": [...]}` |
 | `POST /v1/hosts/{host}/upload?ext=png` | the body is the file, returns its remote path, removed after 15 minutes |

@@ -331,11 +331,24 @@ func (s *state) handle(gtx layout.Context) {
 			}
 		}
 		if s.opModal.cancel.Clicked(gtx) {
-			s.opModal.close()
+			if s.opModal.picking && s.settings.HasOPAccount() {
+				s.opModal.openDetail(len(s.settings.OPAccounts))
+			} else {
+				s.opModal.close()
+			}
 		}
 		if s.opModal.connect.Clicked(gtx) {
 			if i := s.opModal.selected; i >= 0 && i < len(s.opModal.accounts) {
 				s.authorizeOP(s.opModal.accounts[i])
+			}
+		}
+		if s.opModal.addBtn.Clicked(gtx) {
+			s.beginOPAccountList()
+		}
+		for i := range s.opModal.unlinkBtns {
+			if s.opModal.unlinkBtns[i].Clicked(gtx) {
+				s.unlinkOP(i)
+				break
 			}
 		}
 	}

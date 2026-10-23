@@ -27,3 +27,16 @@ func TestAuthLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildVersion(t *testing.T) {
+	old := Version
+	defer func() { Version = old }()
+	Version = "v9.9.9"
+	if BuildVersion() != "v9.9.9" {
+		t.Error("the version set at build time is ignored")
+	}
+	Version = ""
+	if BuildVersion() == "" {
+		t.Error("no version without ldflags")
+	}
+}

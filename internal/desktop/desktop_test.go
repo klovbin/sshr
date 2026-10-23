@@ -33,7 +33,7 @@ func TestInstallLinux(t *testing.T) {
 }
 
 func TestExecQuote(t *testing.T) {
-	if got := execQuote("/a b/$x\"`\\"); got != "\"/a b/\\$x\\\"\\`\\\\\"" {
+	if got, want := execQuote("/a b%/$x\"`\\"), `"/a b%%/\\$x\\"\\`+"`"+`\\\\"`; got != want {
 		t.Fatal(got)
 	}
 }

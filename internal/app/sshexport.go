@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -45,7 +45,9 @@ func exportPath(p string) (string, error) {
 	if strings.ContainsAny(p, "\"\r\n\t") || strings.ContainsFunc(p, func(r rune) bool { return r < 0x20 }) {
 		return "", fmt.Errorf("path %q cannot be written to ssh config", p)
 	}
-	return `"` + strings.ReplaceAll(p, "%", "%%") + `"`, nil
+	// ssh reads a doubled backslash as one, forward slashes keep a UNC or
+	// Windows path whole
+	return `"` + strings.ReplaceAll(filepath.ToSlash(p), "%", "%%") + `"`, nil
 }
 
 // userAliases lists the Host names of the user's ssh config without the
@@ -228,7 +230,7 @@ func (s *Store) SSHConfigExported() bool {
 	if s.SSHConfigOut == "" {
 		return false
 	}
-	b, err := os.ReadFile(s.SSHConfigOut)
+	b, err := ReadFileShared(s.SSHConfigOut)
 	return err == nil && bytes.HasPrefix(b, []byte(exportHeader))
 }
 
@@ -236,7 +238,15 @@ func (s *Store) SSHConfigExported() bool {
 // of ~/.ssh/config, at the top because a Host line before it would make
 // ssh read the Include as part of that block, the hosts are rewritten on
 // every change from then on
-func (s *Store) InstallSSHConfig() ([]ExportItem, error) {
+func (s *Store) InstallSSHConfig() (items []ExportItem, err error) {
+	err = s.locked(func(tx *Store) error {
+		items, err = tx.installSSHConfig()
+		return err
+	})
+	return items, err
+}
+
+func (s *Store) installSSHConfig() ([]ExportItem, error) {
 	if s.SSHConfigOut == "" {
 		return nil, errors.New("this store has no ssh config export path")
 	}
@@ -249,6 +259,10 @@ func (s *Store) InstallSSHConfig() ([]ExportItem, error) {
 
 // UninstallSSHConfig removes the Include line and the export file
 func (s *Store) UninstallSSHConfig() error {
+	return s.locked(func(tx *Store) error { return tx.uninstallSSHConfig() })
+}
+
+func (s *Store) uninstallSSHConfig() error {
 	if err := s.editUserConfig(false); err != nil && !errors.Is(err, ErrSSHConfigLink) {
 		return err
 	}
@@ -264,7 +278,7 @@ func (s *Store) refreshSSHConfig(force bool) ([]ExportItem, error) {
 	if s.SSHConfigOut == "" || (!force && !s.SSHConfigExported()) {
 		return nil, nil
 	}
-	if b, err := os.ReadFile(s.SSHConfigOut); err == nil && !bytes.HasPrefix(b, []byte(exportHeader)) {
+	if b, err := ReadFileShared(s.SSHConfigOut); err == nil && !bytes.HasPrefix(b, []byte(exportHeader)) {
 		return nil, fmt.Errorf("%s was not written by sshr, it is left as it is", s.SSHConfigOut)
 	}
 	var buf bytes.Buffer
@@ -272,7 +286,7 @@ func (s *Store) refreshSSHConfig(force bool) ([]ExportItem, error) {
 	if err != nil {
 		return items, err
 	}
-	return items, writeFileAtomic(s.SSHConfigOut, buf.Bytes(), 0o600)
+	return items, WriteFileAtomic(s.SSHConfigOut, buf.Bytes(), 0o600)
 }
 
 // editUserConfig adds or removes the Include line of the export
@@ -284,22 +298,27 @@ func (s *Store) editUserConfig(add bool) error {
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%w: %s is a link, add this line at its top yourself: %s", ErrSSHConfigLink, path, s.includeLine())
 	}
-	old, err := os.ReadFile(path)
+	old, err := ReadFileShared(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	want := s.includeLine()
 	var kept []string
 	found := false
-	sc := bufio.NewScanner(bytes.NewReader(old))
-	for sc.Scan() {
-		if strings.TrimSpace(sc.Text()) == want {
+	// split by hand, bufio.Scanner stops at a line over 64 KiB and the
+	// rewrite would drop the rest of the file
+	var lines []string
+	if text := strings.TrimSuffix(string(old), "\n"); text != "" {
+		lines = strings.Split(text, "\n")
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == want {
 			found = true
 			if !add {
 				continue
 			}
 		}
-		kept = append(kept, sc.Text())
+		kept = append(kept, line)
 	}
 	if add == found {
 		return nil
@@ -318,19 +337,50 @@ func (s *Store) editUserConfig(add bool) error {
 	if out != "" {
 		out += "\n"
 	}
-	return writeFileAtomic(path, []byte(out), mode)
+	return WriteFileAtomic(path, []byte(out), mode)
 }
 
-// writeFileAtomic writes through a temporary file, a reader never sees half
-// of it
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".sshr-tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
+// WriteFileAtomic writes through a temporary file of its own next to path,
+// a reader never sees half of it and two writers never share a temp file
+func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	tmp := f.Name()
+	_, err = f.Write(data)
+	// the data reaches the disk before the rename does, a power loss
+	// leaves the old file or the new one, never an empty one
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, mode)
+	}
+	if err == nil {
+		// Windows refuses the rename for a moment while another process
+		// reads the file, renameOver waits that out
+		err = renameOver(tmp, path)
+	}
+	if err != nil {
 		os.Remove(tmp)
 		return err
 	}
+	syncDir(filepath.Dir(path))
 	return nil
+}
+
+// syncDir makes a rename in dir durable, Windows has no directory sync and
+// commits the rename itself
+func syncDir(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if d, err := os.Open(dir); err == nil {
+		d.Sync()
+		d.Close()
+	}
 }

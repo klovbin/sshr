@@ -34,6 +34,12 @@ func TestAPIHosts(t *testing.T) {
 	if code != 400 || !strings.Contains(body, "not taken through the API") {
 		t.Errorf("add with a password = %d %s", code, body)
 	}
+	for _, f := range []string{"op_password", "op_key", "bw_password", "bw_key"} {
+		code, body = do(t, srv, "POST", "/v1/hosts", `{"host":"10.0.0.2","user":"u","`+f+`":"op://v/i/password"}`, nil)
+		if code != 400 || !strings.Contains(body, "references are not taken") {
+			t.Errorf("add with %s = %d %s", f, code, body)
+		}
+	}
 	code, body = do(t, srv, "POST", "/v1/hosts", `{"host":"10.0.0.2","user":"u","bogus":1}`, nil)
 	if code != 400 {
 		t.Errorf("unknown field = %d %s", code, body)
@@ -52,6 +58,11 @@ func TestAPIHosts(t *testing.T) {
 	}
 	if code, body = do(t, srv, "POST", "/v1/hosts/web/run", `{"command":"id"}`, nil); code != 403 {
 		t.Errorf("run while off = %d %s", code, body)
+	}
+	for _, bad := range []string{`{"forwards": "db"}`, `{"forwards": [`} {
+		if code, body = do(t, srv, "POST", "/v1/hosts/web/tunnels", bad, nil); code != 400 || !strings.Contains(body, "bad body") {
+			t.Errorf("tunnel with body %s = %d %s", bad, code, body)
+		}
 	}
 	if code, body = do(t, srv, "POST", "/v1/hosts/web/tunnels", `{}`, nil); code != 400 || !strings.Contains(body, "asks_password") {
 		t.Errorf("tunnel to an ask host = %d %s", code, body)
@@ -81,5 +92,21 @@ func TestAPIGuard(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != 403 {
 		t.Errorf("rebinding host = %d", rec.Code)
+	}
+}
+
+func TestAPIUploadAndTunnelChecks(t *testing.T) {
+	s := &app.Store{Dir: t.TempDir()}
+	srv := New(s, Options{})
+	if _, err := s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range []string{"sh%3Bid", "a%24b", "a/b", "a%20b", "abcdefghijk"} {
+		if code, body := do(t, srv, "POST", "/v1/hosts/web/upload?ext="+ext, "data", nil); code != 400 || !strings.Contains(body, "ext must be") {
+			t.Errorf("upload with ext %q = %d %s", ext, code, body)
+		}
+	}
+	if code, body := do(t, srv, "POST", "/v1/hosts/web/tunnels", "", nil); code != 400 || !strings.Contains(body, "no saved forwards") {
+		t.Errorf("tunnel of a host without forwards = %d %s", code, body)
 	}
 }

@@ -39,18 +39,26 @@ type OPAccount struct {
 	AccountUUID string `json:"account_uuid"`
 }
 
-// Ref is what --account / OP_ACCOUNT accept: sign-in address or user ID (op docs).
+// Ref is what --account / OP_ACCOUNT accept: email, user ID or sign-in address (op docs).
 func (a OPAccount) Ref() string {
 	switch {
-	case a.URL != "":
-		return a.URL
+	case a.Email != "":
+		return a.Email
 	case a.UserUUID != "":
 		return a.UserUUID
 	case a.AccountUUID != "":
 		return a.AccountUUID
 	default:
+		return a.URL
+	}
+}
+
+// Label is the account name shown in settings (email, else Ref).
+func (a OPAccount) Label() string {
+	if a.Email != "" {
 		return a.Email
 	}
+	return a.Ref()
 }
 
 // opDevelopersURL is Settings > Developer in the 1Password app.
@@ -93,6 +101,9 @@ func openURL(url string) error {
 		return fmt.Errorf("%w: cannot open %s", ErrNoOP, url)
 	}
 }
+
+// OpenURL opens url in the default browser.
+func OpenURL(url string) error { return openURL(url) }
 
 // OpenOnePasswordCLIIntegration opens the Developer settings page.
 func OpenOnePasswordCLIIntegration() error {
@@ -184,10 +195,14 @@ var opPathCandidates = []string{
 	"/usr/local/bin/op",
 }
 
-func resolveOpBin() (string, error) {
-	if opBin != "op" {
-		return exec.LookPath(opBin)
-	}
+	func resolveOpBin() (string, error) {
+		if opBin != "op" {
+			bin, err := exec.LookPath(opBin)
+			if err != nil {
+				return "", fmt.Errorf("%w: %v", ErrNoOP, err)
+			}
+			return bin, nil
+		}
 	// Use a properly signed op only (Team ID 2BUA8C4S2C). An ad-hoc copy
 	// next to sshr.app cannot talk to the desktop app over XPC.
 	if bin, err := exec.LookPath(opBin); err == nil {

@@ -69,3 +69,38 @@ func TestAttachPasswordEnv(t *testing.T) {
 		t.Errorf("ask mode touched the command: %v %v", cmd.Env, err)
 	}
 }
+
+func TestStripAuthEnv(t *testing.T) {
+	env := []string{"SSH_ASKPASS=/sshr", "SSH_ASKPASS_REQUIRE=force", askpassSockEnv + "=/s", askpassTokenEnv + "=t",
+		"SSH_AUTH_SOCK=/sshr-agent", authSockOrigEnv + "=/user-agent", "KEEP=1"}
+	got := strings.Join(StripAuthEnv(env), " ")
+	if got != "KEEP=1 SSH_AUTH_SOCK=/user-agent" {
+		t.Errorf("with the user's agent = %q", got)
+	}
+	// the user had no agent, the host's one goes and none comes back
+	env[5] = authSockOrigEnv + "="
+	if got := strings.Join(StripAuthEnv(env), " "); got != "KEEP=1" {
+		t.Errorf("without the user's agent = %q", got)
+	}
+	// nothing set by sshr leaves the user's own agent alone
+	if got := strings.Join(StripAuthEnv([]string{"SSH_AUTH_SOCK=/mine", "KEEP=1"}), " "); got != "SSH_AUTH_SOCK=/mine KEEP=1" {
+		t.Errorf("untouched env = %q", got)
+	}
+}
+
+func TestPasswordSocketWrongTokenThenRight(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	sock, token, stop, err := servePassword("pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	for i := 0; i < 3; i++ {
+		if _, err := fetchPassword(sock, "wrong"); err == nil {
+			t.Fatal("a wrong token got the password")
+		}
+	}
+	if pw, err := fetchPassword(sock, token); err != nil || pw != "pw" {
+		t.Fatalf("the right token after wrong ones = %q %v", pw, err)
+	}
+}

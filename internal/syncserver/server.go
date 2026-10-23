@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"sshr.dev/internal/syncproto"
 )
@@ -40,12 +41,18 @@ const (
 
 // Server is the HTTP handler of the sync server
 type Server struct {
+	// TrustProxy takes the client address from the last X-Forwarded-For
+	// entry when the request comes from this machine, set it behind a TLS
+	// reverse proxy, where every request comes from 127.0.0.1
+	TrustProxy bool
+
 	dir   string
 	mux   *http.ServeMux
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	// creates limits account creation and joins per client address
 	creates map[string][]time.Time
+	swept   time.Time
 }
 
 // New serves accounts stored under dir
@@ -97,14 +104,37 @@ func (s *Server) lock(a string) func() {
 }
 
 // allowCreate rate-limits new accounts and joins, 10 an hour per address
-func (s *Server) allowCreate(r *http.Request) bool {
+// clientAddr is the address the join limit counts, the proxy's view of
+// the client when TrustProxy is on and the request came over loopback
+func (s *Server) clientAddr(r *http.Request) string {
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		ip = r.RemoteAddr
 	}
+	if p := net.ParseIP(ip); s.TrustProxy && p != nil && p.IsLoopback() {
+		hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+		if last := strings.TrimSpace(hops[len(hops)-1]); net.ParseIP(last) != nil {
+			return last
+		}
+	}
+	return ip
+}
+
+func (s *Server) allowCreate(r *http.Request) bool {
+	ip := s.clientAddr(r)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
+	// addresses seen once would stay for ever, a sweep now and then drops
+	// the ones whose last try is over an hour old
+	if now.Sub(s.swept) > 10*time.Minute {
+		for addr, times := range s.creates {
+			if len(times) == 0 || now.Sub(times[len(times)-1]) >= time.Hour {
+				delete(s.creates, addr)
+			}
+		}
+		s.swept = now
+	}
 	var kept []time.Time
 	for _, t := range s.creates[ip] {
 		if now.Sub(t) < time.Hour {
@@ -142,13 +172,33 @@ func (s *Server) saveDevices(a string, ds []deviceFile) error {
 	return writeFile(filepath.Join(s.accountDir(a), "devices.json"), b)
 }
 
-// writeFile replaces path through a temp file and a rename
+// writeFile replaces path through a temp file of its own and a rename, two
+// requests writing the same file never share a temp file
 func writeFile(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	_, err = f.Write(data)
+	// the data reaches the disk before the rename does, a power loss
+	// leaves the old file or the new one, never an empty one
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, 0o600)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 func newToken() (token, hash string, err error) {
@@ -168,6 +218,11 @@ func checkDevice(d syncproto.Device) error {
 	}
 	if d.ID != syncproto.DeviceID(d.SignPub) {
 		return errors.New("device id does not match its key")
+	}
+	for _, r := range d.Name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return errors.New("control characters in the device name")
+		}
 	}
 	return nil
 }
@@ -260,7 +315,8 @@ type ctxDevice struct {
 }
 
 // auth checks the bearer token of a device of account {a}, only an active
-// device gets through, except to read its own envelope while waiting
+// device gets through, a waiting one gets 403 everywhere, its envelope is
+// written only after it is approved
 func (s *Server) auth(next func(http.ResponseWriter, *http.Request, ctxDevice)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a := r.PathValue("a")
@@ -401,8 +457,17 @@ func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		fail(w, http.StatusBadRequest, "bad envelope")
 		return
 	}
+	// a key of an older epoch never replaces a newer one, a device still
+	// delivering an old key change would lock the device out of the vault
+	defer s.lock(a)()
+	path := filepath.Join(s.accountDir(a), "envelopes", id+".json")
+	var cur syncproto.Envelope
+	if old, err := os.ReadFile(path); err == nil && json.Unmarshal(old, &cur) == nil && cur.Epoch > env.Epoch {
+		fail(w, http.StatusConflict, "a newer key is stored for this device")
+		return
+	}
 	b, _ := json.Marshal(env)
-	if err := writeFile(filepath.Join(s.accountDir(a), "envelopes", id+".json"), b); err != nil {
+	if err := writeFile(path, b); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}

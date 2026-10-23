@@ -50,7 +50,7 @@ type response struct {
 
 // Serve answers requests from r on w until r ends
 func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
-	s := &server{store: store, opts: opts, w: w}
+	s := &server{store: store, opts: opts, w: w, slots: make(chan struct{}, maxRunning)}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 8<<20)
 	var wg sync.WaitGroup
@@ -79,11 +79,16 @@ func Serve(r io.Reader, w io.Writer, store *app.Store, opts Options) error {
 	return sc.Err()
 }
 
+// maxRunning is how many uploads and commands run at once, as in sshr run,
+// the others wait for a free slot
+const maxRunning = 8
+
 type server struct {
 	store *app.Store
 	opts  Options
 	mu    sync.Mutex
 	w     io.Writer
+	slots chan struct{}
 }
 
 func (s *server) send(resp response) {
@@ -136,7 +141,7 @@ func (s *server) handle(req request) {
 		}
 		if err != nil {
 			// tool errors go back as results, so the assistant can read them
-			result = toolResult{Content: []content{{Type: "text", Text: err.Error()}}, IsError: true}
+			result = toolResult{Content: []content{{Type: "text", Text: toolError(err)}}, IsError: true}
 		}
 		resp.Result = result
 	default:
@@ -157,6 +162,15 @@ type toolResult struct {
 }
 
 var errUnknownTool = errors.New("unknown tool")
+
+// toolError words the error codes of app for the assistant, it passes the
+// text on to the user
+func toolError(err error) string {
+	if errors.Is(err, app.ErrAsksPassword) {
+		return "this host asks for its password on every connect and there is no terminal to type it in, save its password in sshr or log in with a key"
+	}
+	return err.Error()
+}
 
 func (s *server) tools() []map[string]any {
 	hostArg := map[string]any{"type": "string", "description": "host name, address or ID as shown by list_hosts"}
@@ -209,6 +223,8 @@ func (s *server) call(name string, raw json.RawMessage) (toolResult, error) {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return toolResult{}, err
 		}
+		s.slots <- struct{}{}
+		defer func() { <-s.slots }()
 		return s.uploadFile(a.Host, a.Path)
 	case "run_command":
 		if !s.opts.AllowCommands {
@@ -222,6 +238,8 @@ func (s *server) call(name string, raw json.RawMessage) (toolResult, error) {
 		if err := json.Unmarshal(raw, &a); err != nil {
 			return toolResult{}, err
 		}
+		s.slots <- struct{}{}
+		defer func() { <-s.slots }()
 		return s.runCommand(a.Host, a.Command, a.TimeoutSeconds)
 	}
 	return toolResult{}, fmt.Errorf("%w %q", errUnknownTool, name)
@@ -250,7 +268,11 @@ func (s *server) findHost(query string) (*app.Host, error) {
 	case errors.As(err, &amb):
 		names := make([]string, len(amb.Hosts))
 		for i, h := range amb.Hosts {
-			names[i] = h.Name + " (" + h.ID[:8] + ")"
+			id := h.ID
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			names[i] = h.Name + " (" + id + ")"
 		}
 		return nil, fmt.Errorf("%q matches several hosts: %s, use the ID", query, strings.Join(names, ", "))
 	case errors.Is(err, app.ErrNotFound):
@@ -270,6 +292,9 @@ func (s *server) uploadFile(host, path string) (toolResult, error) {
 	}
 	if !filepath.IsAbs(path) {
 		return toolResult{}, errors.New("path must be absolute")
+	}
+	if err := checkUploadPath(path); err != nil {
+		return toolResult{}, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -327,4 +352,31 @@ func (s *server) runCommand(host, command string, timeout int) (toolResult, erro
 		},
 		IsError: res.ExitCode != 0,
 	}, nil
+}
+
+// checkUploadPath refuses files in hidden folders of the home folder and
+// hidden files there, ~/.ssh keys, ~/.sshr tokens and sync state, cloud
+// credentials, the path is resolved first so a link cannot point there
+func checkUploadPath(path string) error {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if h, err := filepath.EvalSymlinks(home); err == nil {
+		home = h
+	}
+	rel, err := filepath.Rel(home, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if strings.HasPrefix(part, ".") {
+			return fmt.Errorf("%s is hidden in the home folder (keys, tokens, settings), upload_file does not send such files, copy it elsewhere first if it is meant to go", path)
+		}
+	}
+	return nil
 }
