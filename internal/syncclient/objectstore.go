@@ -17,8 +17,9 @@ import (
 // folder, it keeps one sync account, the one write a sync relies on is
 // Create, which fails with ErrExists when the name is taken
 type ObjectStore interface {
-	// Get reads an object, ErrNotFound when there is none
-	Get(name string) ([]byte, error)
+	// Get reads an object of at most max bytes, ErrNotFound when there is
+	// none, ErrTooLarge for a bigger one, read no further than max+1
+	Get(name string, max int) ([]byte, error)
 	// Put writes an object over any that is there
 	Put(name string, data []byte) error
 	// Create writes an object only when the name is free, ErrExists
@@ -33,6 +34,10 @@ type ObjectStore interface {
 // ErrExists means Create found the name taken
 var ErrExists = errors.New("the object exists already")
 
+// ErrTooLarge means an object is bigger than its kind may be, a store
+// does not get to fill the memory of a device
+var ErrTooLarge = errors.New("the object is too large")
+
 // ObjectBackend runs a sync account in an ObjectStore: manifests are
 // created as manifests/<counter> and a device that loses the race to
 // create the next one pulls and tries again, as with sshr-sync, there is
@@ -41,6 +46,13 @@ var ErrExists = errors.New("the object exists already")
 type ObjectBackend struct {
 	Store ObjectStore
 }
+
+// Limits of what a store account holds, as sshr-sync has them
+const (
+	maxSmall     = 64 << 10 // the account, a device, an envelope
+	maxNames     = 10000    // names one List may return
+	manifestPage = 100      // manifests one ManifestsAfter returns
+)
 
 const (
 	objAccount   = "account"
@@ -87,7 +99,7 @@ func (o ObjectBackend) Join(dev []byte) ([]byte, error) {
 	if err := json.Unmarshal(dev, &req); err != nil {
 		return nil, err
 	}
-	account, err := o.Store.Get(objAccount)
+	account, err := o.Store.Get(objAccount, maxSmall)
 	if errors.Is(err, ErrNotFound) {
 		return nil, errors.New("the store holds no sync account")
 	}
@@ -105,13 +117,13 @@ func (o ObjectBackend) Join(dev []byte) ([]byte, error) {
 }
 
 func (o ObjectBackend) Devices() ([]byte, error) {
-	names, err := o.Store.List(objDevices)
+	names, err := o.list(objDevices)
 	if err != nil {
 		return nil, err
 	}
 	out := []syncproto.DeviceRecord{}
 	for _, n := range names {
-		b, err := o.Store.Get(n)
+		b, err := o.Store.Get(n, maxSmall)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}
@@ -128,7 +140,7 @@ func (o ObjectBackend) Devices() ([]byte, error) {
 }
 
 func (o ObjectBackend) Activate(id string) error {
-	b, err := o.Store.Get(objDevices + id)
+	b, err := o.Store.Get(objDevices+id, maxSmall)
 	if err != nil {
 		return err
 	}
@@ -144,10 +156,10 @@ func (o ObjectBackend) Activate(id string) error {
 // RemoveDevice takes the device and its envelopes out, the device keeps
 // whatever access the store credential gives it
 func (o ObjectBackend) RemoveDevice(id string) error {
-	if _, err := o.Store.Get(objDevices + id); err != nil {
+	if _, err := o.Store.Get(objDevices+id, maxSmall); err != nil {
 		return err
 	}
-	envs, err := o.Store.List(objEnvelopes + id + "/")
+	envs, err := o.list(objEnvelopes + id + "/")
 	if err != nil {
 		return err
 	}
@@ -161,7 +173,7 @@ func (o ObjectBackend) RemoveDevice(id string) error {
 
 // envelopes are the epochs of the envelopes of id
 func (o ObjectBackend) envelopes(id string) ([]int, error) {
-	names, err := o.Store.List(objEnvelopes + id + "/")
+	names, err := o.list(objEnvelopes + id + "/")
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +208,7 @@ func (o ObjectBackend) PutEnvelope(id string, env []byte) error {
 // never taken for it, while it is missing the newest older one says the
 // key is still on its way
 func (o ObjectBackend) GetEnvelope(id string, epoch int) ([]byte, error) {
-	b, err := o.Store.Get(envelopeName(id, epoch))
+	b, err := o.Store.Get(envelopeName(id, epoch), maxSmall)
 	if !errors.Is(err, ErrNotFound) {
 		return b, err
 	}
@@ -213,20 +225,23 @@ func (o ObjectBackend) GetEnvelope(id string, epoch int) ([]byte, error) {
 	if older == 0 {
 		return nil, ErrNotFound
 	}
-	return o.Store.Get(envelopeName(id, older))
+	return o.Store.Get(envelopeName(id, older), maxSmall)
 }
 
 func (o ObjectBackend) PutBlob(hash string, blob []byte) error {
+	if len(blob) > syncproto.MaxBlob {
+		return ErrTooLarge
+	}
 	return o.Store.Put(objBlobs+hash, blob)
 }
 
 func (o ObjectBackend) GetBlob(hash string) ([]byte, error) {
-	return o.Store.Get(objBlobs + hash)
+	return o.Store.Get(objBlobs+hash, syncproto.MaxBlob)
 }
 
 // manifests are the counters of the stored manifests, in order
 func (o ObjectBackend) manifests() ([]uint64, error) {
-	names, err := o.Store.List(objManifests)
+	names, err := o.list(objManifests)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +264,7 @@ func (o ObjectBackend) Head() (uint64, []byte, error) {
 		return 0, nil, ErrNotFound
 	}
 	last := all[len(all)-1]
-	b, err := o.Store.Get(manifestName(last))
+	b, err := o.Store.Get(manifestName(last), syncproto.MaxManifest)
 	return last, b, err
 }
 
@@ -263,11 +278,14 @@ func (o ObjectBackend) ManifestsAfter(n uint64) ([]byte, error) {
 		if c <= n {
 			continue
 		}
-		b, err := o.Store.Get(manifestName(c))
+		b, err := o.Store.Get(manifestName(c), syncproto.MaxManifest)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, b)
+		if len(out) == manifestPage {
+			break
+		}
 	}
 	return json.Marshal(out)
 }
@@ -276,6 +294,9 @@ func (o ObjectBackend) ManifestsAfter(n uint64) ([]byte, error) {
 // wins, every blob the manifest names has to be there, no server checks
 // that here
 func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
+	if len(signed) > syncproto.MaxManifest {
+		return ErrTooLarge
+	}
 	var sm syncproto.Signed
 	if err := json.Unmarshal(signed, &sm); err != nil {
 		return err
@@ -291,7 +312,7 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 		if e.Hash == "" {
 			continue
 		}
-		if _, err := o.Store.Get(objBlobs + e.Hash); err != nil {
+		if _, err := o.Store.Get(objBlobs+e.Hash, syncproto.MaxBlob); err != nil {
 			return fmt.Errorf("the blob of %s is not in the store: %v", short(id, 8), err)
 		}
 	}
@@ -300,4 +321,17 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 		return ErrCASLost
 	}
 	return err
+}
+
+// list names the objects under prefix, a store that lists more than an
+// account can hold is refused
+func (o ObjectBackend) list(prefix string) ([]string, error) {
+	names, err := o.Store.List(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) > maxNames {
+		return nil, fmt.Errorf("the store lists %d objects under %s, more than a sync account holds", len(names), prefix)
+	}
+	return names, nil
 }

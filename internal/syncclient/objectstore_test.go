@@ -1,6 +1,7 @@
 package syncclient
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/syncproto"
 )
 
 // memStore is an ObjectStore in memory with the create-only-if-absent
@@ -22,12 +24,15 @@ type memStore struct {
 
 func newMemStore() *memStore { return &memStore{m: map[string][]byte{}} }
 
-func (s *memStore) Get(name string) ([]byte, error) {
+func (s *memStore) Get(name string, max int) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.m[name]
 	if !ok {
 		return nil, ErrNotFound
+	}
+	if len(b) > max {
+		return nil, ErrTooLarge
 	}
 	return append([]byte(nil), b...), nil
 }
@@ -219,4 +224,29 @@ func TestManifestThatDoesNotMoveOn(t *testing.T) {
 		t.Fatal("the pull loops on a manifest that does not move on")
 	}
 	_ = a
+}
+
+// objects bigger than their kind may be are refused on the way in and out,
+// a store lists no more than an account holds (#226)
+func TestObjectBackendLimits(t *testing.T) {
+	store := newMemStore()
+	o := ObjectBackend{Store: store}
+	big := make([]byte, syncproto.MaxBlob+1)
+	if err := o.PutBlob("h", big); err != ErrTooLarge {
+		t.Errorf("big blob in = %v", err)
+	}
+	store.Put(objBlobs+"h", big)
+	if _, err := o.GetBlob("h"); err != ErrTooLarge {
+		t.Errorf("big blob out = %v", err)
+	}
+	store.Put(envelopeName("d", 1), make([]byte, maxSmall+1))
+	if _, err := o.GetEnvelope("d", 1); err != ErrTooLarge {
+		t.Errorf("big envelope = %v", err)
+	}
+	for i := 0; i <= maxNames; i++ {
+		store.Put(fmt.Sprintf("%sx%06d", objDevices, i), []byte("{}"))
+	}
+	if _, err := o.Devices(); err == nil {
+		t.Error("a store with more device objects than an account holds was listed")
+	}
 }
