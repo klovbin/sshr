@@ -143,3 +143,33 @@ func TestNamedSecretsInPassphraseMode(t *testing.T) {
 		t.Error("the secret stayed")
 	}
 }
+
+// a machine without a keychain starts the passphrase vault with a new key,
+// a key check from an earlier key stops it (#180)
+func TestPassphraseVaultWithoutKeychain(t *testing.T) {
+	keyring.MockInitWithError(errors.New("no bus"))
+	resetVault(t)
+	t.Cleanup(keyring.MockInit)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetVaultPassphrase(pass); err != nil {
+		t.Fatalf("no keychain: %v", err)
+	}
+	key, _ := VaultKey()
+	forgetVaultKey()
+	got, err := VaultKey()
+	if err != nil || string(got) != string(key) {
+		t.Fatalf("the file does not give the key: %v", err)
+	}
+	// a key check without the key: refused
+	resetVault(t)
+	os.Setenv("SSHR_VAULT", "keychain")
+	t.Cleanup(func() { os.Unsetenv("SSHR_VAULT") })
+	path, _ := keyCheckPath()
+	os.WriteFile(path, []byte("0123\n"), 0o600)
+	if err := SetVaultPassphrase(pass); !errors.Is(err, ErrVaultKeyLost) {
+		t.Fatalf("a key check of a lost key: %v", err)
+	}
+}

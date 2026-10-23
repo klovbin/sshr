@@ -183,6 +183,12 @@ func SetVaultPassphrase(pass string) error {
 		return errors.New("the passphrase is shorter than 8 characters")
 	}
 	key, err := VaultKey()
+	if errors.Is(err, ErrNoKeychain) {
+		// a machine without a keychain, the case the passphrase vault is
+		// for, starts with a new key, unless a key check says secrets were
+		// sealed here with a key that is now out of reach
+		key, err = newVaultKeyWithoutKeychain()
+	}
 	if err != nil {
 		return err
 	}
@@ -229,4 +235,32 @@ func UseKeychainVault() error {
 		return err
 	}
 	return nil
+}
+
+// newVaultKeyWithoutKeychain makes a vault key for a machine without a
+// keychain, refused when a key check exists, a new key would leave the
+// secrets sealed with the old one unreadable
+func newVaultKeyWithoutKeychain() ([]byte, error) {
+	vaultMu.Lock()
+	defer vaultMu.Unlock()
+	if vaultKey != nil {
+		return vaultKey, nil
+	}
+	want, err := readKeyCheck()
+	if err != nil {
+		return nil, err
+	}
+	if want != "" {
+		path, _ := keyCheckPath()
+		return nil, fmt.Errorf("%w: secrets here were sealed with a vault key the keychain does not give now, bring the keychain back before moving the key under a passphrase, or delete %s and save the passwords and keys again", ErrVaultKeyLost, path)
+	}
+	key := make([]byte, chacha20poly1305.KeySize)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	if err := checkVaultKey(key); err != nil {
+		return nil, err
+	}
+	vaultKey = key
+	return key, nil
 }
