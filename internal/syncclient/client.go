@@ -1068,7 +1068,7 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
 	}
 	if p.Host.ID != id {
-		return nil, fmt.Errorf("%w: entry %s holds host %s", errBadPayload, short(id, 8), p.Host.ID)
+		return nil, fmt.Errorf("%w: entry %s holds host %q", errBadPayload, short(id, 8), short(p.Host.ID, 40))
 	}
 	return &p, nil
 }
