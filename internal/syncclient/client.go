@@ -1554,6 +1554,8 @@ type Status struct {
 	Devices  []syncproto.Device
 	Waiting  bool
 	LastSync time.Time
+	// Backend is the store of an account that is not sshr-sync
+	Backend *BackendRef
 }
 
 func (c *Client) Status() (*Status, error) {
@@ -1563,7 +1565,7 @@ func (c *Client) Status() (*Status, error) {
 	st := &Status{
 		Server: c.st.Server, Account: c.st.Account, Device: c.st.DeviceID, Name: c.st.Name,
 		Fingerprint: Fingerprint(c.self().SignPub), Counter: c.st.Counter,
-		Waiting: c.st.Approver != "", LastSync: c.st.LastSync,
+		Waiting: c.st.Approver != "", LastSync: c.st.LastSync, Backend: c.st.Backend,
 	}
 	for _, d := range c.st.Trusted {
 		d.Name = CleanName(d.Name)

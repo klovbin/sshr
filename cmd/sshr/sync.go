@@ -14,9 +14,14 @@ const syncUsage = `Usage:
   sshr sync                              pull, then push what changed here
   sshr sync init --server <url> [--name <device>]
                                          start syncing, this machine is the first device
+  sshr sync init --backend s3 --endpoint <url> --bucket <name> [--prefix <dir>]
+                 [--region <r>] --key-id <id> [--name <device>]
+                                         keep the account in an S3 bucket instead,
+                                         the secret key comes from SSHR_S3_SECRET or a prompt
   sshr sync invite                       code for a new device to join with
   sshr sync join --server <url> [--name <device>] <code>
-                                         ask to add this machine, shows its fingerprint
+                                         ask to add this machine, shows its fingerprint,
+                                         an S3 account takes the flags of init instead of --server
   sshr sync pending                      devices waiting for approval
   sshr sync approve <id|fingerprint>     add a waiting device after comparing fingerprints
   sshr sync pull [--accept-reset]        only take changes from other devices
@@ -32,14 +37,19 @@ func cmdSync(store *app.Store, args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	c := &syncclient.Client{Store: store.Hosts(), Dir: dir, Log: os.Stdout, KeyPrefix: os.Getenv("SSHR_SYNC_KEYS")}
+	c := &syncclient.Client{Store: store.Hosts(), Dir: dir, Log: os.Stdout, KeyPrefix: os.Getenv("SSHR_SYNC_KEYS"),
+		OpenBackend: openStore}
 	sub := "push"
 	if len(args) > 0 {
 		sub, args = args[0], args[1:]
 	}
 	var server, name string
 	var rest []string
+	var sf storeFlags
 	for i := 0; i < len(args); i++ {
+		if sf.take(args, &i) {
+			continue
+		}
 		switch a := args[i]; {
 		case a == "--server" && i+1 < len(args):
 			i++
@@ -58,22 +68,29 @@ func cmdSync(store *app.Store, args []string) {
 	}
 	switch sub {
 	case "init":
+		if server, err = sf.setup(c, server); err != nil {
+			fatal(err)
+		}
 		if server == "" {
-			fatal(fmt.Errorf("sshr sync init needs --server <url>"))
+			fatal(fmt.Errorf("sshr sync init needs --server <url> or --backend s3"))
 		}
 		if err := c.Init(server, name); err != nil {
 			fatal(err)
 		}
 		code, _ := c.Invite()
-		fmt.Printf("Sync is on, this is the first device\nTo add another one run there:\n  sshr sync join --server %s %s\n", server, code)
+		st, _ := c.Status()
+		fmt.Printf("Sync is on, this is the first device\nTo add another one run there:\n  sshr sync join %s %s\n", joinFlags(st), code)
 	case "invite":
 		code, err := c.Invite()
 		if err != nil {
 			fatal(err)
 		}
 		st, _ := c.Status()
-		fmt.Printf("On the new device run:\n  sshr sync join --server %s %s\n", st.Server, code)
+		fmt.Printf("On the new device run:\n  sshr sync join %s %s\n", joinFlags(st), code)
 	case "join":
+		if server, err = sf.setup(c, server); err != nil {
+			fatal(err)
+		}
 		if server == "" || len(rest) != 1 {
 			fatal(fmt.Errorf("sshr sync join --server <url> <code>"))
 		}

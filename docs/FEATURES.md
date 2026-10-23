@@ -202,6 +202,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** add a host once and it appears everywhere, a host changed on two devices keeps both versions
 - **Why this way:** the server stores only ciphertext and cannot read hosts, add a device or rewrite history, devices are approved by comparing fingerprints, keys stored in sshr stay on their device
 
+### Sync through an S3 bucket
+- **What:** `sshr sync init --backend s3` keeps the encrypted account in an S3 bucket (AWS S3, Cloudflare R2) instead of on `sshr-sync`
+- **What for:** sync without running a server, in a bucket you already have
+- **Why it helps:** the same encryption, signatures and chained manifests as with sshr-sync, the bucket stores only ciphertext
+- **Why this way:** the next manifest is written with `If-None-Match: *`, so of two devices one wins, a bucket that writes over an object it should refuse is turned down before the account goes there, the secret key stays in the keychain and never on the command line, off by default since every device shares one bucket key
+
 ### Safe saves from several sshr processes
 - **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
 - **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time
