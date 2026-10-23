@@ -54,6 +54,9 @@ const (
 	maxNames     = 10000    // names one List may return
 	manifestPage = 100      // manifests one ManifestsAfter returns
 	maxPending   = 10       // devices waiting for approval
+	// keepHistory is how many manifests stay, as sshr-sync keeps them, a
+	// store that kept all would pass maxNames and stop the account
+	keepHistory = 1000
 )
 
 const (
@@ -412,7 +415,30 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 	if errors.Is(err, ErrExists) {
 		return ErrCASLost
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	o.trimHistory(m.Counter)
+	return nil
+}
+
+// trimHistory deletes the manifests more than keepHistory changes behind
+// counter, the push is already done, a delete that fails is tried again
+// on the next push
+func (o ObjectBackend) trimHistory(counter uint64) {
+	if counter <= keepHistory {
+		return
+	}
+	all, err := o.manifests()
+	if err != nil {
+		return
+	}
+	for _, c := range all {
+		if c > counter-keepHistory {
+			break
+		}
+		o.Store.Delete(manifestName(c))
+	}
 }
 
 // list names the objects under prefix, a store that lists more than an

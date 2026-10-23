@@ -2,6 +2,7 @@ package syncclient
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -322,3 +323,24 @@ func TestObjectBackendManifestAccount(t *testing.T) {
 }
 
 func base64Std(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
+// the store keeps the last keepHistory manifests, as sshr-sync does, so a
+// busy account never passes maxNames (#246)
+func TestObjectBackendKeepsHistory(t *testing.T) {
+	store := newMemStore()
+	must(t, store.Put(objAccount, []byte("acct")))
+	o := ObjectBackend{Store: store}
+	for n := uint64(1); n <= keepHistory+5; n++ {
+		body, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: n})
+		signed, _ := json.Marshal(syncproto.Signed{Body: body})
+		must(t, o.PutManifest(n-1, signed))
+	}
+	all, err := o.manifests()
+	must(t, err)
+	if len(all) != keepHistory || all[0] != 6 || all[len(all)-1] != keepHistory+5 {
+		t.Fatalf("kept %d manifests, %d to %d", len(all), all[0], all[len(all)-1])
+	}
+	if c, _, err := o.Head(); err != nil || c != keepHistory+5 {
+		t.Errorf("head %d %v", c, err)
+	}
+}
