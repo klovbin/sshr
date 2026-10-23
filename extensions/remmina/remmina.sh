@@ -47,8 +47,9 @@ $f"
 done
 
 # awk reads the [remmina] group of each file and prints one JSON object
-# per SSH profile, the strings are escaped for JSON
-printf '%s\n' "$files" | awk '
+# per SSH profile, the strings are escaped for JSON, in bytes: gawk in a
+# UTF-8 locale stops matching its patterns on a byte that is no UTF-8
+printf '%s\n' "$files" | LC_ALL=C awk '
 function esc(s,   out, i, c, n) {
 	out = ""
 	n = length(s)

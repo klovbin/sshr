@@ -191,3 +191,15 @@ func TestImportersSkipLinksAndHugeFiles(t *testing.T) {
 		}
 	}
 }
+
+// a byte that is no UTF-8 in a profile does not stop the port from being
+// read, whatever the locale
+func TestRemminaImporterTakesAnyBytes(t *testing.T) {
+	t.Setenv("LC_ALL", "C.UTF-8")
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.remmina"), []byte("[remmina]\nname=caf\xe9\nprotocol=SSH\nserver=h\xe9.example:2222\n"), 0o600)
+	hosts := runImporter(t, "remmina", dir)
+	if len(hosts) != 1 || hosts[0].Port != 2222 {
+		t.Fatalf("%+v", hosts)
+	}
+}
