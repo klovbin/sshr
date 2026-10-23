@@ -22,18 +22,19 @@ How sshr is built, which package may use which, where data lives and how the mai
 
 | Package | Does | May import (sshr packages) |
 |----|----|----|
-| `internal/app` | the core: hosts and their store, secrets, ssh command lines, ssh config import and export, health, settings | nothing |
+| `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
+| `internal/app` | the core: hosts and their store, secrets, ssh command lines, ssh config import and export, health, settings | `fileio` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation | `app`, `syncproto` |
-| `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto` |
+| `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
 | `internal/api` | local REST API over the core | `app` |
 | `internal/mcp` | MCP server over the core | `app` |
 | `internal/ext` | extensions: manifest, the installed ones, running one with a clean environment | `app` |
 | `internal/ui` | the Gio desktop app | `app`, `clip`, `i18n`, `assets` |
-| `internal/desktop` | menu entry, icons, app bundle | `assets` |
+| `internal/desktop` | menu entry, icons, app bundle | `assets`, `fileio` |
 | `internal/clip`, `internal/i18n`, `assets` | clipboard, translations, embedded icons | nothing |
 | `cmd/sshr` | CLI commands, wires the front ends together | `app`, `api`, `mcp`, `ext`, `syncclient`, `ui`, `desktop`, `clip`, `assets` |
-| `cmd/sshr-sync` | starts the sync server | `app` (only for its file lock, planned to move), `syncserver` |
+| `cmd/sshr-sync` | starts the sync server | `fileio`, `syncserver` |
 
 Rules that follow:
 
@@ -52,9 +53,9 @@ Rules that follow:
 | secrets | `vault.go` (vault key in the keychain, seal and unseal), `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords), `onepassword.go`, `bitwarden.go`, `manager.go`, `agent.go`, `keyfile.go` |
 | ssh command lines | `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `forward.go`, `copy.go`, `remote.go` |
 | reachability | `health.go`, a TCP connect and the SSH banner in process, no ssh |
-| ssh config | `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`, `WriteFileAtomic`) |
+| ssh config | `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`) |
 | settings | `settings.go` |
-| platform | `lock_*.go`, `tty_*.go`, `agentsock_*.go` |
+| platform | `files.go` (`WriteFileAtomic`, `LockFile`, `WaitLock` over `fileio`), `tty_*.go`, `agentsock_*.go` |
 
 The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp` and remote commands. A session is planned in the core too: `Store.PlanSession` (`internal/app/launch.go`) turns a host and `LaunchOptions` (forwards, mosh, plain, tunnel, batch) into the ssh or mosh command line on a copy of the host, with the route through a gateway, the notes for the user and the ssh fallback of a mosh plan, `SessionPlan.Command` attaches the host's secrets. `sshr connect`, `sshr tunnel` and the tunnels of the REST API use it. Running the process, waiting for it, forwarding signals and printing stay with the caller, a GUI must not forward a terminal's signals.
 
@@ -73,7 +74,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | Path | Holds | Written by |
 |----|----|----|
 | `~/.sshr/vault/hosts/<id>.json` | one host per file, 0600, `rev` counts its saves on this machine, passwords sealed as v2 (bound to the destination), keys sealed, a password from an old version stays in clear in `password` while the keychain cannot be used | `Store.save` through `WriteFileAtomic` |
-| `~/.sshr/vault/hosts/<id>.pub` | public half of a key kept in sshr, for `-i` with an agent | `writePub`, plain `os.WriteFile` |
+| `~/.sshr/vault/hosts/<id>.pub` | public half of a key kept in sshr, for `-i` with an agent | `writePub` through `WriteFileAtomic` |
 | `~/.sshr/vault/.lock` | lock for creating the vault key | `VaultKey` |
 | `~/.sshr/vault/hosts/.lock` | lock for changing hosts, holds the pid of the holder | `Store.locked` |
 | keychain, service `sshr`, entry `vault-key` | the vault key that seals the secrets | `VaultKey` |
@@ -156,7 +157,7 @@ In this order, each one its own issue and commits, the order was checked against
 2. (#96) done: `PlanSession` and `SessionPlan.Command` in `app` plan connect, tunnel and the API tunnels, the CLI keeps running the process and its signals, the app can build its connect on it (#90)
 3. (#97) done: host files, settings.json, the sync state and the extension pins keep the keys a newer sshr wrote and carry a `version`, a file newer than the binary is read and not written (`ErrNewerFormat`), host payloads carry the unknown keys except `local_...`, a host of a newer format is not pushed by a build that cannot write it and is skipped where it arrives and cannot be written, manifests of older formats are read, a golden test pins the payload bytes of today's hosts and a table classifies every `Host` field
 4. (#98) done: every secret goes through the `Keychain` interface (system keychain, or `secrets.json` under the passphrase vault), keychain states are told apart (missing, locked, timeout with a quiet minute), `sshr vault passphrase` keeps the vault key in a file wrapped with Argon2id for machines without a keychain, stored keys are sealed for their destination like passwords, `cleanHost` runs no program, clear passwords of old files are sealed at start, a `Store.Vault` injected instead of the package-level keychain is left for the phone build
-5. (#99) move `LockFile`, `WriteFileAtomic` into a small leaf package, so `cmd/sshr-sync` and `syncserver` stop linking or copying the core, `.pub` files through it too
+5. (#99) done: `internal/fileio` holds the atomic write, the file lock and the shared read, `cmd/sshr-sync` no longer links the core, `syncserver` and `desktop` dropped their copies of the write, `.pub` files are written through it too
 6. (#100) rules as tests, before 9: no `os/exec` in `ui`, `mcp`, `syncserver` and the packages a phone build needs, Gio only in `ui`, a test that every `Host` field is classified as synced, stripped or reset, a redacting format for `Host`, CODEOWNERS for `internal/ui`
 7. (#101) an append-only audit log of MCP and REST actions, a per-host opt-in for commands from assistants, approval that fails closed, remote output marked as data, the API token on the unix socket too, a concurrency limit for REST
 8. (#102) done in part: `scripts/release.sh` and `.github/workflows/release.yml` build the six CLI files on a tag, checksums and a build attestation, the GUI is not in them, the pinned-key signature and its check in install.sh are #146, packages (#17) are next

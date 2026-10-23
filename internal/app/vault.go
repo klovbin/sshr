@@ -410,10 +410,6 @@ func CheckKeychain() error {
 	return err
 }
 
-// LockFile holds an exclusive lock on path until the returned func runs,
-// the sync server keeps one instance per data directory with it
-func LockFile(path string) (func(), error) { return lockFile(path) }
-
 // Keychain is where sshr keeps its own secrets: the vault key and the keys
 // of the sync device, values are base64 text under a name, Get returns
 // keyring.ErrNotFound for a name it does not hold, the system keychain is

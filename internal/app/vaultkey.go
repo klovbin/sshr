@@ -200,5 +200,5 @@ func (s *Store) writePub(h *Host) error {
 		}
 		return nil
 	}
-	return os.WriteFile(path, []byte(h.KeyPub+"\n"), 0o600)
+	return WriteFileAtomic(path, []byte(h.KeyPub+"\n"), 0o600)
 }

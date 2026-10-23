@@ -1,4 +1,4 @@
-package app
+package fileio
 
 import (
 	"errors"
@@ -29,11 +29,14 @@ func (e *BusyError) Error() string {
 // lockPoll is how often a waiting process tries the lock again
 const lockPoll = 50 * time.Millisecond
 
-// WaitLock takes the exclusive lock on path like waitLock, the sync keeps
-// one run at a time with it
+// WaitLock takes the exclusive lock on path like waitLock
 func WaitLock(path, what string, wait time.Duration) (func(), error) {
 	return waitLock(path, what, wait)
 }
+
+// LockFile holds an exclusive lock on path until the returned func runs,
+// waiting as long as another process holds it
+func LockFile(path string) (func(), error) { return lockFile(path) }
 
 // waitLock takes the exclusive lock on path, trying again until wait has
 // passed, a wait of 0 tries once, the holder writes its pid into the file so

@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/crypto/acme/autocert"
 
-	"sshr.dev/internal/app"
+	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/syncserver"
 )
 
@@ -32,7 +32,7 @@ func main() {
 	if err := os.MkdirAll(*data, 0o700); err != nil {
 		fail(err)
 	}
-	unlock, err := app.LockFile(filepath.Join(*data, ".lock"))
+	unlock, err := fileio.LockFile(filepath.Join(*data, ".lock"))
 	if err != nil {
 		fail(err)
 	}

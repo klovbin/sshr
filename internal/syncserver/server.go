@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode"
 
+	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/syncproto"
 )
 
@@ -175,30 +176,7 @@ func (s *Server) saveDevices(a string, ds []deviceFile) error {
 // writeFile replaces path through a temp file of its own and a rename, two
 // requests writing the same file never share a temp file
 func writeFile(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	_, err = f.Write(data)
-	// the data reaches the disk before the rename does, a power loss
-	// leaves the old file or the new one, never an empty one
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(tmp, 0o600)
-	}
-	if err == nil {
-		err = os.Rename(tmp, path)
-	}
-	if err != nil {
-		os.Remove(tmp)
-	}
-	return err
+	return fileio.WriteFile(path, data, 0o600)
 }
 
 func newToken() (token, hash string, err error) {

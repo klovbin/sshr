@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"sshr.dev/internal/fileio"
 )
 
 // executable is the resolved path of the running sshr, the entry points
@@ -26,29 +28,7 @@ func writeFile(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	// a temp file of its own, two runs at once never share one
-	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	_, err = f.Write(data)
-	// the data reaches the disk before the rename does, a power loss
-	// leaves the old file or the new one, never an empty one
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(tmp, mode)
-	}
-	if err == nil {
-		err = os.Rename(tmp, path)
-	}
-	if err != nil {
-		os.Remove(tmp)
+	if err := fileio.WriteFile(path, data, mode); err != nil {
 		return fmt.Errorf("%s: %v", path, err)
 	}
 	return nil
