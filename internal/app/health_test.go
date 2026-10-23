@@ -53,6 +53,24 @@ func TestCheckHealth(t *testing.T) {
 	}
 }
 
+func TestHealthCause(t *testing.T) {
+	closed, _ := net.Listen("tcp", "127.0.0.1:0")
+	closedPort := closed.Addr().(*net.TCPAddr).Port
+	closed.Close()
+	web := listen(t, "HTTP/1.1 400 Bad Request\r\n\r\n")
+	got := CheckHealthAll([]Host{
+		{ID: "refused", Name: "r", Host: "127.0.0.1", Port: closedPort},
+		{ID: "dns", Name: "n", Host: "no-such-host.invalid"},
+		{ID: "banner", Name: "b", Host: "127.0.0.1", Port: web},
+		{ID: "jump", Name: "j", Host: "10.0.0.1", Jump: "bastion"},
+	})
+	for id, want := range map[string]string{"refused": "refused", "dns": "dns", "banner": "no_banner", "jump": "jump"} {
+		if got[id].Cause != want {
+			t.Errorf("%s: cause %q, want %q (%+v)", id, got[id].Cause, want, got[id])
+		}
+	}
+}
+
 func TestHealthEvery(t *testing.T) {
 	for in, want := range map[int]time.Duration{0: 5 * time.Minute, 10: time.Minute, 600: 10 * time.Minute} {
 		if got := (Settings{HealthInterval: in}).HealthEvery(); got != want {

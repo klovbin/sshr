@@ -22,6 +22,9 @@ const (
 	keyringService = "sshr"
 	keyringUser    = "vault-key"
 	sealPrefix     = "v1:"
+	// sealPrefix2 marks a value sealed together with the destination it
+	// belongs to, see sealFor
+	sealPrefix2 = "v2:"
 )
 
 // keyringTimeout bounds every keychain call, a locked Secret Service
@@ -158,8 +161,36 @@ func sealAAD(hostID, field string) []byte {
 	return []byte("sshr\x00" + hostID + "\x00" + field)
 }
 
+// sealFor seals plain for one destination, the address, user, port and
+// jump hosts go into the associated data, a value moved to another host
+// file or a host whose address was changed outside sshr does not open
+func sealFor(plain []byte, hostID, field, dest string) (string, error) {
+	out, err := sealRaw(plain, sealAAD(hostID, field+"\x00"+dest))
+	if err != nil {
+		return "", err
+	}
+	return sealPrefix2 + out, nil
+}
+
+// unsealFor opens a value of sealFor for dest, and an older v1 value made
+// by seal without a destination
+func unsealFor(blob, hostID, field, dest string) ([]byte, error) {
+	if raw, ok := strings.CutPrefix(blob, sealPrefix2); ok {
+		return unsealRaw(raw, sealAAD(hostID, field+"\x00"+dest))
+	}
+	return unseal(blob, hostID, field)
+}
+
 // seal encrypts plain with XChaCha20-Poly1305 under the vault key
 func seal(plain []byte, hostID, field string) (string, error) {
+	out, err := sealRaw(plain, sealAAD(hostID, field))
+	if err != nil {
+		return "", err
+	}
+	return sealPrefix + out, nil
+}
+
+func sealRaw(plain, aad []byte) (string, error) {
 	key, err := VaultKey()
 	if err != nil {
 		return "", err
@@ -172,8 +203,8 @@ func seal(plain []byte, hostID, field string) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	out := aead.Seal(nonce, nonce, plain, sealAAD(hostID, field))
-	return sealPrefix + base64.StdEncoding.EncodeToString(out), nil
+	out := aead.Seal(nonce, nonce, plain, aad)
+	return base64.StdEncoding.EncodeToString(out), nil
 }
 
 // ErrSealBroken means a saved secret does not open with the vault key, the
@@ -186,6 +217,10 @@ func unseal(blob, hostID, field string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown format", ErrSealBroken)
 	}
+	return unsealRaw(raw, sealAAD(hostID, field))
+}
+
+func unsealRaw(raw string, aad []byte) ([]byte, error) {
 	data, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrSealBroken, err)
@@ -201,7 +236,7 @@ func unseal(blob, hostID, field string) ([]byte, error) {
 	if len(data) < aead.NonceSize() {
 		return nil, fmt.Errorf("%w: too short", ErrSealBroken)
 	}
-	plain, err := aead.Open(nil, data[:aead.NonceSize()], data[aead.NonceSize():], sealAAD(hostID, field))
+	plain, err := aead.Open(nil, data[:aead.NonceSize()], data[aead.NonceSize():], aad)
 	if err != nil {
 		return nil, ErrSealBroken
 	}

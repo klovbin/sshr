@@ -150,8 +150,10 @@ func (a *api) getHost(w http.ResponseWriter, r *http.Request) {
 }
 
 // newHost is what POST /v1/hosts takes, secrets that would have to travel
-// through the API (a password to save, a pasted key) are not accepted,
-// those are added in the app or the CLI
+// through the API (a password to save, a pasted key) are not accepted, nor
+// are 1Password and Bitwarden references, any local client could link a
+// server of its choice to any item and the next connect would send the
+// secret there, those are added in the app or the CLI
 type newHost struct {
 	Name        string   `json:"name"`
 	Host        string   `json:"host"`
@@ -185,6 +187,10 @@ func (a *api) addHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, errors.New("passwords and private keys are not taken through the API, add them in the app or with sshr add"))
 		return
 	}
+	if in.OPPassword != "" || in.OPKey != "" || in.BWPassword != "" || in.BWKey != "" {
+		fail(w, http.StatusBadRequest, errors.New("1Password and Bitwarden references are not taken through the API, link them in the app or with sshr add"))
+		return
+	}
 	h := app.Host{Name: in.Name, Host: in.Host, User: in.User, Port: in.Port, Key: in.Key, Jump: in.Jump, Session: in.Session, Tags: in.Tags}
 	switch {
 	case in.Key != "":
@@ -195,14 +201,6 @@ func (a *api) addHost(w http.ResponseWriter, r *http.Request) {
 		}
 	case in.Agent != nil:
 		h.KeyMode, h.Agent, h.AgentKey = app.KeyAgent, *in.Agent, in.AgentKey
-	case in.OPKey != "":
-		h.KeyMode, h.KeyRef = app.KeyOnePassword, in.OPKey
-	case in.OPPassword != "":
-		h.PasswordMode, h.PasswordRef = app.PasswordOnePassword, in.OPPassword
-	case in.BWKey != "":
-		h.KeyMode, h.KeyRef = app.KeyBitwarden, in.BWKey
-	case in.BWPassword != "":
-		h.PasswordMode, h.PasswordRef = app.PasswordBitwarden, in.BWPassword
 	case in.AskPassword:
 		h.PasswordMode = app.PasswordAsk
 	}
@@ -337,7 +335,12 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Forwards []string `json:"forwards"`
 	}
-	json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in)
+	// an empty body means every forward, a body that does not decode is an
+	// error, not an empty list
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+		fail(w, http.StatusBadRequest, fmt.Errorf("bad body: %v", err))
+		return
+	}
 	if len(in.Forwards) == 0 {
 		in.Forwards = []string{"all"}
 	}

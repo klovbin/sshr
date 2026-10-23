@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 )
 
@@ -32,20 +33,41 @@ func (s *Store) CopyArgs(h *Host, send, legacy bool, sources []string, dest stri
 	}
 	args = append(args, "-r", "--")
 	if send {
-		return append(append(args, sources...), remoteSpec(h, dest)), nil
+		for _, src := range sources {
+			args = append(args, localSpec(src))
+		}
+		return append(args, remoteSpec(h, dest)), nil
 	}
 	for _, src := range sources {
 		args = append(args, remoteSpec(h, src))
 	}
-	return append(args, dest), nil
+	return append(args, localSpec(dest)), nil
+}
+
+// localSpec keeps scp from reading a local path as host:path, scp takes a
+// colon before the first slash for a host, ./ in front of a relative path
+// puts a slash first, absolute paths are left as they are, a Windows
+// drive letter included
+func localSpec(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	seps := "/"
+	if filepath.Separator == '\\' {
+		seps = `/\`
+	}
+	if i := strings.IndexByte(path, ':'); i >= 0 && !strings.ContainsAny(path[:i], seps) {
+		return "./" + path
+	}
+	return path
 }
 
 // remoteSpec is [user@]host:path for scp, an IPv6 address goes in brackets
-// so its colons are not read as the path separator, an empty path is the
-// home folder
+// so its colons are not read as the path separator, unless it was saved in
+// them already, an empty path is the home folder
 func remoteSpec(h *Host, path string) string {
 	host := h.Host
-	if strings.Contains(host, ":") {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
 		host = "[" + host + "]"
 	}
 	if h.User != "" {

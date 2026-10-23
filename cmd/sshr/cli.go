@@ -47,12 +47,17 @@ func runCLI(args []string) {
 		printUsage()
 		os.Exit(1)
 	}
+	hintStore = store
 
 	switch args[0] {
 	case "list", "ls":
 		cmdList(store, args[1:])
 	case "ping":
 		cmdPing(store, args[1:])
+	case "show":
+		cmdShow(store, args[1:])
+	case "key":
+		cmdKey(store, args[1:])
 	case "tag":
 		cmdTag(store, args[1:])
 	case "run":
@@ -89,7 +94,7 @@ func runCLI(args []string) {
 		cmdServe(store, args[1:])
 	case "sync":
 		cmdSync(store, args[1:])
-	case "import-ssh-config":
+	case "import", "import-ssh-config":
 		cmdImportSSHConfig(store, args[1:])
 	case "desktop-entry":
 		cmdDesktopEntry(args[1:])
@@ -101,31 +106,43 @@ func runCLI(args []string) {
 		for _, a := range acc {
 			fmt.Printf("%s\t%s\t%s\n", a.Email, a.URL, a.Ref())
 		}
-	case "export-ssh-config":
+	case "export", "export-ssh-config":
 		cmdExportSSHConfig(store, args[1:])
 	case app.ProxyCommandName:
 		cmdProxy(store, args[1:])
+	case "completion":
+		cmdCompletion(args[1:])
+	case completeCommand:
+		cmdComplete(store, args[1:])
+	case "ext":
+		cmdExt(store, args[1:])
 	case "help", "--help", "-h":
-		printUsage()
+		cmdHelp(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "sshr: unknown command %q\n", args[0])
-		printUsage()
-		os.Exit(1)
+		// an installed extension answers to its name, only when no built-in
+		// command has it
+		runExtension(args[0], args[1:])
+		unknownCommand(args[0])
 	}
 }
 
 func cmdList(store *app.Store, args []string) {
 	st, _ := app.LoadSettings()
 	ping := st.HealthCheck
+	recent, asJSON := false, false
 	var query []string
 	for _, a := range args {
 		switch {
+		case a == "--json":
+			asJSON = true
+		case a == "--recent":
+			recent = true
 		case a == "--ping":
 			ping = true
 		case a == "--no-ping":
 			ping = false
 		case strings.HasPrefix(a, "-"):
-			fmt.Fprintln(os.Stderr, "Usage: sshr list [--ping|--no-ping] [search words, tag:x or #x]")
+			fmt.Fprintln(os.Stderr, "Usage: sshr list [--recent] [--ping|--no-ping] [--json] [search words, tag:x or #x]")
 			os.Exit(1)
 		default:
 			query = append(query, a)
@@ -135,12 +152,12 @@ func cmdList(store *app.Store, args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	if len(all) == 0 {
+	if len(all) == 0 && !asJSON {
 		fmt.Println("No hosts. Use `sshr add` to add one.")
 		return
 	}
 	hosts := app.Filter(all, strings.Join(query, " "))
-	if len(hosts) == 0 {
+	if len(hosts) == 0 && !asJSON {
 		fmt.Printf("No hosts match %q\n", strings.Join(query, " "))
 		os.Exit(1)
 	}
@@ -148,9 +165,29 @@ func cmdList(store *app.Store, args []string) {
 	if ping {
 		health = app.CheckHealthAll(hosts)
 	}
+	if recent {
+		app.SortRecent(hosts)
+	}
+	if asJSON {
+		out := make([]listJSON, 0, len(hosts))
+		for _, h := range hosts {
+			item := listJSON{HostSummary: h.Summary()}
+			if ping {
+				hj := toHealthJSON(health[h.ID])
+				item.Status = &hj
+			}
+			out = append(out, item)
+		}
+		printJSON(out)
+		return
+	}
+	now := time.Now()
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	if ping {
 		fmt.Fprint(w, "STATUS\t")
+	}
+	if recent {
+		fmt.Fprint(w, "LAST\t")
 	}
 	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tAUTH\tTAGS\tID")
 	for _, h := range hosts {
@@ -161,6 +198,9 @@ func cmdList(store *app.Store, args []string) {
 		}
 		if ping {
 			fmt.Fprint(w, health[h.ID].Label()+"\t")
+		}
+		if recent {
+			fmt.Fprint(w, app.Ago(h.LastConnected, now)+"\t")
 		}
 		tagCol := strings.Join(h.Tags, ",")
 		if tagCol == "" {
@@ -431,8 +471,20 @@ func cmdConnect(store *app.Store, args []string) {
 	}
 	query := strings.Join(rest, " ")
 	h, err := store.Find(query)
+	unsaved := false
+	if errors.Is(err, app.ErrNotFound) && strings.Contains(query, "@") {
+		// user@host[:port] or ssh://... that is not saved, connect once
+		tmp, perr := app.ParseDestination(query)
+		if perr != nil {
+			fatal(perr)
+		}
+		h, err, unsaved = &tmp, nil, true
+	}
 	if err != nil {
 		findFailed("connect", query, err)
+	}
+	if unsaved {
+		fmt.Fprintf(os.Stderr, "sshr: %s is not saved, connecting once\n", query)
 	}
 	sshOpts, err := store.ConnectArgs(h)
 	if err != nil {
@@ -466,6 +518,7 @@ func cmdConnect(store *app.Store, args []string) {
 	}
 	if useMosh {
 		if code, ok := runMosh(h, sshOpts, dest, session); ok {
+			markConnected(store, h, code)
 			os.Exit(code)
 		}
 	}
@@ -489,7 +542,48 @@ func cmdConnect(store *app.Store, args []string) {
 	} else {
 		sshOpts = append(sshOpts, "--", dest)
 	}
-	os.Exit(run(h, sshBin, sshOpts...))
+	code := run(h, sshBin, sshOpts...)
+	markConnected(store, h, code)
+	os.Exit(code)
+}
+
+// markConnected notes the session for sshr list --recent, 255 is ssh
+// failing to connect at all, any other code is a session that was open
+func markConnected(store *app.Store, h *app.Host, code int) {
+	if h.ID == "" {
+		// a destination that is not saved, offer to keep it
+		if code != 255 {
+			offerSave(store, h)
+		}
+		return
+	}
+	if code != 255 {
+		store.MarkConnected(h.ID)
+	}
+}
+
+// offerSave asks on a terminal whether to keep a destination connected to
+// once, nothing is asked without one, it logs in as ssh did, with the
+// default keys, the agent or a password prompt
+func offerSave(store *app.Store, h *app.Host) {
+	if h.ID != "" || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+	fmt.Printf("Save %s@%s as a host? Type a name, or Enter to skip: ", h.User, h.Host)
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	name := strings.TrimSpace(line)
+	if name == "" {
+		return
+	}
+	h.Name = name
+	saved, err := store.Add(*h)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: not saved: %v\n", err)
+		return
+	}
+	h.ID = saved.ID
+	store.MarkConnected(saved.ID)
+	fmt.Printf("Saved as %s, sshr connect %s next time\n", saved.Name, saved.Name)
 }
 
 // cmdProxy is run by ssh as ProxyCommand ("sshr __proxy <chain> %h %p"), it
@@ -591,124 +685,6 @@ func run(h *app.Host, bin string, args ...string) int {
 		fatal(err)
 	}
 	return 0
-}
-
-func printUsage() {
-	fmt.Fprintln(os.Stderr, `sshr — SSH host manager
-
-Usage:
-  sshr                              open GUI
-  sshr list [--ping|--no-ping] [search...]
-                                    list saved hosts, words filter by
-                                    name, address, user and tags, tag:x
-                                    or #x needs the exact tag, --ping
-                                    adds whether each answers (on by
-                                    default with health_check)
-  sshr send <name or id> <path>... [--to <remote folder>]
-  sshr get <name or id> <remote path>... [--to <local folder>]
-                                    copy files and folders with scp and
-                                    the host's own key, password and
-                                    jump hosts, send goes to the home
-                                    folder, get to the current one,
-                                    --legacy uses the old scp protocol
-                                    for servers without SFTP
-  sshr run [-t <tag>]... [-j N] [--timeout S] [name...] -- <command>
-                                    run a command on several hosts at
-                                    once, by name and by tag (all tags),
-                                    8 at a time, each host's output as a
-                                    block, exits 1 when one fails
-  sshr tag <name or id> [+tag|-tag|tag...]
-                                    show, add (+ or bare) or remove (-)
-                                    tags of a host
-  sshr ping [name or id...]         check whether hosts answer: TCP connect
-                                    time and the SSH banner, no login,
-                                    exits 1 when one is down
-  sshr add <host> -u <user> [-n <name>] [-p <port>]
-           [-k <key> | --key-stdin | --agent [name] | --no-key | --ask-password]
-           [-J <jump>]
-           [--session tmux|zellij] [-t <tags>]
-                                    add a host (asks for the auth method
-                                    unless -k, --no-key or --ask-password
-                                    is given), --no-key saves a password
-                                    encrypted with a key from the system
-                                    keychain, --ask-password saves none,
-                                    ssh asks on every connect,
-                                    --key-stdin stores the private key
-                                    read from stdin inside sshr,
-                                    encrypted the same way,
-                                    --op-password op://v/item/password and
-                                    --op-key "op://v/item/private key"
-                                    read them from 1Password on every
-                                    connect, --no-key --store 1password
-                                    creates a 1Password item from the
-                                    password (--op-vault <name>),
-                                    --bw-password <item id> and
-                                    --bw-key <item id> read them from
-                                    Bitwarden (bw, with BW_SESSION set),
-                                    --agent [system|1password|<socket>]
-                                    uses a key from an ssh agent,
-                                    --agent-key <fingerprint|comment>
-                                    picks one of its keys,
-                                    -J a,b goes through jump hosts: saved
-                                    host names or [user@]host[:port],
-                                    --session attaches to tmux/zellij
-                                    on connect (off by default)
-  sshr rm <name or id>              remove a host
-  sshr connect [--mosh|--ssh] [--plain] [-F <forward>|all] <name or id>
-                                    ssh into a host (mosh if enabled
-                                    in settings or with --mosh),
-                                    --plain skips the host's session,
-                                    -F also opens saved forwards
-  sshr forward <host>               list saved port forwards
-  sshr forward add <host> <name> -L|-R|-D <spec>
-                                    save a forward, e.g.
-                                    db -L 5432:localhost:5432
-  sshr forward rm <host> <name>     remove a forward
-  sshr tunnel <host> [names...]     open forwards without a shell
-                                    (all when no names), Ctrl+C closes
-  sshr close <name or id>           close the shared connection to a host
-  sshr paste [-c] [-f <file>] <name or id>
-                                    upload the clipboard image (or a file)
-                                    to the host and print its path there;
-                                    -c also copies that path; removed from
-                                    the server after 15 minutes
-  sshr mcp [--allow-commands|--no-commands]
-                                    MCP server on stdin/stdout for AI
-                                    assistants: list hosts, upload files,
-                                    run commands only with
-                                    --allow-commands or the mcp_commands
-                                    setting (off by default)
-  sshr serve [--listen unix:<path>|127.0.0.1:<port>] [--allow-commands]
-                                    local REST API for other programs,
-                                    a unix socket by default, a loopback
-                                    port needs the token from
-                                    ~/.sshr/api-token, no secrets are
-                                    returned, commands are off by default
-  sshr sync [init|invite|join|pending|approve|pull|push|status|
-            remove-device|leave]   sync hosts through an sshr-sync server,
-                                    end to end encrypted, see sshr sync help
-  sshr import-ssh-config [--dry-run]
-                                    add the hosts of ~/.ssh/config with
-                                    keys, agent, jump hosts and forwards,
-                                    saved hosts are skipped
-  sshr export-ssh-config [--install|--uninstall]
-                                    print the hosts as ssh config,
-                                    --install writes ~/.sshr/ssh_config,
-                                    includes it from ~/.ssh/config and
-                                    keeps it up to date, so ssh, scp and
-                                    editors reach the hosts by name,
-                                    passwords and keys kept in sshr are
-                                    not exported
-  sshr desktop-entry [--remove]     add sshr with its icon to the
-                                    application menu: a .desktop entry
-                                    and icons on Linux, ~/Applications/
-                                    sshr.app on macOS (run again after
-                                    an update, the bundle holds a copy)
-  sshr help                         show this help
-
-  --reuse / --no-reuse              with any command that connects: share
-                                    one connection per host (ControlMaster)
-                                    or not, overriding the setting`)
 }
 
 func promptAuthMethod() (key, password, mode string, keyData []byte) {
@@ -945,6 +921,11 @@ func findFailed(cmd, query string, err error) {
 		}
 	case errors.Is(err, app.ErrNotFound):
 		fmt.Fprintf(os.Stderr, "sshr %s: %s not found\n", cmd, query)
+		if near := hostHint(query); len(near) > 0 {
+			fmt.Fprintf(os.Stderr, "did you mean: %s\n", strings.Join(near, ", "))
+		} else {
+			fmt.Fprintln(os.Stderr, "sshr list shows the saved hosts")
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "sshr %s: %v\n", cmd, err)
 	}
@@ -952,6 +933,9 @@ func findFailed(cmd, query string, err error) {
 }
 
 func fatal(err error) {
+	if errors.Is(err, app.ErrChanged) {
+		err = errors.New("the host was saved meanwhile (a sync or the app), nothing is changed, run the command again")
+	}
 	fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
 	os.Exit(1)
 }
@@ -961,7 +945,7 @@ func cmdImportSSHConfig(store *app.Store, args []string) {
 	dry := false
 	for _, a := range args {
 		if a != "--dry-run" {
-			fmt.Fprintln(os.Stderr, "Usage: sshr import-ssh-config [--dry-run]")
+			fmt.Fprintln(os.Stderr, "Usage: sshr import [--dry-run]")
 			os.Exit(1)
 		}
 		dry = true
@@ -1007,7 +991,7 @@ func cmdImportSSHConfig(store *app.Store, args []string) {
 // cmdExportSSHConfig prints the hosts as ssh config or installs the export
 func cmdExportSSHConfig(store *app.Store, args []string) {
 	usage := func() {
-		fmt.Fprintln(os.Stderr, "Usage: sshr export-ssh-config [--install|--uninstall]")
+		fmt.Fprintln(os.Stderr, "Usage: sshr export [--install|--uninstall]")
 		os.Exit(1)
 	}
 	if len(args) > 1 {
@@ -1056,6 +1040,20 @@ func cmdExportSSHConfig(store *app.Store, args []string) {
 
 // cmdPing checks the given hosts, all when none is given
 func cmdPing(store *app.Store, args []string) {
+	asJSON, keys := false, false
+	kept := args[:0:0]
+	for _, a := range args {
+		switch a {
+		case "--json":
+			asJSON = true
+			continue
+		case "--keys":
+			keys = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	args = kept
 	var hosts []app.Host
 	if len(args) == 0 {
 		var err error
@@ -1067,14 +1065,45 @@ func cmdPing(store *app.Store, args []string) {
 		hosts = append(hosts, *findHost(store, "ping", a))
 	}
 	res := app.CheckHealthAll(hosts)
+	var hk map[string]app.HostKey
+	if keys {
+		hk = app.CheckHostKeyAll(hosts)
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	code := 0
+	out := make([]pingJSON, 0, len(hosts))
 	for _, h := range hosts {
 		r := res[h.ID]
 		if r.State == app.HealthDown || r.State == app.HealthNotSSH {
 			code = 1
 		}
+		k := hk[h.ID]
+		if k.State == app.KeyChanged {
+			code = 1
+		}
+		if asJSON {
+			p := pingJSON{Name: h.Name, ID: h.ID, healthJSON: toHealthJSON(r)}
+			if keys {
+				p.KeyType, p.KeyFingerprint, p.KeyState = k.Type, k.Fingerprint, k.State
+			}
+			out = append(out, p)
+			continue
+		}
+		if keys {
+			key := k.Err
+			if k.Fingerprint != "" {
+				key = k.Type + " " + k.Fingerprint + " (" + k.State + ")"
+				if k.State == app.KeyChanged {
+					key += " THE SERVER KEY CHANGED, check before connecting"
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", h.Name, r.Label(), r.Reason, key)
+			continue
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Name, r.Label(), r.Reason)
+	}
+	if asJSON {
+		printJSON(out)
 	}
 	w.Flush()
 	os.Exit(code)

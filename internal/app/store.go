@@ -25,6 +25,9 @@ var (
 	ErrPasswordRequired = errors.New("password_required")
 	// ErrKeyRequired means KeyVault was chosen with no key pasted
 	ErrKeyRequired = errors.New("key_required")
+	// ErrChanged means Update got a copy of the host older than the saved
+	// one, a sync or another window saved it meanwhile
+	ErrChanged = errors.New("host_changed")
 )
 
 // Password modes of a host, an empty mode means no password at all, the
@@ -113,6 +116,13 @@ type Host struct {
 	// Tags group hosts (prod, db, client-x), lower case, sorted
 	Tags      []string  `json:"tags,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// LastConnected is the end of the last session ssh opened, set by
+	// MarkConnected, it stays on this machine and does not sync
+	LastConnected *time.Time `json:"last_connected,omitempty"`
+	// Rev counts the saves of the host on this machine, Add, Update and
+	// Import raise it, Update refuses a copy with another Rev, 0 skips the
+	// check, it stays on this machine and does not sync
+	Rev int `json:"rev,omitempty"`
 }
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -126,7 +136,37 @@ type Store struct {
 	// SSHConfigOut is where the hosts are exported for plain ssh, empty
 	// turns the export off, it is rewritten on every change once installed
 	SSHConfigOut string
+
+	// held is set on the copy of the Store that locked hands out, its
+	// methods do not take the lock again
+	held bool
 }
+
+// hostLockWait is how long a save waits for another sshr process, a save
+// can wait on the keychain or 1Password, so it is longer than a write
+const hostLockWait = 30 * time.Second
+
+// locked runs fn under the lock of the host folder, a read, a change and
+// a write of hosts by one process never interleave with another process,
+// fn gets a Store whose methods do not lock again, the lock file sits in
+// the host folder, List reads only .json files
+func (s *Store) locked(fn func(tx *Store) error) error {
+	if s.held {
+		return fn(s)
+	}
+	unlock, err := waitLock(filepath.Join(s.Dir, ".lock"), "saving hosts", hostLockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	tx := *s
+	tx.held = true
+	return fn(&tx)
+}
+
+// Locked runs fn under the lock of the host folder, see locked, the sync
+// reads a host, decides and writes it in one go with it
+func (s *Store) Locked(fn func(tx *Store) error) error { return s.locked(fn) }
 
 // DefaultStore creates ~/.sshr/vault/hosts if needed.
 func DefaultStore() (*Store, error) {
@@ -138,11 +178,51 @@ func DefaultStore() (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &Store{Dir: dir, SSHConfigOut: filepath.Join(home, ".sshr", "ssh_config")}, nil
+	s := &Store{Dir: dir, SSHConfigOut: filepath.Join(home, ".sshr", "ssh_config")}
+	s.upgradeSeals()
+	return s, nil
+}
+
+// upgradeSeals seals passwords saved by an older sshr again for their
+// destination (v1 to v2), until then a host file whose address is changed
+// outside sshr would still open its password, it touches the keychain only
+// when such a host exists and leaves a host as it is when that fails
+func (s *Store) upgradeSeals() {
+	s.locked(func(tx *Store) error {
+		tx.upgradeSealsLocked()
+		return nil
+	})
+}
+
+func (s *Store) upgradeSealsLocked() {
+	hosts, err := s.List()
+	if err != nil {
+		return
+	}
+	for i := range hosts {
+		h := &hosts[i]
+		if h.PasswordMode != PasswordSaved || !strings.HasPrefix(h.PasswordSealed, sealPrefix) {
+			continue
+		}
+		plain, err := unseal(h.PasswordSealed, h.ID, "password")
+		if err != nil {
+			continue
+		}
+		h.Password, h.PasswordSealed = string(plain), ""
+		s.save(h)
+	}
 }
 
 // Add saves a new host, ID and CreatedAt are set here
-func (s *Store) Add(in Host) (*Host, error) {
+func (s *Store) Add(in Host) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.add(in)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) add(in Host) (*Host, error) {
 	h, err := cleanHost(in)
 	if err != nil {
 		return nil, err
@@ -154,11 +234,17 @@ func (s *Store) Add(in Host) (*Host, error) {
 		return nil, err
 	}
 	h.CreatedAt = time.Now().UTC()
+	h.Rev = 1
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
 	return &h, nil
 }
+
+// userRe is what a login name may hold, letters, digits, . _ @ and - for
+// user@domain and DOMAIN\user too, never a leading -, a space or a shell
+// character, ssh and config lines take it as it is
+var userRe = regexp.MustCompile(`^[A-Za-z0-9._@\\][A-Za-z0-9._@\\-]*$`)
 
 // cleanHost trims and checks the fields of a host before it is saved
 func cleanHost(h Host) (Host, error) {
@@ -173,6 +259,9 @@ func cleanHost(h Host) (Host, error) {
 	}
 	if h.User == "" {
 		return h, ErrUserRequired
+	}
+	if !userRe.MatchString(h.User) {
+		return h, fmt.Errorf("user %q has characters a login name cannot have", h.User)
 	}
 	if h.Name == "" {
 		h.Name = h.Host
@@ -291,24 +380,34 @@ func cleanHost(h Host) (Host, error) {
 }
 
 func (s *Store) List() ([]Host, error) {
+	hosts, _, err := s.ListAll()
+	return hosts, err
+}
+
+// ListAll is List that also names the IDs of host files that exist but do
+// not load, the sync must not take such a host for a deleted one
+func (s *Store) ListAll() ([]Host, []string, error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]Host, 0, len(entries))
+	var broken []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(s.Dir, e.Name()))
 		if err != nil {
+			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
 		var h Host
 		if err := json.Unmarshal(b, &h); err != nil {
+			broken = append(broken, strings.TrimSuffix(e.Name(), ".json"))
 			continue
 		}
 		// The file name is the source of truth: Delete builds its path from ID.
@@ -321,7 +420,7 @@ func (s *Store) List() ([]Host, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
-	return out, nil
+	return out, broken, nil
 }
 
 // Find resolves a query by exact ID, then name, then host address, then ID
@@ -362,6 +461,10 @@ func (s *Store) Find(query string) (*Host, error) {
 }
 
 func (s *Store) Delete(id string) error {
+	return s.locked(func(tx *Store) error { return tx.delete(id) })
+}
+
+func (s *Store) delete(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ErrNotFound
@@ -378,9 +481,19 @@ func (s *Store) Delete(id string) error {
 	return nil
 }
 
-// Update rewrites an existing host with the fields of in, ID and
-// CreatedAt are kept
-func (s *Store) Update(id string, in Host) (*Host, error) {
+// Update rewrites an existing host with the fields of in, ID, CreatedAt
+// and LastConnected are kept, a Rev in in that is not the saved one returns
+// ErrChanged and saves nothing, a copy read before a sync or another save
+// would undo it, in.Rev 0 overwrites without the check
+func (s *Store) Update(id string, in Host) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.update(id, in)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) update(id string, in Host) (*Host, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, ErrNotFound
@@ -389,13 +502,24 @@ func (s *Store) Update(id string, in Host) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
+	if in.Rev != 0 && in.Rev != cur.Rev {
+		return nil, ErrChanged
+	}
 	h, err := cleanHost(in)
 	if err != nil {
 		return nil, err
 	}
-	// no new password typed keeps the saved one
+	// no new password typed keeps the saved one, sealed again for the new
+	// destination when the address, user, port or jump hosts changed
 	if h.PasswordMode == PasswordSaved && h.Password == "" && h.PasswordSealed == "" && h.PlainPassword == "" {
 		h.PasswordSealed, h.PlainPassword = cur.PasswordSealed, cur.PlainPassword
+	}
+	if h.PasswordMode == PasswordSaved && h.Password == "" && h.PasswordSealed != "" && h.PasswordSealed == cur.PasswordSealed && destination(h) != destination(*cur) {
+		plain, err := unsealFor(cur.PasswordSealed, cur.ID, "password", destination(*cur))
+		if err != nil {
+			return nil, fmt.Errorf("the saved password of %s does not open, type it again: %v", cur.Name, err)
+		}
+		h.Password, h.PasswordSealed = string(plain), ""
 	}
 	// no new key pasted keeps the stored one
 	if h.KeyMode == KeyVault && len(h.KeyData) == 0 && h.KeySealed == "" {
@@ -409,7 +533,9 @@ func (s *Store) Update(id string, in Host) (*Host, error) {
 	if err := needSecret(&h); err != nil {
 		return nil, err
 	}
-	h.ID, h.CreatedAt = cur.ID, cur.CreatedAt
+	h.ID, h.CreatedAt, h.Rev = cur.ID, cur.CreatedAt, cur.Rev+1
+	// only MarkConnected sets it, a host built from form fields has none
+	h.LastConnected = cur.LastConnected
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -420,7 +546,15 @@ func (s *Store) Update(id string, in Host) (*Host, error) {
 // creation time, a password in it is sealed with this machine's vault key,
 // with no keychain the host is not written rather than written in the
 // clear, a private key stored in sshr never travels, the local one is kept
-func (s *Store) Import(in Host) (*Host, error) {
+func (s *Store) Import(in Host) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.importHost(in)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) importHost(in Host) (*Host, error) {
 	id := strings.TrimSpace(in.ID)
 	if !validID(id) {
 		return nil, fmt.Errorf("bad host id %q", id)
@@ -446,7 +580,10 @@ func (s *Store) Import(in Host) (*Host, error) {
 	if h.PasswordMode == PasswordSaved && h.Password == "" {
 		return nil, fmt.Errorf("host %s came without its password", h.Name)
 	}
-	h.ID, h.CreatedAt = id, created
+	h.ID, h.CreatedAt, h.Rev = id, created, 1
+	if cur != nil {
+		h.Rev = cur.Rev + 1
+	}
 	if err := s.save(&h); err != nil {
 		return nil, err
 	}
@@ -489,7 +626,58 @@ func FromOtherDevice(in Host, local *Host) (Host, []string) {
 	} else {
 		in.KeyRef = ""
 	}
+	// when this machine last connected is its own business
+	in.LastConnected = nil
+	if local != nil {
+		in.LastConnected = local.LastConnected
+	}
 	return in, notes
+}
+
+// MarkConnected records that a session to host id ended after ssh had
+// opened it, recent hosts are listed first with sshr list --recent
+func (s *Store) MarkConnected(id string) error {
+	return s.locked(func(tx *Store) error { return tx.markConnected(id) })
+}
+
+func (s *Store) markConnected(id string) error {
+	h, err := s.Find(id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	h.LastConnected = &now
+	return s.save(h)
+}
+
+// SortRecent orders hosts by their last connection, newest first, hosts
+// never connected keep their order at the end
+func SortRecent(hosts []Host) {
+	sort.SliceStable(hosts, func(i, j int) bool {
+		a, b := hosts[i].LastConnected, hosts[j].LastConnected
+		if a == nil || b == nil {
+			return a != nil && b == nil
+		}
+		return a.After(*b)
+	})
+}
+
+// Ago says how long ago t was in a few characters, "-" for never
+func Ago(t *time.Time, now time.Time) string {
+	if t == nil {
+		return "-"
+	}
+	d := now.Sub(*t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return strconv.Itoa(int(d/time.Minute)) + " min ago"
+	case d < 48*time.Hour:
+		return strconv.Itoa(int(d/time.Hour)) + " h ago"
+	default:
+		return strconv.Itoa(int(d/(24*time.Hour))) + " d ago"
+	}
 }
 
 // addressRe is a host name, an ssh config alias, an IPv4 or an IPv6
@@ -515,6 +703,13 @@ func sameDestination(a, b Host) bool {
 		strings.ReplaceAll(a.Jump, " ", "") == strings.ReplaceAll(b.Jump, " ", "")
 }
 
+// destination is what a saved password is sealed for, the server it may
+// be sent to
+func destination(h Host) string {
+	return strings.ToLower(strings.TrimSpace(h.Host)) + "\x00" + strings.TrimSpace(h.User) + "\x00" +
+		strconv.Itoa(effectivePort(h.Port)) + "\x00" + strings.ReplaceAll(h.Jump, " ", "")
+}
+
 func effectivePort(p int) int {
 	if p == 0 {
 		return 22
@@ -537,17 +732,26 @@ func managerName(mode string) string {
 // Duplicate saves a copy of host id under a new ID and name, its saved
 // password and stored key are sealed again for the new ID, the sync keeps
 // the losing side of a conflict this way
-func (s *Store) Duplicate(id, name string) (*Host, error) {
+func (s *Store) Duplicate(id, name string) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		out, err = tx.duplicate(id, name)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) duplicate(id, name string) (*Host, error) {
 	cur, err := s.Find(id)
 	if err != nil {
 		return nil, err
 	}
 	h := *cur
-	if err := Unlock(&h); err != nil && h.PasswordMode == PasswordSaved {
-		return nil, err
-	}
-	if h.PasswordMode == PasswordOnePassword {
-		h.Password = ""
+	// only a password sealed by sshr has to be opened and sealed again, a
+	// password manager entry keeps its reference and is not read at all
+	if h.PasswordMode == PasswordSaved {
+		if err := Unlock(&h); err != nil {
+			return nil, err
+		}
 	}
 	if h.KeyMode == KeyVault && h.KeySealed != "" {
 		plain, err := unseal(h.KeySealed, h.ID, "key")
@@ -639,7 +843,7 @@ func sealPassword(h *Host) error {
 	if plain == "" {
 		return nil
 	}
-	sealed, err := seal([]byte(plain), h.ID, "password")
+	sealed, err := sealFor([]byte(plain), h.ID, "password", destination(*h))
 	if err != nil {
 		if h.Password == "" || h.Password == h.PlainPassword {
 			return nil
@@ -677,9 +881,9 @@ func Unlock(h *Host) error {
 	}
 	switch {
 	case h.PasswordSealed != "":
-		plain, err := unseal(h.PasswordSealed, h.ID, "password")
+		plain, err := unsealFor(h.PasswordSealed, h.ID, "password", destination(*h))
 		if errors.Is(err, ErrSealBroken) {
-			return fmt.Errorf("the saved password of %s does not open with the vault key of this machine (keychain reset or the host copied from another machine), save the password again", h.Name)
+			return fmt.Errorf("the saved password of %s does not open here (keychain reset, the host copied from another machine, or its address changed outside sshr), save the password again", h.Name)
 		}
 		if err != nil {
 			return err
@@ -708,11 +912,7 @@ func (s *Store) save(h *Host) error {
 		return err
 	}
 	path := filepath.Join(s.Dir, h.ID+".json")
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	if err := s.writePub(h); err != nil {
@@ -742,4 +942,59 @@ func newID() (string, error) {
 // vault or from 1Password
 func (h *Host) PasswordFromSshr() bool {
 	return h.Key == "" && (h.PasswordMode == PasswordSaved || h.PasswordMode == PasswordOnePassword || h.PasswordMode == PasswordBitwarden)
+}
+
+// ParseDestination reads user@host[:port] or ssh://user@host[:port] into a
+// host that is not saved, for connecting once, an IPv6 address goes in
+// brackets when a port follows, a password in the string is refused so it
+// cannot end up in the shell history
+func ParseDestination(s string) (Host, error) {
+	rest, isURL := strings.CutPrefix(s, "ssh://")
+	rest = strings.TrimSuffix(rest, "/")
+	user, addr, ok := strings.Cut(rest, "@")
+	if !ok || user == "" {
+		return Host{}, fmt.Errorf("%q is not user@host[:port]", s)
+	}
+	if strings.Contains(user, ":") {
+		return Host{}, errors.New("a password in the address is refused, it would stay in the shell history, sshr asks for it or saves it")
+	}
+	if isURL && strings.ContainsAny(addr, "/?#") {
+		return Host{}, fmt.Errorf("%q has a path, only ssh://user@host[:port] is taken", s)
+	}
+	host, port := addr, 22
+	switch {
+	case strings.HasPrefix(addr, "["):
+		end := strings.Index(addr, "]")
+		if end < 0 {
+			return Host{}, fmt.Errorf("%q has an unclosed [", s)
+		}
+		host = addr[1:end]
+		if tail := addr[end+1:]; tail != "" {
+			p, err := parsePort(strings.TrimPrefix(tail, ":"))
+			if err != nil || !strings.HasPrefix(tail, ":") {
+				return Host{}, fmt.Errorf("%q has a bad port", s)
+			}
+			port = p
+		}
+	case strings.Count(addr, ":") == 1:
+		h, p, _ := strings.Cut(addr, ":")
+		n, err := parsePort(p)
+		if err != nil {
+			return Host{}, fmt.Errorf("%q has a bad port", s)
+		}
+		host, port = h, n
+	}
+	h, err := cleanHost(Host{Host: host, User: user, Port: port})
+	if err != nil {
+		return Host{}, err
+	}
+	return h, nil
+}
+
+func parsePort(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, errors.New("bad port")
+	}
+	return n, nil
 }

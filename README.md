@@ -9,7 +9,7 @@ sshr keeps your SSH servers in one list and connects to them with one command, f
 - [tags and search](docs/USAGE.md#tags-and-search), [health check](docs/USAGE.md#health-check), [import](docs/USAGE.md#importing-sshconfig) and [export](docs/USAGE.md#exporting-to-sshconfig) of `~/.ssh/config`
 - [copy files](docs/USAGE.md#copying-files), [run a command on many hosts](docs/USAGE.md#running-a-command-on-many-hosts), [send clipboard images](docs/USAGE.md#sending-images-to-a-server)
 - [end to end encrypted sync](docs/USAGE.md#sync-between-devices) through [your own server](docs/USAGE.md#sync-server)
-- [MCP server](docs/USAGE.md#ai-assistants-mcp) for AI assistants and a local [REST API](docs/USAGE.md#rest-api)
+- [MCP server](docs/MCP.md) for AI assistants and a local [REST API](docs/USAGE.md#rest-api)
 
 Anything that costs something (an extra connection, editing your files, commands from AI) is off until you turn it on
 
@@ -25,7 +25,7 @@ Linux and macOS, into `~/.local/bin` without root, [install options](docs/USAGE.
 
 ```sh
 sshr add 10.0.0.7 -u deploy -n web    # asks how to log in
-sshr import-ssh-config                 # or bring hosts from ~/.ssh/config
+sshr import                            # or bring hosts from ~/.ssh/config
 sshr list
 sshr connect web
 sshr                                   # the desktop app
@@ -36,6 +36,7 @@ sshr                                   # the desktop app
 - [Usage](docs/USAGE.md): every command, option and what it costs
 - [Features](docs/FEATURES.md): what each feature is for
 - [Security](docs/SECURITY.md): how passwords, keys and sync data are protected
+- [Architecture](docs/ARCHITECTURE.md): packages, data on disk, flows, decisions
 - [Roadmap](docs/ROADMAP.md) and the [project board](https://github.com/users/klovbin/projects/3)
 - [Why it is built this way](docs/WHY.md) (Russian)
 
@@ -50,3 +51,7 @@ Bugs and ideas go to [issues](https://github.com/klovbin/sshr/issues), build wit
     <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="41" width="174">
   </a>
 </p>
+
+## License
+
+[MIT](LICENSE)

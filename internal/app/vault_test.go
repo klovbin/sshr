@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestSavedPasswordIsSealed(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(filepath.Join(s.Dir, h.ID+".json"))
-	if strings.Contains(string(b), "secret") || !strings.Contains(string(b), `"password_sealed": "v1:`) {
+	if strings.Contains(string(b), "secret") || !strings.Contains(string(b), `"password_sealed": "v2:`) {
 		t.Fatalf("host file:\n%s", b)
 	}
 	got, _ := s.Find(h.ID)
@@ -123,5 +124,61 @@ func TestNoKeychain(t *testing.T) {
 	h, _ = s.Find("old")
 	if err := Unlock(h); err != nil || h.Password != "pw1" {
 		t.Errorf("old password lost: %q, %v", h.Password, err)
+	}
+}
+
+func TestSavedPasswordBoundToDestination(t *testing.T) {
+	useMockKeychain(t)
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "w", Host: "10.0.0.1", User: "u", PasswordMode: PasswordSaved, Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// an address changed in the file outside sshr does not open it
+	path := filepath.Join(s.Dir, h.ID+".json")
+	b, _ := os.ReadFile(path)
+	os.WriteFile(path, []byte(strings.Replace(string(b), `"10.0.0.1"`, `"203.0.113.66"`, 1)), 0o600)
+	moved, _ := s.Find(h.ID)
+	if err := Unlock(moved); err == nil {
+		t.Fatal("the password opened for an address changed outside sshr")
+	}
+	os.WriteFile(path, b, 0o600)
+	// an address changed through sshr keeps the password
+	cur, _ := s.Find(h.ID)
+	cur.Host, cur.Port = "10.0.0.2", 2222
+	if _, err := s.Update(h.ID, *cur); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Find(h.ID)
+	if err := Unlock(got); err != nil || got.Password != "pw" {
+		t.Fatalf("after an edit in sshr: %v %q", err, got.Password)
+	}
+}
+
+func TestOlderSealsAreUpgraded(t *testing.T) {
+	useMockKeychain(t)
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "w", Host: "10.0.0.1", User: "u", PasswordMode: PasswordSaved, Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := seal([]byte("pw"), h.ID, "password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Password, h.PasswordSealed = "", old
+	b, _ := json.MarshalIndent(h, "", "  ")
+	os.WriteFile(filepath.Join(s.Dir, h.ID+".json"), b, 0o600)
+	v1, _ := s.Find(h.ID)
+	if err := Unlock(v1); err != nil || v1.Password != "pw" {
+		t.Fatalf("a v1 password does not open: %v", err)
+	}
+	s.upgradeSeals()
+	got, _ := s.Find(h.ID)
+	if !strings.HasPrefix(got.PasswordSealed, sealPrefix2) {
+		t.Fatalf("not upgraded: %s", got.PasswordSealed)
+	}
+	if err := Unlock(got); err != nil || got.Password != "pw" {
+		t.Fatalf("after the upgrade: %v %q", err, got.Password)
 	}
 }

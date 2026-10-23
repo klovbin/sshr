@@ -26,6 +26,7 @@ func main() {
 	key := flag.String("tls-key", "", "TLS key file")
 	domain := flag.String("autocert", "", "get a Let's Encrypt certificate for this domain (needs port 443 or a TLS-ALPN path to it)")
 	plain := flag.Bool("plain-http", false, "serve plain HTTP, allowed only on a loopback address behind a TLS reverse proxy")
+	trustProxy := flag.Bool("trust-proxy", false, "count the join limit by the last X-Forwarded-For address of requests from this machine, for a reverse proxy that sets it")
 	flag.Parse()
 
 	if err := os.MkdirAll(*data, 0o700); err != nil {
@@ -40,6 +41,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	srv.TrustProxy = *trustProxy
 	hs := &http.Server{
 		Addr:              *listen,
 		Handler:           srv,

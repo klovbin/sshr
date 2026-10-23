@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -98,5 +99,47 @@ func TestAgentHostSystem(t *testing.T) {
 	}
 	if got := agentSocket(AgentOnePassword); !strings.Contains(got, "agent.sock") {
 		t.Errorf("1password socket = %q", got)
+	}
+}
+
+// argvSplit reads one config value the way OpenSSH's argv_split does, a
+// backslash before a quote, a backslash or a space outside quotes escapes
+// it, the test checks what ssh would really see
+func argvSplit(s string) string {
+	var out []byte
+	quote := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\\' && i+1 < len(s) && (s[i+1] == '\'' || s[i+1] == '"' || s[i+1] == '\\' || quote == 0 && s[i+1] == ' '):
+			i++
+			out = append(out, s[i])
+		case quote == 0 && (c == '"' || c == '\''):
+			quote = c
+		case quote != 0 && c == quote:
+			quote = 0
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(out)
+}
+
+func TestAgentPipeSurvivesSSHParsing(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the pipe path is Windows only")
+	}
+	s := &Store{Dir: t.TempDir()}
+	args := s.agentArgs(&Host{KeyMode: KeyAgent, Agent: AgentOnePassword})
+	val := argvSplit(strings.TrimPrefix(args[1], "IdentityAgent="))
+	if val != "//./pipe/openssh-ssh-agent" {
+		t.Fatalf("ssh reads the agent as %q", val)
+	}
+}
+
+func TestArgvSplitDoubledBackslash(t *testing.T) {
+	// the reason for forward slashes: \\.\pipe\x loses its first backslash
+	if got := argvSplit(`"\\.\pipe\x"`); got != `\.\pipe\x` {
+		t.Fatalf("argvSplit = %q", got)
 	}
 }

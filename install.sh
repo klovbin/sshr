@@ -19,6 +19,7 @@ FROM_SOURCE=0
 CLI_ONLY=0
 UNINSTALL=0
 GUI=0
+COMPLETION=1
 PATH_MARK="# added by the sshr installer"
 
 usage() {
@@ -30,6 +31,7 @@ Usage: install.sh [options]
   --from-source       build from source even if a release binary exists
   --cli-only          build without the GUI (no cgo, no C compiler needed)
   --no-modify-path    do not touch shell startup files
+  --no-completion     do not install Tab completion for bash and fish
   --uninstall         remove sshr, its menu entry and the PATH line this
                       script added
   -h, --help          show this help
@@ -49,6 +51,7 @@ while [ $# -gt 0 ]; do
 	--from-source) FROM_SOURCE=1 ;;
 	--cli-only) CLI_ONLY=1 ;;
 	--no-modify-path) MODIFY_PATH=0 ;;
+	--no-completion) COMPLETION=0 ;;
 	--uninstall) UNINSTALL=1 ;;
 	-h | --help) usage; exit 0 ;;
 	*) usage >&2; die "unknown option $1" ;;
@@ -91,10 +94,16 @@ remove_path_line() {
 	say "removed the PATH line from $f"
 }
 
+bash_completion_file() { echo "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/sshr"; }
+fish_completion_file() { echo "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/sshr.fish"; }
+
 if [ "$UNINSTALL" = 1 ]; then
 	if [ -x "$PREFIX/sshr" ]; then "$PREFIX/sshr" desktop-entry --remove >/dev/null 2>&1 && say "removed the application menu entry"; fi
 	rm -f "$PREFIX/sshr"
 	say "removed $PREFIX/sshr"
+	for f in "$(bash_completion_file)" "$(fish_completion_file)"; do
+		if [ -f "$f" ] && grep -qF "sshr completion" "$f"; then rm -f "$f"; say "removed $f"; fi
+	done
 	# the fish file holds only our line, it goes whole
 	fish_rc="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/sshr.fish"
 	if [ -f "$fish_rc" ] && grep -qF "$PATH_MARK" "$fish_rc"; then rm -f "$fish_rc"; say "removed $fish_rc"; fi
@@ -144,7 +153,8 @@ download_release() {
 		return 1
 	fi
 	chmod 755 "$WORK/sshr"
-	GUI=1
+	# release files are the CLI, built without cgo, there is no GUI to add to
+	# the menu
 	say "downloaded release $VERSION for $OS/$ARCH"
 }
 
@@ -202,6 +212,22 @@ say "installed $PREFIX/sshr"
 # icons and writes the entry itself (an app bundle on macOS)
 if [ "$GUI" = 1 ]; then
 	"$PREFIX/sshr" desktop-entry || say "could not add sshr to the application menu"
+fi
+
+# Tab completion for the shells that are here, written by sshr itself so
+# it always matches the installed version, zsh needs a line in .zshrc
+if [ "$COMPLETION" = 1 ]; then
+	if have bash; then
+		f="$(bash_completion_file)"
+		mkdir -p "$(dirname "$f")" && "$PREFIX/sshr" completion bash >"$f" && say "Tab completion for bash in $f"
+	fi
+	if have fish; then
+		f="$(fish_completion_file)"
+		mkdir -p "$(dirname "$f")" && "$PREFIX/sshr" completion fish >"$f" && say "Tab completion for fish in $f"
+	fi
+	if have zsh; then
+		say "for Tab completion in zsh add to ~/.zshrc: source <(sshr completion zsh)"
+	fi
 fi
 
 case ":$PATH:" in

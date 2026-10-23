@@ -10,6 +10,54 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** `sshr connect web` replaces a long ssh line, the same list feeds the app, the CLI, sync, MCP and the API
 - **Why this way:** plain files on your machine work offline, survive any crash of sshr and can be backed up or read without it, one file per host keeps a broken file from taking the others with it
 
+### Short help
+- **What:** `sshr help` lists every command in one line each, `sshr help <command>` shows its usage, other names and options
+- **What for:** the full help had grown to 115 lines, the command you look for scrolled away
+- **Why it helps:** the overview fits one screen, the options of one command are one call away, nothing that was in the long help is lost
+- **Why this way:** one table in the code feeds both views and the completion, so a new command cannot be listed in one place and forgotten in another
+
+### Short command names
+- **What:** `sshr import` and `sshr export` for `import-ssh-config` and `export-ssh-config`, the long names keep working
+- **What for:** the longest commands to type were the ones for `~/.ssh/config`
+- **Why it helps:** six to eleven fewer characters, the name says what it does, scripts that use the old names do not break
+- **Why this way:** aliases in the same command table, not new commands, so both names share one code path and one help entry
+
+### Hints on a typo
+- **What:** an unknown command answers with the closest ones (`sshr tunel` gives `did you mean: sshr tunnel`), a host that is not found with the closest saved names
+- **What for:** a typo used to end with the whole help or a bare "not found"
+- **Why it helps:** the right name is on the screen, no trip to `sshr help` or `sshr list`
+- **Why this way:** edit distance of at most two (one for short words) plus prefixes, at most three names, nothing is run on a guess, so a typo never connects to the wrong server
+
+### Tab completion
+- **What:** `sshr completion bash|zsh|fish` prints a script, Tab then completes commands, flags, saved host names, tags and forward names, install.sh puts it in place for bash and fish
+- **What for:** host names, tags and forward names had to be typed out or looked up in `sshr list`
+- **Why it helps:** `sshr conn<Tab> w<Tab>` instead of the whole line, names come from your own hosts, so a typo cannot reach the wrong server
+- **Why this way:** the scripts are a few lines that call `sshr __complete`, the logic lives in Go with the command table, so it matches the installed version on every shell, files are completed where sshr has nothing to offer, as in send and get
+
+### Recent hosts first
+- **What:** `sshr connect` notes when a session ended after ssh had opened it, `sshr list --recent` puts the last connected hosts first with a LAST column ("3 h ago")
+- **What for:** with many hosts the one you need is usually one of the last few
+- **Why it helps:** the host is on the first line instead of somewhere in a long list, the plain `sshr list` stays as it was
+- **Why this way:** the time is written only when ssh did not fail to connect (exit code other than 255), so failed attempts do not count, it stays on this machine and does not sync, otherwise every connect would be a change pushed to every device
+
+### sshr show
+- **What:** `sshr show <host>` prints the fields of a host and the exact ssh command `sshr connect` runs for it, quoted for a shell
+- **What for:** when a connection does not work you need to know what sshr actually passes to ssh
+- **Why it helps:** the line can be copied, run with `-v` added and compared with plain ssh, without reading the code
+- **Why this way:** passwords never show because they reach ssh through the askpass socket and not the command line, each argument is quoted for a POSIX shell so the copied line runs as the same argv, a test runs it through sh, the lab connects with it through a jump host
+
+### JSON output
+- **What:** `--json` for `sshr list`, `sshr ping` and `sshr run`: hosts with the fields of the REST API, state, latency and reason per host, exit code, stdout and stderr per host
+- **What for:** scripts, monitoring and other programs had to parse tables made for people
+- **Why it helps:** `sshr list --json | jq` and `sshr run --json -t prod -- uptime` give data that does not break when a column is added
+- **Why this way:** fixed field lists, the host part is app.HostSummary that the API already returns, so secrets cannot slip in, run prints one list at the end instead of a stream so the output is one valid JSON document
+
+### Quick connect without saving
+- **What:** `sshr connect user@host[:port]` or `ssh://user@host[:port]` connects to a destination that is not saved, then asks on a terminal for a name to save it under
+- **What for:** a server you need once should not need `sshr add` first, and one you will need again should not need retyping
+- **Why it helps:** the same command for both cases, saved hosts behave exactly as before
+- **Why this way:** it only applies when no saved host matches and the text has a user, so a typo in a host name still gets the "did you mean" hint, a password in the address is refused because it would stay in the shell history, the address and user pass the same checks as a saved host, nothing is asked without a terminal
+
 ### Ambiguous names refused, short IDs
 - **What:** a query that matches several hosts is refused with the list of matches, `sshr list` shows an 8 character ID
 - **What for:** two hosts called "web" must never mean "connect to whichever came first"
@@ -35,6 +83,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What for:** the most common way to log in, with keys you already have
 - **Why it helps:** a typo or a public key given by mistake fails when you save, not later at connect with a vague ssh error
 - **Why this way:** ssh reads the file itself, sshr only passes `-i`, nothing is copied
+
+### New keys and putting them on a host
+- **What:** `sshr key new` makes an ed25519 key in `~/.ssh` with ssh-keygen, `sshr key install <host> [key.pub] [--use]` appends the public key to `authorized_keys` on the host and with `--use` switches the host to that key
+- **What for:** moving a server from a password to a key took ssh-keygen, ssh-copy-id with the right port and jump hosts, then editing the host
+- **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
+- **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
 ### Saved passwords and ask mode
 - **What:** a password sealed with XChaCha20-Poly1305 under a key from the system keychain, or nothing stored and ssh asks each time
@@ -108,9 +162,15 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What:** a TCP connect and the SSH banner with the round trip, in `sshr ping`, `list --ping` and a dot in the app, off by default
 - **What for:** know which servers are down before waiting on an ssh timeout
 - **Why it helps:** a glance at the list shows what answers
-- **Why this way:** no login is tried, but sshd still logs each check and strict fail2ban modes count it, so it is off until you choose it
+- **Why this way:** no login is tried, but sshd still logs each check and strict fail2ban modes count it, so it is off until you choose it, a host that is down says why (the name does not resolve, refused, no answer, unreachable, no SSH banner) and `--json` gives the same as one word for scripts
 
 ## Moving hosts in and out
+
+### Server key check
+- **What:** `sshr ping --keys` reads the key each server shows and compares it with `~/.ssh/known_hosts`: known, unknown or changed, with its SHA256 fingerprint, a changed key makes ping exit 1
+- **What for:** a reinstalled server or someone in between shows up as "REMOTE HOST IDENTIFICATION HAS CHANGED" only when you connect, in the middle of work
+- **Why it helps:** one command checks every host before you log in, the fingerprint can be compared with the one the server's admin gives
+- **Why this way:** only the key exchange runs, sshr stops before any login, it reads the user's own known_hosts (hashed entries too) and never writes to it, so there is no second trust store, hosts behind a jump host are not checked because their key is only visible through it
 
 ### Import from ssh config
 - **What:** every `Host` of `~/.ssh/config` and its includes becomes a host, with keys, agent, jumps and forwards
@@ -129,6 +189,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What for:** the same list on every machine without drift
 - **Why it helps:** add a host once and it appears everywhere, a host changed on two devices keeps both versions
 - **Why this way:** the server stores only ciphertext and cannot read hosts, add a device or rewrite history, devices are approved by comparing fingerprints, keys stored in sshr stay on their device
+
+### Safe saves from several sshr processes
+- **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
+- **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time
+- **Why it helps:** an edit saved in the app during a sync is never overwritten, a key rotation is never undone by a second sync started at the same moment
+- **Why this way:** one lock for all hosts because the export and conflict copies touch several at once and a write takes milliseconds, a waiting save gives up after 30 s and names the pid that holds the lock, a second sync stops at once since it would have nothing new to do
 
 ### Sync server
 - **What:** `sshr-sync` with TLS 1.3, Let's Encrypt or your own certificate, or plain HTTP behind a proxy on loopback
@@ -164,8 +230,15 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 
 ## For other programs
 
+### Extensions
+- **What:** `sshr ext install <git url or folder>` shows what an extension is and asks, then `sshr <name>` runs it, `sshr ext list` and `sshr ext remove` manage them, an extension is a program in `~/.sshr/extensions/<name>/` with a manifest `sshr-ext.json`, written in any language
+- **What for:** your own commands under the same word `sshr` without a fork or a change of sshr, a deploy helper, a report of your hosts, a wrapper for your cloud
+- **Why it helps:** the tools around your hosts live in one place, a built-in command never changes whatever you install, and the extension can read your hosts back with `sshr list --json`
+- **Import sources:** an extension of kind `import` prints hosts as JSON and `sshr ext import <name>` saves them, for PuTTY, Termius or a company inventory, only a fixed list of fields is read and never a password or key, a second import skips hosts that are already there
+- **Why this way:** an executable with a fixed protocol, not a Go plugin or WASM, so any language works and a crash stays in its own process, sshr asks before it installs and shows the manifest, the command, the commit and a hash, every file of the folder is pinned and a changed file stops the run until you install it again, the extension never gets a password, key or secret reference or the askpass and password manager variables of sshr, it is still a program that runs as you, which is said in `sshr ext install` and in [SECURITY.md](SECURITY.md)
+
 ### MCP server for AI assistants
-- **What:** `sshr mcp` gives Claude Code, Codex or Cursor the tools list_hosts, upload_file and run_command
+- **What:** `sshr mcp` gives Claude Code, Codex or Cursor the tools list_hosts, upload_file and run_command, setup and limits in [MCP.md](MCP.md)
 - **What for:** assistants asked to read logs or check a server
 - **Why it helps:** no addresses or keys pasted into a chat, the assistant uses your saved logins without seeing them
 - **Why this way:** run_command is off by default and marked destructive, nothing listens on the network, output and time are capped, every command is logged
@@ -183,6 +256,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What for:** installing without root or a package manager
 - **Why it helps:** one command, and `--uninstall` removes everything it added
 - **Why this way:** an unchecked binary is never installed, the GUI falls back to the CLI when build tools are missing, packages are planned in #17
+
+### Release files
+- **What:** a tag like `v1.2.3` builds the CLI for linux, darwin and windows on amd64 and arm64 in GitHub Actions, publishes `sshr_<os>_<arch>` (`.exe` on Windows) with `sha256sums.txt` and signs them with a build attestation, `scripts/release.sh v1.2.3` makes the same files on any machine
+- **What for:** install.sh and the packages of #17 (AUR, Homebrew, Scoop, nixpkgs) need a file with a known name and a checksum to take
+- **Why it helps:** installing needs no Go and no build tools, a tampered file is found by the checksum, and `gh attestation verify sshr_linux_amd64 --repo klovbin/sshr` shows which commit and workflow built it
+- **Why this way:** the tests run first, a failing tag publishes nothing, the CLI is built without cgo so one machine builds all six files, the version is set at build time and the binary reports it, the attestation needs no key to store and lose, the GUI is not in these files, it needs cgo and a build per system
 
 ### Application menu and icons
 - **What:** `sshr desktop-entry` adds sshr to the Linux menu and makes `~/Applications/sshr.app` on macOS, the Windows exe carries the icon
