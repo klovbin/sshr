@@ -500,7 +500,9 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 	t.cmd, t.stop = cmd, stop
 	done := make(chan struct{})
 	go func() {
-		cmd.Wait()
+		// the end record is the end of the tunnel, not of the request
+		werr := cmd.Wait()
+		end(cmd.ProcessState.ExitCode(), 0, werr)
 		stop()
 		a.mu.Lock()
 		delete(a.tunnels, t.ID)
@@ -513,13 +515,10 @@ func (a *api) openTunnel(w http.ResponseWriter, r *http.Request) {
 		if msg == "" {
 			msg = "ssh exited"
 		}
-		err := fmt.Errorf("tunnel to %s did not open: %s", h.Name, msg)
-		end(-1, 0, err)
-		fail(w, http.StatusBadGateway, err)
+		fail(w, http.StatusBadGateway, fmt.Errorf("tunnel to %s did not open: %s", h.Name, msg))
 		return
 	case <-time.After(tunnelStartup):
 	}
-	end(0, 0, nil)
 	a.mu.Lock()
 	select {
 	case <-done:
@@ -555,5 +554,9 @@ func (a *api) closeTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	err := t.cmd.Process.Kill()
 	end(exitOf(err), 0, err)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, fmt.Errorf("the tunnel did not stop: %v", err))
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

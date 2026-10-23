@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"sshr.dev/internal/app"
+	"sshr.dev/internal/audit"
 )
 
 func do(t *testing.T, h http.Handler, method, path, body string, hdr map[string]string) (int, string) {
@@ -220,5 +221,44 @@ func TestAPIGoneClientDoesNotRun(t *testing.T) {
 	rec := httptest.NewRecorder()
 	if _, ok := a.take(rec, httptest.NewRequest("POST", "/v1/hosts/web/run", nil).WithContext(ctx)); ok || rec.Code != 503 || len(a.slots) != 0 {
 		t.Fatalf("a gone client got a slot: %v %d %d", ok, rec.Code, len(a.slots))
+	}
+}
+
+// the audit end of a tunnel is written when ssh exits, with its exit
+// code, not when the request is answered (#208)
+func TestAPITunnelAuditEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "ssh"), []byte("#!/bin/sh\nsleep 3\nexit 3\n"), 0o700)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	s := &app.Store{Dir: t.TempDir()}
+	s.Add(app.Host{Name: "web", Host: "10.0.0.1", User: "u", Key: "/k", Forwards: []app.Forward{{Name: "db", Kind: "L", Spec: "5432:localhost:5432"}}})
+	dir := t.TempDir()
+	l, err := audit.Open(dir, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := do(t, New(s, Options{Audit: l}), "POST", "/v1/hosts/web/tunnels", "", nil); code != 201 {
+		t.Fatalf("tunnel = %d %s", code, body)
+	}
+	path := filepath.Join(dir, audit.FileName)
+	if b, _ := os.ReadFile(path); strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("an end was written while the tunnel runs: %s", b)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		b, _ := os.ReadFile(path)
+		if strings.Count(string(b), "\n") == 2 {
+			if !strings.Contains(string(b), `"exit":3`) {
+				t.Fatalf("end without the exit code of ssh: %s", b)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no end after ssh exited: %s", b)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
