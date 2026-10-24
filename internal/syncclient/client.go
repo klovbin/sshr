@@ -1887,6 +1887,9 @@ func (c *Client) handPrimary(prefix string, confirm func(name, fingerprint strin
 	if target == nil {
 		return nil, fmt.Errorf("no other device matches %q", prefix)
 	}
+	if target.ID == c.st.Recovery {
+		return nil, errors.New("that is the device of the recovery kit, it cannot be the primary device")
+	}
 	if !confirm(CleanName(target.Name), DeviceFingerprint(*target)) {
 		return nil, errors.New("not handed on")
 	}

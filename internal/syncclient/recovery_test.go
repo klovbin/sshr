@@ -321,3 +321,15 @@ func TestRestoreCutShortStartsAgain(t *testing.T) {
 		t.Fatalf("a second restore: %v", err)
 	}
 }
+
+// TestKitIsNoPrimaryTarget checks that sync primary does not hand the
+// role to the recovery kit device, every device would refuse it (#305)
+func TestKitIsNoPrimaryTarget(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	_, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	if _, err := w.a.HandPrimary(w.a.st.Recovery[:8], func(string, string) bool { return true }); err == nil || !strings.Contains(err.Error(), "recovery kit") {
+		t.Fatalf("handed the role to the kit device: %v", err)
+	}
+}
