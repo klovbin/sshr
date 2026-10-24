@@ -43,7 +43,23 @@ func isGitURL(s string) bool {
 // temporary folder and checks it: the manifest, plain files only, the size
 // limits, a git clone is made shallow and none of its files is run, the .git
 // folder is not kept, the commit is recorded
-func Prepare(source string) (*Staged, error) {
+func Prepare(source string) (*Staged, error) { return prepare(source, "") }
+
+// PrepareAt is Prepare of the git URL url at commit, a catalog entry names
+// the commit it was checked at and nothing newer is installed from it
+func PrepareAt(url, commit string) (*Staged, error) {
+	if !isGitURL(url) {
+		return nil, fmt.Errorf("%q is not an https or ssh git address", url)
+	}
+	if !commitRe.MatchString(commit) {
+		return nil, fmt.Errorf("%q is not a full git commit hash", commit)
+	}
+	return prepare(url, commit)
+}
+
+var commitRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+func prepare(source, commit string) (*Staged, error) {
 	if strings.HasPrefix(source, "-") {
 		return nil, fmt.Errorf("%q is not a folder or a git address", source)
 	}
@@ -60,11 +76,11 @@ func Prepare(source string) (*Staged, error) {
 	switch {
 	case isGitURL(source):
 		clone := filepath.Join(tmp, "clone")
-		commit, err := cloneGit(source, clone)
+		got, err := cloneGit(source, clone, commit)
 		if err != nil {
 			return fail(err)
 		}
-		from, s.Lock.Commit = clone, commit
+		from, s.Lock.Commit = clone, got
 	default:
 		abs, err := filepath.Abs(source)
 		if err != nil {
@@ -97,27 +113,62 @@ func Prepare(source string) (*Staged, error) {
 // and then would otherwise hold sshr for good
 var cloneTimeout = 60 * time.Second
 
-// cloneGit fetches the newest commit of url into dest and returns its hash,
-// git gets the environment without secrets, no prompt on any terminal, only
-// https and ssh, no hooks, templates or git-lfs filters of the user, blobs
-// over 5 MiB are not downloaded, and git runs no file of the clone
-func cloneGit(url, dest string) (string, error) {
+// gitSafe are the options of every git run on a clone: only https and ssh,
+// no hooks, templates or git-lfs filters of the user
+var gitSafe = []string{
+	"-c", "core.hooksPath=" + os.DevNull,
+	"-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
+	"-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+}
+
+// runGit runs git with gitSafe and args under the clone timeout
+func runGit(what string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git",
-		"-c", "core.hooksPath="+os.DevNull,
-		"-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
-		"-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
-		"clone", "--depth", "1", "--no-tags", "--single-branch", "--no-recurse-submodules",
-		"--filter=blob:limit=5m", "--template=", "--", url, dest)
+	cmd := exec.CommandContext(ctx, "git", append(append([]string{}, gitSafe...), args...)...)
 	cmd.Env = gitEnv(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("git clone %s did not finish in %s", url, cloneTimeout)
+		return fmt.Errorf("%s did not finish in %s", what, cloneTimeout)
 	}
 	if err != nil {
-		return "", fmt.Errorf("git clone %s failed: %s", url, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%s failed: %s", what, strings.TrimSpace(string(out)))
 	}
+	return nil
+}
+
+// cloneGit fetches the newest commit of url into dest, or commit when it is
+// set, and returns the hash checked out, git gets the environment without
+// secrets, no prompt on any terminal, blobs over 5 MiB are not downloaded,
+// and git runs no file of the clone, a commit that is not the newest is
+// fetched by its hash afterwards, which works with every git version
+func cloneGit(url, dest, commit string) (string, error) {
+	if err := runGit("git clone "+url, "clone", "--depth", "1", "--no-tags", "--single-branch", "--no-recurse-submodules",
+		"--filter=blob:limit=5m", "--template=", "--", url, dest); err != nil {
+		return "", err
+	}
+	head, err := revParse(dest)
+	if err != nil || commit == "" || head == commit {
+		return head, err
+	}
+	if err := runGit("git fetch of commit "+commit, "-C", dest, "fetch", "--depth", "1", "--no-tags",
+		"--filter=blob:limit=5m", "origin", commit); err != nil {
+		return "", err
+	}
+	if err := runGit("git checkout of commit "+commit, "-C", dest, "checkout", "--quiet", "--detach", commit); err != nil {
+		return "", err
+	}
+	if head, err = revParse(dest); err != nil {
+		return "", err
+	}
+	if head != commit {
+		return "", fmt.Errorf("%s does not hold commit %s, the catalog entry is wrong or the repository changed", url, commit)
+	}
+	return head, nil
+}
+
+// revParse is the commit checked out in dest
+func revParse(dest string) (string, error) {
 	rev := exec.Command("git", "-C", dest, "rev-parse", "HEAD")
 	rev.Env = gitEnv(os.Environ())
 	commit, err := rev.Output()

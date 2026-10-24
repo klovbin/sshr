@@ -397,3 +397,44 @@ func TestDamagedPinsTouchNoFolder(t *testing.T) {
 		}
 	}
 }
+
+// an install from the catalog takes the commit of the entry, the newest one
+// is kept when it is that commit, any other is fetched by its hash and must
+// end up checked out (#170)
+func TestPrepareAtPinsTheCommit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the git stub is a shell script")
+	}
+	const head = "0123456789abcdef0123456789abcdef01234567"
+	log := gitStub(t, source(t, "pinned", "#!/bin/sh\necho hi\n"), "")
+	st, err := PrepareAt("https://example.com/a/pinned.git", head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Discard()
+	if st.Lock.Commit != head {
+		t.Errorf("commit %s", st.Lock.Commit)
+	}
+	b, _ := os.ReadFile(log)
+	if strings.Contains(string(b), " fetch ") {
+		t.Errorf("fetched although the newest commit is the pinned one:\n%s", b)
+	}
+
+	os.Remove(log)
+	other := strings.Repeat("f", 40)
+	_, err = PrepareAt("https://example.com/a/pinned.git", other)
+	if err == nil || !strings.Contains(err.Error(), "does not hold commit") {
+		t.Errorf("a repository without the commit: %v", err)
+	}
+	b, _ = os.ReadFile(log)
+	for _, want := range []string{"fetch --depth 1 --no-tags --filter=blob:limit=5m origin " + other, "checkout --quiet --detach " + other, "core.hooksPath=" + os.DevNull} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("git was run without %q:\n%s", want, b)
+		}
+	}
+	for _, bad := range [][2]string{{"http://example.com/a.git", head}, {"https://example.com/a.git", "abc"}, {"https://example.com/a.git", "--upload-pack=x"}} {
+		if _, err := PrepareAt(bad[0], bad[1]); err == nil {
+			t.Errorf("PrepareAt(%q, %q) went on", bad[0], bad[1])
+		}
+	}
+}
