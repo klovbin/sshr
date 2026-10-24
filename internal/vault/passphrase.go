@@ -196,9 +196,10 @@ func SetPassphrase(pass string, secretNames []string) error {
 		return fmt.Errorf("the passphrase is shorter than %d characters, the file it guards can be attacked offline", passphraseMin)
 	}
 	key, err := Key()
-	// a locked keychain or one that did not answer may hold the real key,
-	// only a keychain that is not there starts with a new one
-	if errors.Is(err, ErrNoKeychain) && !errors.Is(err, ErrKeychainLocked) && !errors.Is(err, ErrKeychainTimeout) {
+	// only a keychain the system reports missing starts with a new key,
+	// every keychain error carries ErrNoKeychain, a locked one, one that did
+	// not answer or failed another way may hold the real key
+	if errors.Is(err, ErrKeychainMissing) {
 		// a machine without a keychain, the case the passphrase vault is
 		// for, starts with a new key, unless a key check says secrets were
 		// sealed here with a key that is now out of reach
