@@ -1,13 +1,16 @@
 package sshcmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
 
 	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/settings"
 )
 
 // ErrHardwareKeyRequired means the host may connect only with a key on a
@@ -31,12 +34,21 @@ var hardwareKeyArgs = []string{
 }
 
 // hardwareKeyRequired tells whether the settings ask for a token key for
-// h, a settings file that does not read asks for none, connect goes on
-// without its settings and says so already, whoever can break the file
-// can also take the requirement out of it
+// h, a settings file that does not parse asks for one on every host when
+// it names hardware_key at all, a broken file must not drop the
+// requirement for sshr mcp, sshr serve and the tunnels, which do not say
+// that they connect without settings, a file without it asks for none
 func hardwareKeyRequired(h *Host) bool {
 	st, err := LoadSettings()
-	return err == nil && st.HardwareKeyRequired(h.ID)
+	if err == nil {
+		return st.HardwareKeyRequired(h.ID)
+	}
+	path, perr := settings.Path()
+	if perr != nil {
+		return false
+	}
+	raw, rerr := os.ReadFile(path)
+	return rerr == nil && bytes.Contains(raw, []byte(`"hardware_key`))
 }
 
 // CheckHardwareKey refuses a host under the requirement whose login is

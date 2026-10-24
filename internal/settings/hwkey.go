@@ -9,15 +9,16 @@ const (
 )
 
 // HardwareKeyRequired tells whether the host with id may connect only
-// with a key on a FIDO token
+// with a key on a FIDO token, a mode this build does not know (a typo, a
+// mode of a newer sshr) asks it of every host
 func (s Settings) HardwareKeyRequired(id string) bool {
 	switch s.HardwareKey {
-	case HardwareKeyAll:
-		return true
+	case "":
+		return false
 	case HardwareKeyListed:
 		return slices.Contains(s.HardwareKeyHosts, id)
 	}
-	return false
+	return true
 }
 
 // RequireHardwareKey lists the host with id and turns the listed mode on

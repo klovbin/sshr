@@ -113,3 +113,29 @@ func TestConnectArgsUnderTheRequirement(t *testing.T) {
 		t.Errorf("all hosts asked, a password host went through: %v", err)
 	}
 }
+
+// a settings file that does not parse keeps the requirement when it names
+// hardware_key, a mode this build does not know asks it of every host
+// (#352)
+func TestHardwareKeyRequiredFailsClosed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	path, err := settings.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Host{ID: "0123456789abcdef0123456789abcdef", Name: "web"}
+	os.WriteFile(path, []byte(`{"hardware_key": "listed", "hardware_key_hosts": [`), 0o600)
+	if !hardwareKeyRequired(h) {
+		t.Error("a broken file that names the requirement dropped it")
+	}
+	os.WriteFile(path, []byte(`{"lang": `), 0o600)
+	if hardwareKeyRequired(h) {
+		t.Error("a broken file without the requirement asked for a hardware key")
+	}
+	os.WriteFile(path, []byte(`{"hardware_key": "evrything"}`), 0o600)
+	if !hardwareKeyRequired(h) {
+		t.Error("an unknown mode asked for nothing")
+	}
+}
