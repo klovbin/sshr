@@ -329,7 +329,7 @@ func TestKitIsNoPrimaryTarget(t *testing.T) {
 	w.pair()
 	_, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
 	must(t, err)
-	if _, err := w.a.HandPrimary(w.a.st.Recovery[:8], func(string, string) bool { return true }); err == nil || !strings.Contains(err.Error(), "recovery kit") {
+	if _, err := w.a.HandPrimary(w.a.st.Recovery[:8], func(string, string) bool { return true }); err == nil || !strings.Contains(err.Error(), "cannot be the primary device") {
 		t.Fatalf("handed the role to the kit device: %v", err)
 	}
 }
