@@ -16,6 +16,17 @@ chmod 700 ~/.ssh
 cat "$w/userkey.pub" >>~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 
+os="$(uname -s)"
+# the sshd of Git for Windows has no PAM
+usepam="UsePAM yes"
+case "$os" in
+MINGW* | MSYS*)
+	usepam=""
+	# the ssh sshr runs is the one of Windows, the case #135 is about
+	export PATH="/c/Windows/System32/OpenSSH:$PATH"
+	;;
+esac
+
 cat >"$w/sshd_config" <<EOF
 Port 2222
 ListenAddress 127.0.0.1
@@ -25,12 +36,12 @@ StrictModes no
 PubkeyAuthentication yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication yes
-UsePAM yes
+$usepam
 AuthorizedKeysFile .ssh/authorized_keys
 Subsystem sftp internal-sftp
 EOF
 
-case "$(uname -s)" in
+case "$os" in
 Linux)
 	sudo apt-get install -y -qq openssh-server >/dev/null
 	sudo mkdir -p /run/sshd
@@ -42,8 +53,18 @@ Darwin)
 	sudo createhomedir -c -u sshrpw >/dev/null || true
 	;;
 esac
-sudo /usr/sbin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
-trap 'sudo kill "$(cat "$w/sshd.pid")" || true; sudo cat "$w/sshd.log" || true' EXIT
+case "$os" in
+MINGW* | MSYS*)
+	# Git for Windows brings an sshd that runs as the runner user, it logs
+	# in only that user, which is all the key and jump checks need
+	"$(command -v sshd || echo /usr/bin/sshd)" -f "$w/sshd_config" -E "$w/sshd.log"
+	trap 'kill "$(cat "$w/sshd.pid")" || true; cat "$w/sshd.log" || true' EXIT
+	;;
+*)
+	sudo /usr/sbin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
+	trap 'sudo kill "$(cat "$w/sshd.pid")" || true; sudo cat "$w/sshd.log" || true' EXIT
+	;;
+esac
 for _ in 1 2 3 4 5 6 7 8 9 10; do
 	ssh-keyscan -p 2222 127.0.0.1 >"$w/known" 2>/dev/null && [ -s "$w/known" ] && break
 	sleep 1
@@ -97,7 +118,7 @@ mcp key "cat $remote" | grep 'hello from ci'
 
 # a saved password needs the system keychain, macOS runners have the login
 # keychain, Linux runners have no Secret Service
-if [ "$(uname -s)" = Darwin ]; then
+if [ "$os" = Darwin ]; then
 	printf '%s\n' "$pw" | "$sshr" add 127.0.0.1 -u sshrpw -n pw -p 2222 --no-key
 	mcp pw 'id -un' | tee "$w/out3" | grep 'sshrpw'
 fi

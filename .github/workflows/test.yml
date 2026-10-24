@@ -85,7 +85,6 @@ jobs:
           ./cli/sshr rm local
 
       - name: connect to a local sshd
-        if: runner.os != 'Windows'
         run: .github/e2e.sh
 
       - name: app bundle
