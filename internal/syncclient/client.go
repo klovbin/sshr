@@ -685,6 +685,9 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	if err := c.errNotPrimary("approves devices"); err != nil {
 		return nil, err
 	}
+	if err := c.claimPrimary(); err != nil {
+		return nil, err
+	}
 	// the list is taken from the state each attempt pulled, a device
 	// another one removed meanwhile is not written back
 	plan := func() (pushPlan, error) {
@@ -963,6 +966,22 @@ func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error
 		return err
 	}
 	return nil
+}
+
+// claimPrimary makes this device the first primary of an account made
+// before primary devices, in a change of its own, the change that adds or
+// removes a device or hands the role on comes after it, other devices take
+// no first primary together with such a change
+func (c *Client) claimPrimary() error {
+	if c.st.Primary != "" {
+		return nil
+	}
+	return c.push(func() (pushPlan, error) {
+		if c.st.Primary != "" {
+			return pushPlan{}, nil
+		}
+		return pushPlan{primary: c.st.DeviceID}, nil
+	})
 }
 
 // errNotPrimary refuses what only the primary device may do, before
@@ -1614,6 +1633,9 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	if err := c.errNotPrimary("removes devices"); err != nil {
 		return nil, err
 	}
+	if err := c.claimPrimary(); err != nil {
+		return nil, err
+	}
 	// the token goes first, a removed device that can still push could
 	// block the others with manifests no one trusts, a rerun after a lost
 	// race finds the device still listed and gets 404 here
@@ -1716,6 +1738,9 @@ func (c *Client) handPrimary(prefix string, confirm func(name, fingerprint strin
 	}
 	if !confirm(CleanName(target.Name), Fingerprint(target.SignPub)) {
 		return nil, errors.New("not handed on")
+	}
+	if err := c.claimPrimary(); err != nil {
+		return nil, err
 	}
 	id := target.ID
 	err = c.push(func() (pushPlan, error) {

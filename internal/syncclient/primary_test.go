@@ -235,4 +235,14 @@ func TestPrimaryOfAnOlderAccount(t *testing.T) {
 	if err := c.checkPrimary(&syncproto.Signed{Signer: "x"}, m); err == nil {
 		t.Fatal("a primary outside the account")
 	}
+	// the first primary must not remove a device or change the key in the
+	// same change (#297)
+	m = &syncproto.Manifest{Version: 2, Devices: devs[1:], Primary: "b"}
+	if err := c.checkPrimary(&syncproto.Signed{Signer: "b"}, m); err == nil {
+		t.Fatal("the first primary removed a device in the same step")
+	}
+	m = &syncproto.Manifest{Version: 2, Devices: devs, Primary: "b", Epoch: 1}
+	if err := c.checkPrimary(&syncproto.Signed{Signer: "b"}, m); err == nil {
+		t.Fatal("the first primary changed the key in the same step")
+	}
 }

@@ -177,6 +177,11 @@ func CheckPrimary(prev, m *Manifest, signer string) error {
 		if m.Primary != signer {
 			return fmt.Errorf("change %d makes device %s primary but was written by device %s, the first primary is the device that writes the first change of this format", m.Counter, short(m.Primary), short(signer))
 		}
+		// naming the first primary is all it may do, a device that pushes
+		// first must not also throw the others out in the same step
+		if m.Epoch != prev.Epoch || !SameDevices(prev.Devices, m.Devices) {
+			return fmt.Errorf("change %d names the first primary device and changes the devices or the vault key in the same step", m.Counter)
+		}
 		return nil
 	}
 	privileged := m.Primary != prev.Primary || m.Epoch > prev.Epoch || !SameDevices(prev.Devices, m.Devices)
