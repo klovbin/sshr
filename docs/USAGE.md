@@ -126,7 +126,8 @@ sshr hwkey off web                       # web off the list, sshr hwkey off turn
 - a host under the requirement is refused when it would log in with a password, a key kept in sshr, 1Password or Bitwarden, the default keys of ssh or a key file outside a token, the error says which and how to fix it, there is no way around it for one connect
 - ssh then gets only sk key types, no password, no keyboard-interactive login and no connection shared through ControlMaster, so it cannot fall back to another key from ssh_config or the agent
 - `"hardware_key": "listed"|"all"` and `"hardware_key_hosts"` in settings.json, never synced, a stolen sync device cannot turn it off, a host keeps the requirement when it is changed or repointed elsewhere
-- sshr can only keep itself from logging in another way, a server that still takes a password or another key lets anyone in who has them
+- with `--all` the jump hops of a host go through sshr and each is checked like a host, in the listed mode a hop logs in its own way unless it is listed too
+- sshr can only keep itself from logging in another way, a server that still takes a password or another key lets anyone in who has them, the export to `~/.ssh/config` writes these hosts without the rule, plain `ssh` is not held to the token
 
 ## Jump hosts
 
