@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The ssh sshr runs (#154): the first one on PATH, except on Windows where
@@ -137,20 +139,42 @@ func parseSSHVersion(out string) (major, minor int, ok bool) {
 
 var sshVersions sync.Map
 
-// sshVersion runs path -V once per path, ok is false when it does not say
-// an OpenSSH version
+// sshVersionTimeout bounds ssh -V, a wrapper that hangs or a slow first
+// scan must not hold the connect, a timeout counts as an unknown version
+const sshVersionTimeout = 3 * time.Second
+
+// sshVersionOf is how askpassSupported reads a version, tests stand in for
+// it so they do not depend on the ssh of the machine
+var sshVersionOf = sshVersion
+
+// sshVersion runs path -V once per path, size and time of the file, an
+// ssh updated in place is read again, ok is false when it does not say an
+// OpenSSH version
 func sshVersion(path string) (major, minor int, ok bool) {
-	if v, hit := sshVersions.Load(path); hit {
+	key := path
+	if fi, err := os.Stat(path); err == nil {
+		key = fmt.Sprintf("%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+	}
+	if v, hit := sshVersions.Load(key); hit {
 		r := v.([3]int)
 		return r[0], r[1], r[2] == 1
 	}
-	out, _ := exec.Command(path, "-V").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), sshVersionTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "-V")
+	// a child of a wrapper keeps the output open after the wrapper is
+	// killed, the wait stops shortly after the kill anyway
+	cmd.WaitDelay = 500 * time.Millisecond
+	out, _ := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return 0, 0, false
+	}
 	major, minor, ok = parseSSHVersion(string(out))
 	okInt := 0
 	if ok {
 		okInt = 1
 	}
-	sshVersions.Store(path, [3]int{major, minor, okInt})
+	sshVersions.Store(key, [3]int{major, minor, okInt})
 	return major, minor, ok
 }
 
@@ -158,7 +182,7 @@ func sshVersion(path string) (major, minor int, ok bool) {
 // from sshr: SSH_ASKPASS_REQUIRE came with OpenSSH 8.4, an older ssh asks
 // on the terminal instead, an ssh whose version is unknown is let through
 func askpassSupported(path string) error {
-	major, minor, ok := sshVersion(path)
+	major, minor, ok := sshVersionOf(path)
 	if !ok || major > 8 || major == 8 && minor >= 4 {
 		return nil
 	}

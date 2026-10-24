@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPickSSH checks which ssh sshr runs (#154): on Windows the ssh of Git
@@ -151,5 +152,30 @@ func TestSSHROwnSSH(t *testing.T) {
 	t.Setenv("SSHR_SSH", own+"-missing")
 	if _, err := SSHPath(); err == nil {
 		t.Fatal("a missing SSHR_SSH went through")
+	}
+}
+
+// TestSSHVersionTimeoutAndUpdate checks that an ssh -V that hangs counts
+// as unknown after the timeout and that an ssh updated in place is read
+// again (#315)
+func TestSSHVersionTimeoutAndUpdate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ssh")
+	os.WriteFile(p, []byte("#!/bin/sh\necho 'OpenSSH_8.1p1' >&2\n"), 0o700)
+	if ma, mi, ok := sshVersion(p); !ok || ma != 8 || mi != 1 {
+		t.Fatalf("first read %d.%d %v", ma, mi, ok)
+	}
+	os.WriteFile(p, []byte("#!/bin/sh\necho 'OpenSSH_9.6p1 newer' >&2\n"), 0o700)
+	if ma, mi, ok := sshVersion(p); !ok || ma != 9 || mi != 6 {
+		t.Fatalf("after the update %d.%d %v", ma, mi, ok)
+	}
+	slow := filepath.Join(dir, "slow")
+	os.WriteFile(slow, []byte("#!/bin/sh\nsleep 10\n"), 0o700)
+	start := time.Now()
+	if _, _, ok := sshVersion(slow); ok || time.Since(start) > sshVersionTimeout+2*time.Second {
+		t.Fatalf("a hanging ssh -V: ok %v after %s", ok, time.Since(start))
 	}
 }

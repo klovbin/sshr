@@ -44,6 +44,10 @@ func TestPasswordSocketAnswersOnce(t *testing.T) {
 }
 
 func TestAttachPasswordEnv(t *testing.T) {
+	// the ssh of the machine is no part of this test (#315)
+	old := sshVersionOf
+	sshVersionOf = func(string) (int, int, bool) { return 9, 6, true }
+	t.Cleanup(func() { sshVersionOf = old })
 	useMockKeychain(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	cmd := exec.Command("true")
