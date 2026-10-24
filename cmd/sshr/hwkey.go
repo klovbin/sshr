@@ -114,7 +114,7 @@ func hwkeyCheck(store *app.Store, h *app.Host) {
 	sk, other := authorizedKeyTypes(data)
 	fmt.Printf("%s: %d key(s) on a hardware token, %d other key(s) in ~/.ssh/authorized_keys\n", h.Name, len(sk), len(other))
 	for _, k := range other {
-		fmt.Println("  not on a token: " + k)
+		fmt.Println("  logs in without a token: " + k)
 	}
 	if len(sk) == 0 {
 		fmt.Println("put a key on a token there first: sshr key new --sk, then sshr key install " + h.Name + " ~/.ssh/sshr_sk.pub --use")
@@ -159,22 +159,40 @@ func authorizedKeysOf(name string, res *app.RemoteResult) ([]byte, error) {
 // authorizedKeyTypes sorts the lines of an authorized_keys file into keys
 // on a token and others, each as type, fingerprint and comment, options
 // before a key (from=, command=) are read past, lines that are no key are
-// left out
+// left out, an sk key with no-touch-required logs in without a touch and
+// a cert-authority line lets in any key it signed, both go to the others
+// with the option named
 func authorizedKeyTypes(data []byte) (sk, other []string) {
 	for len(data) > 0 {
-		pub, comment, _, rest, err := ssh.ParseAuthorizedKey(data)
+		pub, comment, options, rest, err := ssh.ParseAuthorizedKey(data)
 		if err != nil {
 			break
 		}
 		line := strings.TrimSpace(pub.Type() + " " + ssh.FingerprintSHA256(pub) + " " + terminalSafe(comment))
-		if strings.HasPrefix(pub.Type(), "sk-") {
-			sk = append(sk, line)
-		} else {
+		switch {
+		case hasKeyOption(options, "cert-authority"):
+			other = append(other, line+" (cert-authority, any key it signed logs in)")
+		case !strings.HasPrefix(pub.Type(), "sk-"):
 			other = append(other, line)
+		case hasKeyOption(options, "no-touch-required"):
+			other = append(other, line+" (no-touch-required, no touch of the token is asked)")
+		default:
+			sk = append(sk, line)
 		}
 		data = rest
 	}
 	return sk, other
+}
+
+// hasKeyOption tells whether an authorized_keys line carries the option
+// name, sshd reads option names in any case
+func hasKeyOption(options []string, name string) bool {
+	for _, o := range options {
+		if strings.EqualFold(o, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // terminalSafe puts ? for control characters and the marks that turn
