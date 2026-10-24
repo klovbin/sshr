@@ -1,0 +1,7 @@
+What it is for: keys that arrive as text from a client or a panel
+
+Why it helps: no key file to lose in backups or dotfile repos, a
+passphrase is asked once
+
+Why this way: ssh offers only this key and agent forwarding is off, so
+neither other keys nor the server can reach it
