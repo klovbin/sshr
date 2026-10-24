@@ -1,0 +1,8 @@
+What it is for: assistants asked to read logs or check a server
+
+Why it helps: no addresses or keys pasted into a chat, the assistant
+uses your saved logins without seeing them
+
+Why this way: run_command is off by default and marked destructive,
+nothing listens on the network, output and time are capped, every
+command is logged
