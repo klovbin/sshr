@@ -321,3 +321,13 @@ func TestSupabaseSQLCommand(t *testing.T) {
 		t.Errorf("supabase-sql --replace with the variable set: %q", errOut)
 	}
 }
+
+// TestSyncPrimaryTakesYes checks that sshr sync primary reads its own
+// --yes instead of stopping with the usage of sshr sync (#300)
+func TestSyncPrimaryTakesYes(t *testing.T) {
+	home := t.TempDir()
+	_, errOut, code := sshrIn(t, home, "sync", "primary", "abcd", "--yes")
+	if code == 0 || strings.Contains(errOut, "Usage") || strings.Contains(errOut, "sshr sync [") {
+		t.Fatalf("--yes did not reach sync primary: %d %q", code, errOut)
+	}
+}

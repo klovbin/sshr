@@ -89,7 +89,8 @@ func cmdSync(store *app.Store, args []string) {
 			c.AcceptReset = true
 		case a == "--replace" && sub == "supabase-sql":
 			replaceKey = true
-		case strings.HasPrefix(a, "-"):
+		case strings.HasPrefix(a, "-") && sub != "primary":
+			// primary reads its own --yes
 			fmt.Fprintln(os.Stderr, syncUsage)
 			os.Exit(1)
 		default:
