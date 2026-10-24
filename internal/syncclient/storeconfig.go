@@ -209,6 +209,11 @@ func CheckStoreURL(what, raw string) error {
 	if u.User != nil {
 		return fmt.Errorf("the %s must not carry a user or password, they go apart", what)
 	}
+	// a query is sent with every request and printed in errors, a token
+	// there would leak
+	if u.RawQuery != "" || u.Fragment != "" || u.ForceQuery {
+		return fmt.Errorf("the %s must not carry a query or fragment", what)
+	}
 	switch u.Scheme {
 	case "https":
 		return nil
