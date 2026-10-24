@@ -377,3 +377,46 @@ func TestFailedKitLeavesNoPendingDevice(t *testing.T) {
 		t.Fatalf("%d devices wait for approval after a failed kit", len(pending))
 	}
 }
+
+// TestRotationAfterRoleMoved checks that a key change left half done does
+// not block every sync of a device that is no longer primary: the new key
+// reached the kit device but not c, then the kit hands the account to a
+// new machine (#308)
+func TestRotationAfterRoleMoved(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	w.srv.Config.Handler.(*syncserver.Server).Now = now
+	kit, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	// c joins after the kit, so the delivery reaches the kit before it
+	c := w.client("c-")
+	w.join(c)
+	cid := c.st.DeviceID
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/envelopes/"+cid) {
+			return answer(http.StatusServiceUnavailable), nil
+		}
+		return nil, nil
+	}}}
+	if _, err := w.a.RemoveDevice(w.b.st.DeviceID[:8]); err == nil {
+		t.Fatal("the delivery did not fail")
+	}
+	w.a.HTTP = nil
+	n := w.client("n-")
+	n.Now = now
+	_, err = n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass)
+	must(t, err)
+	clock = clock.Add(DefaultRecoveryWait + time.Hour)
+	must(t, n.RestoreFinish())
+	w.a.Now = now
+	// a never saw the claim in time and rightly refuses the hand-over, but
+	// the delivery left from before must not be what stops it
+	if err := w.a.Pull(); err != nil && strings.Contains(err.Error(), "delivers vault keys") {
+		t.Fatalf("a is stuck on its old key change: %v", err)
+	}
+	if w.a.st != nil && w.a.st.Rotation != nil {
+		t.Fatal("the old key change is still pending on a")
+	}
+}

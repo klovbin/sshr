@@ -1940,9 +1940,25 @@ func (c *Client) finishRotation() error {
 	if err := vault.SecretSet(c.prefix()+"key-"+strconv.Itoa(r.Epoch), key); err != nil {
 		return err
 	}
-	for _, d := range r.Devices {
-		if err := c.putEnvelope(d, r.Epoch, key); err != nil {
-			return err
+	if c.st.Primary != "" && c.st.Primary != c.st.DeviceID {
+		// the role moved before the delivery, only the primary delivers
+		// keys now, retrying would fail every sync of this device, the key
+		// stays here and a device still without it needs the primary to
+		// change the key again (remove a device) or pair it again
+		c.logf("the vault key change of epoch %d was not delivered to every device before device %s became primary, a device that cannot read the account needs the primary to change the key again", r.Epoch, short(c.st.Primary, 8))
+	} else {
+		for _, d := range r.Devices {
+			err := c.putEnvelope(d, r.Epoch, key)
+			var se *StatusError
+			if errors.As(err, &se) && se.Code == http.StatusForbidden {
+				// sshr-sync knows of a new primary this device has not
+				// pulled yet, the same as above
+				c.logf("the vault key change of epoch %d was not delivered to every device before another device became primary, a device that cannot read the account needs the primary to change the key again", r.Epoch)
+				break
+			}
+			if err != nil {
+				return err
+			}
 		}
 	}
 	vault.SecretDelete(c.prefix() + "key-pending")
