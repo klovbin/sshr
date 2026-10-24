@@ -42,7 +42,7 @@ func TestProxyCommandQuotesHops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if line := strings.Join(args, " "); !strings.Contains(line, " __proxy 'bastion,gw' %h %p") {
+	if line := strings.Join(args, " "); !strings.Contains(line, ` __proxy "bastion,gw" %h %p`) {
 		t.Fatalf("ProxyCommand = %s", line)
 	}
 }
