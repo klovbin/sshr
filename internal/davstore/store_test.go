@@ -290,3 +290,17 @@ func TestStoreRefusesBadNames(t *testing.T) {
 		t.Errorf("requests went out: %v", f.methods)
 	}
 }
+
+// a create that meets the upload lock of another device lost the race
+// (#256)
+func TestCreateLockedIsTaken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusLocked)
+	}))
+	defer srv.Close()
+	s, err := New(Config{URL: srv.URL + "/dav", User: "u"}, "pw", nil)
+	must(t, err)
+	if err := s.Create("manifests/1", []byte("1")); !errors.Is(err, syncclient.ErrExists) {
+		t.Errorf("create on 423: %v", err)
+	}
+}

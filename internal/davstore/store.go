@@ -225,7 +225,9 @@ func (s *Store) Create(name string, data []byte) error {
 	switch {
 	case written(code):
 		return nil
-	case code == http.StatusPreconditionFailed:
+	// Nextcloud and ownCloud lock the upload of a name, of two creates at
+	// once the loser gets 423 and the other device wrote first
+	case code == http.StatusPreconditionFailed || code == http.StatusLocked:
 		return syncclient.ErrExists
 	default:
 		return statusError("PUT", name, code)
