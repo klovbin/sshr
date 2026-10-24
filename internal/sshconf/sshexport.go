@@ -1,4 +1,4 @@
-package app
+package sshconf
 
 import (
 	"bytes"
@@ -55,7 +55,7 @@ func exportPath(p string) (string, error) {
 // file sshr writes, a saved host with one of those names stays out of the
 // export, ssh takes the first value it reads and the export would shadow
 // the user's own block
-func (e confEnv) userAliases() map[string]bool {
+func (e Env) userAliases() map[string]bool {
 	out := map[string]bool{}
 	path, err := userSSHConfig()
 	if err != nil {
@@ -73,7 +73,7 @@ func (e confEnv) userAliases() map[string]bool {
 // WriteSSHConfig writes every saved host as a Host block of ssh config, so
 // plain ssh, scp, rsync and editors reach them by name, a password or a key
 // kept inside sshr does not leave it, such hosts get the address only
-func (e confEnv) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
+func (e Env) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
 	hosts, err := e.Hosts.List()
 	if err != nil {
 		return nil, err
@@ -117,7 +117,7 @@ func (e confEnv) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
 }
 
 // exportBlock is the Host block of one host
-func (e confEnv) exportBlock(h *Host, alias string, aliasOf map[string]string) (block, note string, err error) {
+func (e Env) exportBlock(h *Host, alias string, aliasOf map[string]string) (block, note string, err error) {
 	if !exportHostRe.MatchString(h.Host) {
 		return "", "", fmt.Errorf("address %q cannot be written to ssh config", h.Host)
 	}
@@ -194,7 +194,7 @@ func (e confEnv) exportBlock(h *Host, alias string, aliasOf map[string]string) (
 }
 
 // includeLine is the line of ~/.ssh/config that reads the export
-func (e confEnv) includeLine() string {
+func (e Env) includeLine() string {
 	p := e.Out
 	// "~/" is read the same by Windows OpenSSH and by the msys ssh of Git
 	// for Windows, which takes C:/... as relative to ~/.ssh, both paths
@@ -231,7 +231,7 @@ var ErrSSHConfigLink = errors.New("ssh_config_link")
 
 // SSHConfigExported tells whether the export is installed, then every
 // change of the hosts rewrites it
-func (e confEnv) SSHConfigExported() bool {
+func (e Env) SSHConfigExported() bool {
 	if e.Out == "" {
 		return false
 	}
@@ -243,19 +243,19 @@ func (e confEnv) SSHConfigExported() bool {
 // of ~/.ssh/config, at the top because a Host line before it would make
 // ssh read the Include as part of that block, the hosts are rewritten on
 // every change from then on
-func (e confEnv) InstallSSHConfig() (items []ExportItem, err error) {
-	err = e.locked(func(tx confEnv) error {
+func (e Env) InstallSSHConfig() (items []ExportItem, err error) {
+	err = e.locked(func(tx Env) error {
 		items, err = tx.installSSHConfig()
 		return err
 	})
 	return items, err
 }
 
-func (e confEnv) installSSHConfig() ([]ExportItem, error) {
+func (e Env) installSSHConfig() ([]ExportItem, error) {
 	if e.Out == "" {
 		return nil, errors.New("this store has no ssh config export path")
 	}
-	items, err := e.refreshSSHConfig(true)
+	items, err := e.RefreshSSHConfig(true)
 	if err != nil {
 		return items, err
 	}
@@ -263,11 +263,11 @@ func (e confEnv) installSSHConfig() ([]ExportItem, error) {
 }
 
 // UninstallSSHConfig removes the Include line and the export file
-func (e confEnv) UninstallSSHConfig() error {
-	return e.locked(func(tx confEnv) error { return tx.uninstallSSHConfig() })
+func (e Env) UninstallSSHConfig() error {
+	return e.locked(func(tx Env) error { return tx.uninstallSSHConfig() })
 }
 
-func (e confEnv) uninstallSSHConfig() error {
+func (e Env) uninstallSSHConfig() error {
 	if err := e.editUserConfig(false); err != nil && !errors.Is(err, ErrSSHConfigLink) {
 		return err
 	}
@@ -277,9 +277,9 @@ func (e confEnv) uninstallSSHConfig() error {
 	return nil
 }
 
-// refreshSSHConfig rewrites the export file, unless force it does so only
+// RefreshSSHConfig rewrites the export file, unless force it does so only
 // when the export is installed
-func (e confEnv) refreshSSHConfig(force bool) ([]ExportItem, error) {
+func (e Env) RefreshSSHConfig(force bool) ([]ExportItem, error) {
 	if e.Out == "" || (!force && !e.SSHConfigExported()) {
 		return nil, nil
 	}
@@ -295,7 +295,7 @@ func (e confEnv) refreshSSHConfig(force bool) ([]ExportItem, error) {
 }
 
 // editUserConfig adds or removes the Include line of the export
-func (e confEnv) editUserConfig(add bool) error {
+func (e Env) editUserConfig(add bool) error {
 	path, err := userSSHConfig()
 	if err != nil {
 		return err

@@ -20,6 +20,8 @@ How sshr is built, which package may use which, where data lives and how the mai
           internal/app (Store,     |    syncproto <---------------+
           the keychain, op, bw)    |
                   \                |
+          internal/sshconf (ssh config import, export)
+                  \                |
           internal/sshcmd (runs ssh, scp, the agent)
                   \                |
        hosts, health, vault, settings, record, fileio (no programs)
@@ -36,7 +38,8 @@ How sshr is built, which package may use which, where data lives and how the mai
 | `internal/record` | keeps files readable across versions: unknown keys kept and written back, the `version` of a file | nothing |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
 | `internal/sshcmd` | the ssh runner: ssh, scp and mosh command lines, jump hosts, reuse of a connection, copy, remote commands, a session plan, keys of the vault, 1Password and Bitwarden served through a private agent, saved passwords through askpass, the ssh binary to use, on an Env over the host store | `fileio`, `settings`, `vault`, `hosts`, `health`, `pwmgr` |
-| `internal/app` | the core: the Store facade over package hosts with its hooks, the system keychain, password managers, ssh config import and export, the names of sshcmd the front ends use | `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `pwmgr`, `sshcmd` |
+| `internal/sshconf` | the ssh config: import of the user's hosts through `ssh -G`, the export file of the saved hosts and its Include line in `~/.ssh/config`, on an Env of the ssh env and the export path | `fileio`, `hosts`, `sshcmd` |
+| `internal/app` | the core: the Store facade over package hosts with its hooks, the system keychain, password managers, the names of sshcmd and sshconf the front ends use | `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `pwmgr`, `sshcmd`, `sshconf` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/s3store` | a sync account in an S3 bucket (AWS S3, R2, MinIO) through the AWS SDK, the create of a manifest is PutObject with If-None-Match: * | `syncclient` |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation, runs no program | `fileio`, `record`, `vault`, `hosts`, `syncproto` |
@@ -71,7 +74,7 @@ Rules that follow:
 | secrets | `vault.go` (the system keychain and the passphrase prompt handed to package vault, wrappers), `keychain_system.go`, `prompt.go`, `pwmgr.go` and `opstore.go` over package pwmgr, in package `sshcmd` `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords, Unlock), `agent.go` |
 | ssh command lines | package `sshcmd` (`env.go`, the Env over the host store, `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `copy.go`, `remote.go`, `launch.go`, `keyinstall.go`, `sshbin.go`), in app `sshenv.go` (Store builds the Env and forwards the methods) and `sshcmd.go` (the names the front ends use) |
 | reachability | package `health`, a TCP connect and the SSH banner in process, no ssh, `hostkey.go` there reads the host key |
-| ssh config | `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`) |
+| ssh config | package `sshconf` (`env.go`, `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`)), in app `sshenv.go` builds its Env, the hook of Store rewrites the export after a change |
 | settings | `settings.go` (aliases of package settings) |
 | platform | `files.go` (`WriteFileAtomic`, `LockFile`, `WaitLock` over `fileio`), in package `sshcmd` `tty_*.go`, `agentsock_*.go` |
 
@@ -182,5 +185,5 @@ In this order, each one its own issue and commits, the order was checked against
 6. (#100) done: archtest checks `os/exec` (direct and through any import for the phone packages) and Gio, `TestHostFieldsAreClassified` classes every `Host` field, `Host.String` redacts secrets, CODEOWNERS asks the GUI owner, a key file and an agent of a host that moved on another device are dropped (#195)
 7. (#101) done: `internal/audit` keeps the audit log of MCP and REST actions, `sshr commands` limits commands to allowed hosts bound to where they point, `confirm_commands` asks through MCP elicitation and fails closed, remote output and synced host text reach the model as data (`internal/mcp/text.go`), the API socket refuses peers of another user instead of asking for a token (the same user can read the token anyway), REST runs at most 8 uploads and commands at once
 8. (#102) done in part: `scripts/release.sh` and `.github/workflows/release.yml` build the six CLI files on a tag, checksums and a build attestation, the GUI is not in them, the pinned-key signature and its check in install.sh are #146, packages (#17) are next
-9. (#103) done: `record`, `settings`, `vault`, `hosts`, `health` and `pwmgr` left `app`, the sync client builds on `hosts` and `vault`, everything a phone build needs reaches no `os/exec` and archtest checks it, `app` keeps the Store facade with its hooks, the system keychain, the passphrase prompt, the ssh runner and the ssh config import and export, splitting those last two is #222
+9. (#103) done: `record`, `settings`, `vault`, `hosts`, `health` and `pwmgr` left `app`, the sync client builds on `hosts` and `vault`, everything a phone build needs reaches no `os/exec` and archtest checks it, `app` keeps the Store facade with its hooks, the system keychain and the passphrase prompt, the ssh runner went to `internal/sshcmd` and the ssh config import and export to `internal/sshconf` in #222, each on an Env over the host store, `app` keeps their names for the front ends
 10. (#128) in progress: every request of the sync client goes through `syncclient.Backend` (`backend.go`), `httpBackend` is sshr-sync, its answers become `StatusError` with the text of the server and the meanings `ErrNotFound`, `ErrCASLost`, `ErrStaleEpoch`, `ErrPending`, `testdata/http-trace.golden` pins the requests, `ObjectBackend` (`objectstore.go`) runs an account in any store with a create-only-if-absent write (manifests/<counter>, one envelope per epoch, blobs/<hash>, devices/<id>), tested over a store in memory, `internal/s3store` is the S3 store, next the CLI and a backend in the sync state, then Supabase, 1Password and a synced folder, after 3 so every backend carries the versioned payload, a backend must offer compare and swap on the manifest or the protocol must say how a fork merges, a fork looks like a rollback today and stops sync

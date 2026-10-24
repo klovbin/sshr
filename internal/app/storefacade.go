@@ -73,7 +73,7 @@ func fillKeyPub(h *Host) error {
 // hostsChanged rewrites the ssh config export when it is installed, the
 // host is saved already, a failed export is reported and does not undo it
 func (s *Store) hostsChanged() {
-	if _, err := s.confEnv().refreshSSHConfig(false); err != nil {
+	if _, err := s.confEnv().RefreshSSHConfig(false); err != nil {
 		fmt.Fprintf(os.Stderr, "sshr: ssh config export: %v\n", err)
 	}
 }

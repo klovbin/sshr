@@ -1,4 +1,4 @@
-package app
+package sshconf
 
 import (
 	"bufio"
@@ -292,7 +292,7 @@ type ImportItem struct {
 // ImportSSHConfig adds the hosts of the user's ssh config that sshr does
 // not have yet, a host whose name or address, user and port are saved
 // already is skipped, dryRun only reports
-func (e confEnv) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
+func (e Env) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
 	aliases, err := SSHConfigAliases()
 	if err != nil {
 		return nil, err

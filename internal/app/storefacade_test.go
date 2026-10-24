@@ -16,7 +16,8 @@ func TestHostsKeepsTheExportHook(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	out := filepath.Join(home, "ssh_config")
-	os.WriteFile(out, []byte(exportHeader+"\n"), 0o600)
+	// the first line of an export sshr wrote, see sshconf
+	os.WriteFile(out, []byte("# Written by sshr, edits here are lost, change the hosts in sshr\n\n"), 0o600)
 	s := &Store{Dir: t.TempDir(), SSHConfigOut: out}
 	err := s.Hosts().Locked(func(tx *hosts.Store) error {
 		_, err := tx.Import(Host{ID: "0123456789abcdef0123456789abcdef", Name: "synced-web", Host: "10.0.0.1", User: "u"})
