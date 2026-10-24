@@ -139,3 +139,27 @@ func TestHardwareKeyRequiredFailsClosed(t *testing.T) {
 		t.Error("an unknown mode asked for nothing")
 	}
 }
+
+// when every host needs a hardware key, an unsaved jump hop goes through
+// sshr as ProxyCommand and not -J, so the rule is checked for it (#354)
+func TestEveryHostRequiredSendsHopsThroughSshr(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "web", Host: "10.0.0.1", User: "u", Key: skHandleFile(t, home), Jump: "ops@bastion.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := s.JumpArgs(h)
+	if err != nil || len(args) != 2 || args[0] != "-J" {
+		t.Fatalf("without the rule: %q %v", args, err)
+	}
+	st, _ := settings.Load()
+	st.HardwareKey = settings.HardwareKeyAll
+	settings.Save(st)
+	args, err = s.JumpArgs(h)
+	if err != nil || len(args) != 2 || !strings.HasPrefix(args[1], "ProxyCommand=") {
+		t.Fatalf("every host required, the hop went as %q %v", args, err)
+	}
+}

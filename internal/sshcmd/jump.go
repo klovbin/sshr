@@ -55,8 +55,10 @@ func (e Env) JumpArgs(h *Host) ([]string, error) {
 	// with -J the ssh for each hop inherits the askpass and the agent of
 	// this host, a bastion that asks for a password would get this host's
 	// saved one, and every hop would be offered a key kept in sshr, sshr as
-	// ProxyCommand starts each hop with that environment removed
-	if !anySaved && !h.PasswordFromSshr() && !h.ServedByAgent() {
+	// ProxyCommand starts each hop with that environment removed, when every
+	// host needs a hardware key each hop goes through sshr too, so the rule
+	// is checked for it, ssh -J would log the hop in another way
+	if !anySaved && !h.PasswordFromSshr() && !h.ServedByAgent() && !hardwareKeyEverywhere() {
 		return []string{"-J", strings.Join(parts, ",")}, nil
 	}
 	exe, err := os.Executable()
