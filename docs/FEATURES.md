@@ -214,6 +214,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the same encryption, signatures and chained manifests as with sshr-sync, the folder holds only ciphertext
 - **Why this way:** the next manifest is a PUT with `If-None-Match: *`, setup refuses a server that writes over a taken name (OCIS, nginx, rclone, Caddy, dufs do), redirects are never followed, the password stays in the keychain, off by default since every device shares one password and no WebDAV server decides the create strictly atomically
 
+### Sync through a Supabase project
+- **What:** `sshr sync init --backend supabase` keeps the encrypted account in a Supabase project, a free one is enough
+- **What for:** sync without running a server, renting a bucket or trusting a WebDAV server with races
+- **Why it helps:** the primary key of a table decides two pushes at once, so the history never forks, the project holds only ciphertext
+- **Why this way:** `sshr sync supabase-sql` prints one SQL file for the SQL editor, the objects sit in a schema the API does not expose, the device reaches them only through functions that check the sshr key first, a stale key is an error and never an empty store, every call is a POST so no read replica answers, the device holds the publishable key and its own sshr key in the keychain, never a secret or service_role key, off by default since every device shares one sshr key
+
 ### Safe saves from several sshr processes
 - **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
 - **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time

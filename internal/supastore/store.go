@@ -69,10 +69,15 @@ func NewKey() (string, error) {
 }
 
 // SetupSQL is the SQL the user runs once in the project, with the hash of
-// key in it, never the key itself
-func SetupSQL(key string) string {
+// key in it, never the key itself, replace drops the keys there were, after
+// a removed device the old key must stop working
+func SetupSQL(key string, replace bool) string {
 	sum := sha256.Sum256([]byte(key))
-	return strings.Replace(setupSQL, "{{KEY_HASH}}", hex.EncodeToString(sum[:]), 1)
+	sql := strings.Replace(setupSQL, "{{KEY_HASH}}", hex.EncodeToString(sum[:]), 1)
+	if replace {
+		sql = strings.Replace(sql, "insert into sshr.keys", "delete from sshr.keys;\ninsert into sshr.keys", 1)
+	}
+	return sql
 }
 
 // CheckKey takes a publishable key, a secret or service_role key reaches the

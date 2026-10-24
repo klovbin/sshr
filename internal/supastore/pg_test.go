@@ -67,7 +67,7 @@ func realREST(t *testing.T) (url, rest, jwtSecret string) {
 		alter default privileges in schema public grant all on functions to anon, authenticated;
 		alter default privileges in schema public grant all on tables to anon, authenticated;`)
 	sqlFile := filepath.Join(dir, "setup.sql")
-	os.WriteFile(sqlFile, []byte(SetupSQL(testKey)), 0o600)
+	os.WriteFile(sqlFile, []byte(SetupSQL(testKey, false)), 0o600)
 	run("psql", "-h", sock, "-p", fmt.Sprint(pgPort), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-f", sqlFile)
 
 	jwtSecret = strings.Repeat("s", 40)

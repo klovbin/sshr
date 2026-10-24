@@ -239,3 +239,71 @@ func TestJoinFlagsQuote(t *testing.T) {
 		t.Errorf("quote of plain values %q %q", shellQuote(""), shellQuote("u"))
 	}
 }
+
+// the Supabase flags land in their place, a mix with other backends or a
+// secret key stops before the sshr key is asked for, invite prints the
+// public flags only, supabase-sql prints the SQL and a key (#128)
+func TestSupabaseFlags(t *testing.T) {
+	args := []string{"--backend", "supabase", "--url", "https://abc.supabase.co", "--key", "sb_publishable_x"}
+	var f storeFlags
+	for i := 0; i < len(args); i++ {
+		ok, err := f.take(args, &i)
+		if err != nil || !ok {
+			t.Fatalf("%s: %v %v", args[i], ok, err)
+		}
+	}
+	if f.backend != "supabase" || f.dav.URL != "https://abc.supabase.co" || f.sbKey != "sb_publishable_x" || !f.keyGiven {
+		t.Fatalf("got %+v", f)
+	}
+	t.Setenv("SSHR_SUPABASE_KEY", strings.Repeat("ab", 32))
+	for _, tc := range []struct {
+		f   storeFlags
+		err string
+	}{
+		{storeFlags{backend: "supabase", dav: davstore.Config{URL: f.dav.URL, User: "u"}, sbKey: f.sbKey, davGiven: true, keyGiven: true}, "not the S3 flags or --user"},
+		{storeFlags{backend: "supabase", dav: davstore.Config{URL: f.dav.URL}, davGiven: true}, "--key <publishable key>"},
+		{storeFlags{backend: "supabase", dav: davstore.Config{URL: f.dav.URL}, sbKey: "sb_secret_x", davGiven: true, keyGiven: true}, "secret key"},
+		{storeFlags{backend: "supabase", dav: davstore.Config{URL: "http://abc.supabase.co"}, sbKey: f.sbKey, davGiven: true, keyGiven: true}, "https://"},
+		{storeFlags{backend: "webdav", dav: davstore.Config{URL: f.dav.URL, User: "u"}, sbKey: f.sbKey, davGiven: true, keyGiven: true}, "are for --backend s3 or supabase"},
+		{storeFlags{sbKey: f.sbKey, given: true, keyGiven: true}, "--key needs --backend supabase"},
+	} {
+		c := &syncclient.Client{}
+		if _, err := tc.f.setup(c, ""); err == nil || !strings.Contains(err.Error(), tc.err) {
+			t.Errorf("%+v: %v, want %q", tc.f, err, tc.err)
+		}
+		if c.Backend != nil || c.StoreSecret != "" {
+			t.Errorf("%+v: a refused setup changed the client", tc.f)
+		}
+	}
+	cfg, _ := json.Marshal(map[string]string{"url": "https://abc.supabase.co", "key": "sb_publishable_x"})
+	ref := &syncclient.BackendRef{Kind: "supabase", Config: cfg}
+	got, err := joinFlags("supabase https://abc.supabase.co", ref)
+	if err != nil || got != "--backend supabase --url https://abc.supabase.co --key sb_publishable_x" {
+		t.Errorf("join flags %q %v", got, err)
+	}
+	if _, err := openStore(*ref, strings.Repeat("ab", 32)); err != nil {
+		t.Error(err)
+	}
+	if _, err := openStore(*ref, "short"); err == nil {
+		t.Error("opened a project with a short sshr key")
+	}
+}
+
+func TestSupabaseSQLCommand(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SSHR_SUPABASE_KEY", "")
+	out, errOut, code := sshrIn(t, home, "sync", "supabase-sql")
+	if code != 0 || !strings.Contains(out, "create schema if not exists sshr") || !strings.Contains(errOut, "sshr key of the account") || strings.Contains(out, "delete from sshr.keys") {
+		t.Fatalf("supabase-sql: %d %q %q", code, out, errOut)
+	}
+	key := strings.Repeat("cd", 32)
+	t.Setenv("SSHR_SUPABASE_KEY", key)
+	out, errOut, _ = sshrIn(t, home, "sync", "supabase-sql")
+	if strings.Contains(errOut, "sshr key of the account") || strings.Contains(out, key) {
+		t.Errorf("supabase-sql with a key given: %q %q", out, errOut)
+	}
+	out, errOut, _ = sshrIn(t, home, "sync", "supabase-sql", "--replace")
+	if !strings.Contains(out, "delete from sshr.keys") || !strings.Contains(errOut, "sshr key of the account") {
+		t.Errorf("supabase-sql --replace: %q %q", out, errOut)
+	}
+}

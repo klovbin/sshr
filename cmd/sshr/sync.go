@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"sshr.dev/internal/app"
+	"sshr.dev/internal/supastore"
 	"sshr.dev/internal/syncclient"
 )
 
@@ -35,6 +36,11 @@ const syncUsage = `Usage:
   sshr sync store-key --key-id <id>      a new key of the S3 bucket of this account,
                                          the secret from SSHR_S3_SECRET or a prompt
   sshr sync store-key [--user <name>]    a new password of the WebDAV folder
+  sshr sync supabase-sql [--replace]     the SQL that prepares a Supabase project and
+                                         a new sshr key, --replace drops the old key
+  sshr sync init --backend supabase --url https://<ref>.supabase.co --key <publishable key>
+                                         keep the account in a Supabase project,
+                                         the sshr key from SSHR_SUPABASE_KEY or a prompt
   sshr sync leave [--force]              stop syncing here, hosts stay`
 
 // cmdSync runs the sync subcommands
@@ -52,6 +58,7 @@ func cmdSync(store *app.Store, args []string) {
 	var server, name string
 	var rest []string
 	var sf storeFlags
+	replaceKey := false
 	for i := 0; i < len(args); i++ {
 		if ok, err := sf.take(args, &i); err != nil {
 			fatal(err)
@@ -71,6 +78,8 @@ func cmdSync(store *app.Store, args []string) {
 			}
 		case a == "--accept-reset":
 			c.AcceptReset = true
+		case a == "--replace" && sub == "supabase-sql":
+			replaceKey = true
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintln(os.Stderr, syncUsage)
 			os.Exit(1)
@@ -192,11 +201,23 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Removed %s, the vault key was changed, what it already downloaded it keeps\n", d.Name)
-		if ref, err := c.StoreRef(); err == nil && ref != nil && ref.Kind == "webdav" {
+		if ref, err := c.StoreRef(); err == nil && ref != nil && ref.Kind == "supabase" {
+			fmt.Println("This account is in a Supabase project and the removed device still holds the sshr key, it can delete objects and stop the sync\nMake a new key and run its SQL in the project, it drops the old one:\n  sshr sync supabase-sql --replace\nthen run on every device that stays, with the new key:\n  sshr sync store-key")
+		} else if err == nil && ref != nil && ref.Kind == "webdav" {
 			fmt.Println("This account is in a WebDAV folder and the removed device still knows the password, it can delete files and stop the sync\nChange the password (in Nextcloud make a new app password and delete the old one), then run on every device that stays:\n  sshr sync store-key\nwith --user <name> on each of them if the user changes too")
 		} else if err == nil && ref != nil {
 			fmt.Println("This account is in a bucket and the removed device still holds the bucket key, it can delete objects and stop the sync\nMake a new key for the bucket, delete the old one, then run on every device that stays:\n  sshr sync store-key --key-id <new key id>")
 		}
+	case "supabase-sql":
+		key := os.Getenv("SSHR_SUPABASE_KEY")
+		if key == "" || replaceKey {
+			if key, err = supastore.NewKey(); err != nil {
+				fatal(err)
+			}
+			fmt.Fprintf(os.Stderr, "sshr key of the account, keep it in a password manager, every device needs it for sshr sync init, join and store-key:\n  %s\n", key)
+		}
+		fmt.Print(supastore.SetupSQL(key, replaceKey))
+		fmt.Fprintln(os.Stderr, "Run the SQL above in the SQL editor of the Supabase project, then sshr sync init --backend supabase --url https://<ref>.supabase.co --key <publishable key>")
 	case "store-key":
 		if err := sf.replaceKey(c); err != nil {
 			fatal(err)

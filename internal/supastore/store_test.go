@@ -264,10 +264,13 @@ func TestCheckKeyAndAddress(t *testing.T) {
 
 // the setup SQL holds the hash of the key and never the key
 func TestSetupSQL(t *testing.T) {
-	sql := SetupSQL(testKey)
+	sql := SetupSQL(testKey, false)
 	sum := sha256.Sum256([]byte(testKey))
 	if strings.Contains(sql, testKey) || !strings.Contains(sql, `'\x`+hex.EncodeToString(sum[:])+`'`) || strings.Contains(sql, "{{") {
 		t.Errorf("setup SQL does not carry the hash alone")
+	}
+	if r := SetupSQL(testKey, true); !strings.Contains(r, "delete from sshr.keys;\ninsert into sshr.keys") || strings.Contains(sql, "delete from sshr.keys") {
+		t.Error("only the replace SQL drops the old keys")
 	}
 	k, err := NewKey()
 	if err != nil || !keyRe.MatchString(k) {

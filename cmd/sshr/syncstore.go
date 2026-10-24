@@ -10,18 +10,22 @@ import (
 	"sshr.dev/internal/app"
 	"sshr.dev/internal/davstore"
 	"sshr.dev/internal/s3store"
+	"sshr.dev/internal/supastore"
 	"sshr.dev/internal/syncclient"
 )
 
 // storeFlags are the flags of sshr sync init and join that put the account
-// in a bucket or a WebDAV folder instead of on sshr-sync
+// in a bucket, a WebDAV folder or a Supabase project instead of on
+// sshr-sync, --url names the folder or the project
 type storeFlags struct {
 	backend string
 	s3      s3store.Config
 	dav     davstore.Config
-	// given says that one of them was on the command line, s3Given and
-	// davGiven that one of the S3 or of the WebDAV ones was
-	given, s3Given, davGiven bool
+	// sbKey is the publishable key of a Supabase project
+	sbKey string
+	// given says that one of them was on the command line, s3Given,
+	// davGiven (--url or --user) and keyGiven (--key) which ones
+	given, s3Given, davGiven, keyGiven bool
 }
 
 // flagValue is the value after the flag at args[i], a missing one or the
@@ -52,6 +56,8 @@ func (f *storeFlags) take(args []string, i *int) (bool, error) {
 		f.s3Given = true
 	case dav[a] != nil:
 		dst, f.davGiven = dav[a], true
+	case a == "--key":
+		dst, f.keyGiven = &f.sbKey, true
 	default:
 		return false, nil
 	}
@@ -106,23 +112,34 @@ func (f *storeFlags) setup(c *syncclient.Client, server string) (string, error) 
 			return "", errors.New("--endpoint, --bucket, --prefix, --region and --key-id need --backend s3")
 		}
 		if f.davGiven {
-			return "", errors.New("--url and --user need --backend webdav")
+			return "", errors.New("--url and --user need --backend webdav or supabase")
+		}
+		if f.keyGiven {
+			return "", errors.New("--key needs --backend supabase")
 		}
 		return server, nil
 	case "s3":
-		if f.davGiven {
-			return "", errors.New("--url and --user are for --backend webdav")
+		if f.davGiven || f.keyGiven {
+			return "", errors.New("--url, --user and --key are for --backend webdav or supabase")
 		}
 	case "webdav":
-		if f.s3Given {
-			return "", errors.New("--endpoint, --bucket, --prefix, --region and --key-id are for --backend s3")
+		if f.s3Given || f.keyGiven {
+			return "", errors.New("--endpoint, --bucket, --prefix, --region, --key-id and --key are for --backend s3 or supabase")
 		}
 		if server != "" {
 			return "", errors.New("--server is for sshr-sync, a WebDAV account takes --url and --user")
 		}
 		return f.setupDAV(c)
+	case "supabase":
+		if f.s3Given || f.dav.User != "" {
+			return "", errors.New("a Supabase account takes --url and --key, not the S3 flags or --user")
+		}
+		if server != "" {
+			return "", errors.New("--server is for sshr-sync, a Supabase account takes --url and --key")
+		}
+		return f.setupSupabase(c)
 	default:
-		return "", fmt.Errorf("unknown sync backend %q, there are s3 and webdav", f.backend)
+		return "", fmt.Errorf("unknown sync backend %q, there are s3, webdav and supabase", f.backend)
 	}
 	if server != "" {
 		return "", errors.New("--server is for sshr-sync, an S3 account takes --endpoint and --bucket")
@@ -184,10 +201,62 @@ func (f *storeFlags) setupDAV(c *syncclient.Client) (string, error) {
 	return "webdav " + f.dav.URL, nil
 }
 
+// supabaseKey is the sshr key of a Supabase account, from
+// SSHR_SUPABASE_KEY or asked on the terminal, sshr sync supabase-sql makes
+// it, it never goes on the command line
+func supabaseKey() (string, error) {
+	if s := os.Getenv("SSHR_SUPABASE_KEY"); s != "" {
+		return s, nil
+	}
+	s, err := app.AskTerminal("sshr key of the Supabase account (from sshr sync supabase-sql): ")
+	if err != nil {
+		return "", fmt.Errorf("no sshr key, set SSHR_SUPABASE_KEY or run in a terminal: %v", err)
+	}
+	if s == "" {
+		return "", errors.New("no sshr key")
+	}
+	return strings.TrimSpace(s), nil
+}
+
+// setupSupabase opens the Supabase project of the flags, checks that the
+// functions of the SQL answer to the key and refuse a second create, and
+// returns the address the state keeps
+func (f *storeFlags) setupSupabase(c *syncclient.Client) (string, error) {
+	cfg := supastore.Config{URL: f.dav.URL, Key: f.sbKey}
+	if cfg.URL == "" || cfg.Key == "" {
+		return "", errors.New("a Supabase account needs --url https://<ref>.supabase.co --key <publishable key>")
+	}
+	if err := syncclient.CheckStoreURL("Supabase address", cfg.URL); err != nil {
+		return "", err
+	}
+	if err := supastore.CheckKey(cfg.Key); err != nil {
+		return "", err
+	}
+	secret, err := supabaseKey()
+	if err != nil {
+		return "", err
+	}
+	store, err := supastore.New(cfg, secret, nil)
+	if err != nil {
+		return "", err
+	}
+	if err := syncclient.ProbeCreate(store); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+	c.Backend = syncclient.ObjectBackend{Store: store}
+	c.BackendRef = &syncclient.BackendRef{Kind: "supabase", Config: raw}
+	c.StoreSecret = secret
+	return "supabase " + cfg.URL, nil
+}
+
 // replaceKey puts a new key of the bucket of this account into the state
 // and the keychain, only --key-id may change, the bucket stays
 func (f *storeFlags) replaceKey(c *syncclient.Client) error {
-	if f.backend != "" || f.s3.Endpoint != "" || f.s3.Bucket != "" || f.s3.Prefix != "" || f.s3.Region != "" || f.dav.URL != "" {
+	if f.backend != "" || f.s3.Endpoint != "" || f.s3.Bucket != "" || f.s3.Prefix != "" || f.s3.Region != "" || f.dav.URL != "" || f.keyGiven {
 		return errors.New("sshr sync store-key takes only --key-id for a bucket or --user for WebDAV, the place of the account stays")
 	}
 	ref, err := c.StoreRef()
@@ -200,6 +269,8 @@ func (f *storeFlags) replaceKey(c *syncclient.Client) error {
 	switch ref.Kind {
 	case "webdav":
 		return f.replaceDAVPassword(c, *ref)
+	case "supabase":
+		return f.replaceSupabaseKey(c, *ref)
 	case "s3":
 	default:
 		return fmt.Errorf("this sshr cannot open a sync store of kind %q", ref.Kind)
@@ -264,6 +335,31 @@ func (f *storeFlags) replaceDAVPassword(c *syncclient.Client, ref syncclient.Bac
 	return c.ReplaceStoreKey(ref, syncclient.BackendRef{Kind: "webdav", Config: raw}, secret, syncclient.ObjectBackend{Store: store})
 }
 
+// replaceSupabaseKey puts a new sshr key of the Supabase account into the
+// keychain, sshr sync supabase-sql --replace made it and its SQL put its
+// hash in place of the old one
+func (f *storeFlags) replaceSupabaseKey(c *syncclient.Client, ref syncclient.BackendRef) error {
+	if f.s3Given || f.davGiven {
+		return errors.New("sshr sync store-key of a Supabase account takes no flags, the new key comes from SSHR_SUPABASE_KEY or a prompt")
+	}
+	var cfg supastore.Config
+	if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+		return fmt.Errorf("the Supabase settings in the sync state: %v", err)
+	}
+	secret, err := supabaseKey()
+	if err != nil {
+		return err
+	}
+	store, err := supastore.New(cfg, secret, nil)
+	if err != nil {
+		return err
+	}
+	if err := syncclient.ProbeCreate(store); err != nil {
+		return err
+	}
+	return c.ReplaceStoreKey(ref, ref, secret, syncclient.ObjectBackend{Store: store})
+}
+
 // s3Address names the bucket in the status, it is not dialed
 func s3Address(cfg s3store.Config) string {
 	return "s3 " + strings.TrimRight(cfg.Endpoint, "/") + " " + strings.Trim(cfg.Bucket+"/"+cfg.Prefix, "/")
@@ -271,6 +367,17 @@ func s3Address(cfg s3store.Config) string {
 
 // openStore opens the store a sync state names on later runs
 func openStore(ref syncclient.BackendRef, secret string) (syncclient.Backend, error) {
+	if ref.Kind == "supabase" {
+		var cfg supastore.Config
+		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+			return nil, fmt.Errorf("the Supabase settings in the sync state: %v", err)
+		}
+		store, err := supastore.New(cfg, secret, nil)
+		if err != nil {
+			return nil, err
+		}
+		return syncclient.ObjectBackend{Store: store}, nil
+	}
 	if ref.Kind == "webdav" {
 		var cfg davstore.Config
 		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
@@ -308,6 +415,14 @@ func joinFlags(server string, ref *syncclient.BackendRef) (string, error) {
 			return "", fmt.Errorf("the WebDAV settings in the sync state: %v", err)
 		}
 		return "--backend webdav --url " + shellQuote(cfg.URL) + " --user " + shellQuote(cfg.User), nil
+	}
+	if ref.Kind == "supabase" {
+		var cfg supastore.Config
+		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+			return "", fmt.Errorf("the Supabase settings in the sync state: %v", err)
+		}
+		// the publishable key is public by design, the sshr key travels apart
+		return "--backend supabase --url " + shellQuote(cfg.URL) + " --key " + shellQuote(cfg.Key), nil
 	}
 	if ref.Kind != "s3" {
 		return "", fmt.Errorf("this sshr cannot open a sync store of kind %q", ref.Kind)
