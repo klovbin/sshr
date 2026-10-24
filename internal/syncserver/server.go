@@ -703,16 +703,24 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		}
 		live[e.Hash] = true
 	}
+	if m.Claim != 0 && m.Claim == m.Counter {
+		// when the recovery kit claimed the account, the hand-over waits
+		// from here, written before the claim stands, a claim whose time
+		// is lost could never be handed over
+		err := os.MkdirAll(filepath.Join(dir, "claims"), 0o700)
+		if err == nil {
+			err = writeFile(filepath.Join(dir, "claims", strconv.FormatUint(m.Counter, 10)), []byte(strconv.FormatInt(s.now().Unix(), 10)))
+		}
+		if err != nil {
+			fail(w, http.StatusInternalServerError, "the time of the claim could not be kept: "+err.Error())
+			return
+		}
+	}
 	if err := writeFile(filepath.Join(dir, "manifests", fmt.Sprintf("%d.json", m.Counter)), data); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if m.Claim != 0 && m.Claim == m.Counter {
-		// when the recovery kit claimed the account, the hand-over waits
-		// from here
-		os.MkdirAll(filepath.Join(dir, "claims"), 0o700)
-		writeFile(filepath.Join(dir, "claims", strconv.FormatUint(m.Counter, 10)), []byte(strconv.FormatInt(s.now().Unix(), 10)))
-	}
+
 	s.collect(a, live)
 	w.Header().Set("ETag", strconv.FormatUint(m.Counter, 10))
 	w.WriteHeader(http.StatusNoContent)

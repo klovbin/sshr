@@ -333,3 +333,25 @@ func TestKitIsNoPrimaryTarget(t *testing.T) {
 		t.Fatalf("handed the role to the kit device: %v", err)
 	}
 }
+
+// TestClaimTimeKeptFirst checks that sshr-sync refuses a claim whose time
+// it cannot keep, the claim would stand but never be handed over (#306)
+func TestClaimTimeKeptFirst(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	kit, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	claims := filepath.Join(filepath.Dir(w.manifestDir()), "claims")
+	must(t, os.WriteFile(claims, []byte("not a folder"), 0o600))
+	n := w.client("n-")
+	if _, err := n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass); err == nil {
+		t.Fatal("the claim stood without its time")
+	}
+	must(t, w.a.Pull())
+	if w.a.st.Claim != 0 {
+		t.Fatal("the claim is in the account without its time")
+	}
+	must(t, os.Remove(claims))
+	_, err = n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass)
+	must(t, err)
+}
