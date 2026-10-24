@@ -116,7 +116,7 @@ func TestNoBareSSH(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, bad := range []string{`exec.Command("ssh"`, `exec.CommandContext(ctx, "ssh"`, `LookPath("ssh")`} {
+			for _, bad := range []string{`exec.Command("ssh"`, `exec.CommandContext(ctx, "ssh"`, `LookPath("ssh")`, `exec.Command("ssh-keygen"`} {
 				if strings.Contains(string(b), bad) && !strings.HasSuffix(f, "sshbin.go") {
 					t.Errorf("%s starts ssh by name (%s), use sshCommand or SSHPath", f, bad)
 				}
@@ -215,5 +215,22 @@ func TestPickSCP(t *testing.T) {
 	}
 	if _, err := pickSCP("windows", sys, `C:\Windows\System32\OpenSSH\ssh.exe`, none, look); err == nil {
 		t.Error("SSHR_SSH without scp on Windows took the scp on PATH")
+	}
+}
+
+// TestPickKeygen checks that ssh-keygen comes from the install of the
+// chosen ssh on Windows, the one of Git for Windows has no FIDO (#341)
+func TestPickKeygen(t *testing.T) {
+	sys := func() (string, error) { return `C:\Windows\System32\OpenSSH\ssh.exe`, nil }
+	gitKeygen := func(string) (string, error) { return `C:\Program Files\Git\usr\bin\ssh-keygen.exe`, nil }
+	next := func(p string) bool { return p == `C:\Windows\System32\OpenSSH\ssh-keygen.exe` }
+	if got, err := pickTool("ssh-keygen", "windows", sys, "", next, gitKeygen); err != nil || got != `C:\Windows\System32\OpenSSH\ssh-keygen.exe` {
+		t.Errorf("windows: %q %v", got, err)
+	}
+	if _, err := pickTool("ssh-keygen", "windows", sys, "", func(string) bool { return false }, gitKeygen); err == nil || !strings.Contains(err.Error(), "no ssh-keygen.exe next to") {
+		t.Errorf("windows without one next to ssh: %v", err)
+	}
+	if got, err := pickTool("ssh-keygen", "linux", sys, "", next, func(string) (string, error) { return "/usr/bin/ssh-keygen", nil }); err != nil || got != "/usr/bin/ssh-keygen" {
+		t.Errorf("linux: %q %v", got, err)
 	}
 }

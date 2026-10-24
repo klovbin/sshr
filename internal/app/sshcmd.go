@@ -40,6 +40,7 @@ func MoshStartFailed(code int, elapsed time.Duration) bool {
 func ReadPublicKey(path string) (string, error) { return sshcmd.ReadPublicKey(path) }
 func RunAskpass(prompt string) int              { return sshcmd.RunAskpass(prompt) }
 func SCPPath() (string, error)                  { return sshcmd.SCPPath() }
+func KeygenPath() (string, error)               { return sshcmd.KeygenPath() }
 func SessionCommand(kind string) string         { return sshcmd.SessionCommand(kind) }
 func SessionScript(kind string) string          { return sshcmd.SessionScript(kind) }
 func SSHArgs(h *Host) []string                  { return sshcmd.SSHArgs(h) }

@@ -68,10 +68,26 @@ func SCPPath() (string, error) {
 	return pickSCP(runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileExists, exec.LookPath)
 }
 
+// KeygenPath is the ssh-keygen to run, on Windows (and with SSHR_SSH) the
+// one next to the chosen ssh, the ssh-keygen of Git for Windows that PATH
+// often finds first has no FIDO support, so a key on a token needs the
+// one of the OpenSSH sshr connects with
+func KeygenPath() (string, error) {
+	return pickTool("ssh-keygen", runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileExists, exec.LookPath)
+}
+
 // pickSCP chooses scp, on Windows (and with SSHR_SSH) scp gets -S with the
 // chosen ssh, an scp of another install would drive an ssh it was not
 // built with, so Windows refuses when none sits next to the chosen ssh
 func pickSCP(goos string, sshPath func() (string, error), own string, exists func(string) bool,
+	look func(string) (string, error)) (string, error) {
+	return pickTool("scp", goos, sshPath, own, exists, look)
+}
+
+// pickTool chooses a program of OpenSSH (scp, ssh-keygen), the one next
+// to the chosen ssh on Windows and with SSHR_SSH, Windows refuses when
+// none sits there, elsewhere the one on PATH
+func pickTool(name, goos string, sshPath func() (string, error), own string, exists func(string) bool,
 	look func(string) (string, error)) (string, error) {
 	if goos == "windows" || own != "" {
 		ssh, err := sshPath()
@@ -81,19 +97,19 @@ func pickSCP(goos string, sshPath func() (string, error), own string, exists fun
 		}
 		if err == nil {
 			i := strings.LastIndexAny(ssh, `\/`)
-			for _, name := range []string{"scp.exe", "scp"} {
-				if scp := ssh[:i+1] + name; i >= 0 && exists(scp) {
-					return scp, nil
+			for _, file := range []string{name + ".exe", name} {
+				if p := ssh[:i+1] + file; i >= 0 && exists(p) {
+					return p, nil
 				}
 			}
 			if goos == "windows" {
-				return "", fmt.Errorf("no scp.exe next to %s, install the OpenSSH client of Windows or name an ssh with SSHR_SSH", ssh)
+				return "", fmt.Errorf("no %s.exe next to %s, install the OpenSSH client of Windows or name an ssh with SSHR_SSH", name, ssh)
 			}
 		}
 	}
-	p, err := look("scp")
+	p, err := look(name)
 	if err != nil {
-		return "", errors.New("scp not found in PATH, it comes with OpenSSH")
+		return "", fmt.Errorf("%s not found in PATH, it comes with OpenSSH", name)
 	}
 	return p, nil
 }

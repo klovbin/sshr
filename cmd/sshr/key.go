@@ -80,7 +80,11 @@ func cmdKeyNew(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	cmd := exec.Command("ssh-keygen", kargs...)
+	keygen, err := app.KeygenPath()
+	if err != nil {
+		fatal(err)
+	}
+	cmd := exec.Command(keygen, kargs...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fatal(fmt.Errorf("ssh-keygen: %v", err))
@@ -123,7 +127,11 @@ func makeSKKey(path, comment string, resident, verify, noPass bool, run func(arg
 // runKeygen runs ssh-keygen with the terminal of the user, it asks for the
 // touch and the PIN
 func runKeygen(args []string, w io.Writer) error {
-	cmd := exec.Command("ssh-keygen", args...)
+	keygen, err := app.KeygenPath()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(keygen, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, w
 	return cmd.Run()
 }
