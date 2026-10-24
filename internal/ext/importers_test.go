@@ -2,6 +2,7 @@ package ext
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -286,16 +287,26 @@ func TestPuttyWindowsImporter(t *testing.T) {
 		`"Protocol"="telnet"` + "\r\n\r\n" +
 		`[HKEY_CURRENT_USER\Software\Other]` + "\r\n" +
 		`"HostName"="other.example"` + "\r\n"
-	utf16 := []byte{0xff, 0xfe}
-	for _, r := range reg {
-		utf16 = append(utf16, byte(r), byte(r>>8))
-	}
-	file := filepath.Join(t.TempDir(), "putty.reg")
-	if err := os.WriteFile(file, utf16, 0o600); err != nil {
-		t.Fatal(err)
+	// a second file, every file given is read (#319)
+	second := "Windows Registry Editor Version 5.00\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\work]` + "\r\n" +
+		`"HostName"="work.example"` + "\r\n"
+	tmp := t.TempDir()
+	var files []string
+	for i, text := range []string{reg, second} {
+		utf16 := []byte{0xff, 0xfe}
+		for _, r := range text {
+			utf16 = append(utf16, byte(r), byte(r>>8))
+		}
+		file := filepath.Join(tmp, fmt.Sprintf("putty%d.reg", i))
+		if err := os.WriteFile(file, utf16, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, file)
 	}
 	dir := filepath.Join(extensionsDir, "putty")
-	cmd := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "putty.ps1"), file)
+	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "putty.ps1")}, files...)
+	cmd := exec.Command(pwsh, args...)
 	cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
 	var notes bytes.Buffer
 	cmd.Stderr = &notes
@@ -304,7 +315,7 @@ func TestPuttyWindowsImporter(t *testing.T) {
 		t.Fatalf("%v: %s", err, notes.String())
 	}
 	hosts, warnings, err := ParseImport(out)
-	if err != nil || len(warnings) > 0 || len(hosts) != 2 {
+	if err != nil || len(warnings) > 0 || len(hosts) != 3 || hosts[2].Host != "work.example" {
 		t.Fatalf("printed %s: %v %v", out, err, warnings)
 	}
 	web, db := hosts[0], hosts[1]

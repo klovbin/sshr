@@ -8,7 +8,9 @@
 # key, so it is left out with a note, an SSH proxy (ProxyMethod 6) becomes
 # a jump host, other proxies are not carried, the rules are the ones of
 # putty.sh, so a session gives the same host on every system
-param([string[]]$Files)
+# every argument is a file, without ValueFromRemainingArguments only the
+# first one is bound
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Files)
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
