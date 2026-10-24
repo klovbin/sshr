@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"sshr.dev/internal/hosts"
 
@@ -147,7 +148,18 @@ func (s *Store) Update(id string, in Host) (*Host, error) { return s.db().Update
 func (s *Store) Import(in Host) (*Host, error) { return s.db().Import(in) }
 
 // Delete removes a host
-func (s *Store) Delete(id string) error { return s.db().Delete(id) }
+func (s *Store) Delete(id string) error {
+	if err := s.db().Delete(id); err != nil {
+		return err
+	}
+	// a removed host leaves the hardware key list, the ID is never used
+	// again, a list with dead IDs hides which hosts it still holds
+	if st, err := LoadSettings(); err == nil && slices.Contains(st.HardwareKeyHosts, id) {
+		st.ReleaseHardwareKey(id)
+		return SaveSettings(st)
+	}
+	return nil
+}
 
 // Duplicate saves a copy of a host under another name
 func (s *Store) Duplicate(id, name string) (*Host, error) { return s.db().Duplicate(id, name) }
