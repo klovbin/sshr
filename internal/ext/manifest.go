@@ -11,6 +11,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Protocol is the version of what sshr and an extension say to each other,
@@ -63,6 +64,14 @@ func ParseManifest(data []byte) (Manifest, error) {
 	if len(m.Description) > 200 {
 		return Manifest{}, fmt.Errorf("%s: description is longer than 200 characters", ManifestFile)
 	}
+	// the install screen prints these before the yes, a control character
+	// could rewrite the lines the user reads
+	if err := printable("version", m.Version); err != nil {
+		return Manifest{}, fmt.Errorf("%s: %v", ManifestFile, err)
+	}
+	if err := printable("description", m.Description); err != nil {
+		return Manifest{}, fmt.Errorf("%s: %v", ManifestFile, err)
+	}
 	if len(m.Kinds) == 0 {
 		return Manifest{}, fmt.Errorf("%s: kinds is empty, use %q or %q", ManifestFile, KindCommand, KindImport)
 	}
@@ -78,8 +87,24 @@ func ParseManifest(data []byte) (Manifest, error) {
 		if err := checkArgv(argv); err != nil {
 			return Manifest{}, fmt.Errorf("%s: command for %s: %v", ManifestFile, goos, err)
 		}
+		for _, a := range argv {
+			if err := printable("a command argument", a); err != nil {
+				return Manifest{}, fmt.Errorf("%s: command for %s: %v", ManifestFile, goos, err)
+			}
+		}
 	}
 	return m, nil
+}
+
+// printable refuses control, line separator and bidi characters in a field
+// the install screen shows
+func printable(what, s string) error {
+	for _, r := range s {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.In(r, unicode.Bidi_Control) {
+			return fmt.Errorf("%s holds the control character %U", what, r)
+		}
+	}
+	return nil
 }
 
 // CheckName tells whether name can be the name of an extension, it becomes

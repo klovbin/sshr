@@ -125,14 +125,14 @@ func extInstall(reg *ext.Registry, args []string) {
 	} else {
 		fmt.Printf("  runs:   nothing on %s, it has no command for this system\n", runtime.GOOS)
 	}
-	from := st.Lock.Source
+	from := ext.CleanText(st.Lock.Source, 300)
 	if st.Lock.Commit != "" {
 		from += " at " + st.Lock.Commit
 	}
 	fmt.Printf("  from:   %s\n", from)
 	fmt.Printf("  files:  %d, hash %s\n", st.Files, st.Lock.Tree[:16])
 	if old, err := reg.Find(st.Name); err == nil {
-		fmt.Printf("  it replaces version %s, installed from %s\n", old.Version, old.Lock.Source)
+		fmt.Printf("  it replaces version %s, installed from %s\n", old.Version, ext.CleanText(old.Lock.Source, 300))
 	}
 	if fromCatalog {
 		fmt.Printf("  author: %s (catalog %s)\n", entry.Author, catalogURL())

@@ -57,3 +57,21 @@ func TestArgvWithoutCommandForTheSystem(t *testing.T) {
 		t.Error("an extension with a command for linux only has one for windows")
 	}
 }
+
+// a field the install screen prints cannot carry a control character that
+// rewrites what the user reads (#259)
+func TestManifestRefusesControlCharacters(t *testing.T) {
+	for _, m := range []string{
+		`{"protocol":1,"name":"x","version":"1\u001b[1A","description":"d","kinds":["command"],"command":{"default":["run"]}}`,
+		`{"protocol":1,"name":"x","version":"1","description":"safe\rruns: nothing","kinds":["command"],"command":{"default":["run"]}}`,
+		`{"protocol":1,"name":"x","version":"1","description":"d","kinds":["command"],"command":{"default":["run","\u009b2K"]}}`,
+		`{"protocol":1,"name":"x","version":"1","description":"d\u202e","kinds":["command"],"command":{"default":["run"]}}`,
+	} {
+		if _, err := ParseManifest([]byte(m)); err == nil || !strings.Contains(err.Error(), "control character") {
+			t.Errorf("%s: %v", m, err)
+		}
+	}
+	if _, err := ParseManifest([]byte(`{"protocol":1,"name":"x","version":"1.0-β","description":"says hi, привет","kinds":["command"],"command":{"default":["run","--name=a b"]}}`)); err != nil {
+		t.Errorf("a plain manifest: %v", err)
+	}
+}

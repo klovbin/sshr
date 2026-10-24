@@ -150,6 +150,10 @@ func checkEntry(e Entry) error {
 	return nil
 }
 
+// CleanText is clean for text sshr prints that came from elsewhere, a
+// recorded source of an extension
+func CleanText(s string, max int) string { return clean(s, max) }
+
 // clean drops control characters and cuts s at max runes, text from a
 // catalog must not move the cursor or change the terminal
 func clean(s string, max int) string {
