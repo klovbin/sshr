@@ -170,6 +170,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the shell survives network changes and typing echoes at once
 - **Why this way:** off by default, it needs UDP ports and mosh-server, carries no forwards and has no Windows client
 
+### Local commands before and after connect
+- **What:** `sshr hooks set <host> before|after <command>` runs a command on this machine before ssh starts and after the session ends
+- **What for:** a host behind an office VPN or a key that needs unlocking, without typing the same command before every connect
+- **Why it helps:** a failing command before stops the connect instead of a long ssh timeout, the command after gets the exit code of the session in `SSHR_EXIT` and can take the VPN down again
+- **Why this way:** off until `sshr hooks on` or `connect --local-commands` since they run as the user, the commands live in settings.json, which never syncs, and nothing but `sshr hooks` writes them, so no other device, import, assistant or extension can put a command on this machine
+
 ### Health check
 - **What:** a TCP connect and the SSH banner with the round trip, in `sshr ping`, `list --ping` and a dot in the app, off by default
 - **What for:** know which servers are down before waiting on an ssh timeout

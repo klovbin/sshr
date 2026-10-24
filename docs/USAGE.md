@@ -163,6 +163,17 @@ The spec is what ssh takes after `-L`, `-R`, `-D`, checked on save, `tunnel` use
 
 `--mosh` / `--ssh` per call or `"mosh": true`: survives network changes and sleep, echoes typing at once, off by default: needs `mosh` here and `mosh-server` plus open UDP 60000-61000 there, no port or agent forwarding, no scrollback without tmux, no terminal images, no Windows client, falls back to ssh when mosh is missing, fails within 20 s, or an ssh option has spaces
 
+## Commands before and after connect
+
+```sh
+sshr hooks set web before "wg-quick up office"
+sshr hooks set web after "wg-quick down office"
+sshr hooks on
+sshr connect web
+```
+
+The command before runs before ssh starts, if it fails sshr does not connect, the command after runs when the session ends, also after an error, the exit code of the session is in `SSHR_EXIT`. Both run through `sh -c` (`cmd /C` on Windows) on this machine with `SSHR_HOST_NAME`, `SSHR_HOST`, `SSHR_PORT`, `SSHR_USER` and `SSHR_HOST_ID` set. They are off until `sshr hooks on` (`local_commands` in `~/.sshr/settings.json`), `connect --local-commands` and `--no-local-commands` decide for one run, a connect with commands that are off says so. `sshr hooks list` shows them, `sshr hooks unset web [before|after]` removes them, `sshr rm` removes them with the host. They stay on this machine: settings never sync and only `sshr hooks` writes them.
+
 ## Health check
 
 ```sh

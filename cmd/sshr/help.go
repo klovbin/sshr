@@ -96,6 +96,9 @@ Examples:
   --ssh              plain ssh even when mosh is on in the settings
   --plain            skip the tmux or zellij session of the host
   -F <forward>|all   also open saved forwards
+  --local-commands   run the commands of sshr hooks for this host, also on
+                     when local_commands is on in the settings
+  --no-local-commands  do not run them even when the setting is on
 
 A destination that is not saved works too: user@host[:port] or
 ssh://user@host[:port] connects once with the default keys, the agent or a
@@ -237,6 +240,23 @@ setting, --listed-hosts-only and --all-hosts for one run). allow lists a
 host for where it points now, a host that points elsewhere later, for
 example changed on another device, is refused until it is allowed again.
 The list is in settings.json and never syncs`},
+	{name: "hooks", usage: `sshr hooks list
+sshr hooks on|off
+sshr hooks set <host> before|after <command>
+sshr hooks unset <host> [before|after]`, short: "commands to run on this machine around a session",
+		details: `A command before runs before ssh starts, to bring a VPN up or unlock a
+key, if it fails sshr does not connect, a command after runs when the
+session ends and gets its exit code in SSHR_EXIT. Both run through the
+shell of this machine with SSHR_HOST_NAME, SSHR_HOST, SSHR_PORT, SSHR_USER
+and SSHR_HOST_ID set. They are off until sshr hooks on (local_commands
+setting, connect --local-commands for one run). They live in settings.json,
+which never syncs, no import, sshr serve, sshr mcp or extension sets them,
+so a command never comes from another machine
+
+Examples:
+  sshr hooks set web before "wg-quick up office"
+  sshr hooks set web after "wg-quick down office"
+  sshr hooks on`},
 	{name: "vault", usage: "sshr vault status|passphrase|keychain", short: "keep the vault key in the keychain or under a passphrase",
 		details: `The vault key seals saved passwords and keys stored in sshr. It lives in
 the system keychain, passphrase moves a copy into ~/.sshr/vault/vault-key.json

@@ -107,7 +107,7 @@ func TestCloneSettingsCoversEveryList(t *testing.T) {
 		if !f.IsExported() {
 			continue
 		}
-		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" {
+		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" && f.Name != "HostCommands" {
 			t.Errorf("Settings.%s is a %s, copy it in cloneSettings and list it here", f.Name, k)
 		}
 	}

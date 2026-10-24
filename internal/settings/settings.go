@@ -106,6 +106,14 @@ type Settings struct {
 	// name refuse while it is off, off by default: nobody reviews the code
 	// of a catalog extension and it runs as the user
 	ExtCommunity bool `json:"ext_community,omitempty"`
+	// LocalCommands runs the commands of HostCommands before and after
+	// sshr connect, off by default: they run on this machine as the user,
+	// connect --local-commands and --no-local-commands decide for one run
+	LocalCommands bool `json:"local_commands,omitempty"`
+	// HostCommands are the commands to run on this machine around a
+	// session, by host ID, settings never sync and no import, REST, MCP or
+	// extension writes them, so a command never comes from elsewhere
+	HostCommands map[string]HostCommand `json:"host_commands,omitempty"`
 
 	// base is the file as Load read it, Save writes only
 	// the fields that differ from it, copies of the value share it
@@ -178,7 +186,39 @@ func cloneSettings(s Settings) Settings {
 			c.CommandHosts[k] = v
 		}
 	}
+	if s.HostCommands != nil {
+		c.HostCommands = make(map[string]HostCommand, len(s.HostCommands))
+		for k, v := range s.HostCommands {
+			c.HostCommands[k] = v
+		}
+	}
 	return c
+}
+
+// HostCommand is what runs on this machine around a session to one host,
+// Before before ssh starts (a VPN up, a key unlocked), a failure stops the
+// connect, After when the session ended, with its exit code
+type HostCommand struct {
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
+// SetHostCommand sets one command of host id, an empty one removes it
+func (s *Settings) SetHostCommand(id, when, command string) {
+	c := s.HostCommands[id]
+	if when == "before" {
+		c.Before = command
+	} else {
+		c.After = command
+	}
+	if c == (HostCommand{}) {
+		delete(s.HostCommands, id)
+		return
+	}
+	if s.HostCommands == nil {
+		s.HostCommands = map[string]HostCommand{}
+	}
+	s.HostCommands[id] = c
 }
 
 func readSettings() (Settings, error) {
