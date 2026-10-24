@@ -13,10 +13,16 @@
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Files)
 
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+# the output goes to the standard streams as UTF-8 directly, setting
+# [Console]::OutputEncoding throws without a console on PowerShell 5.1
+# and leaves the code page of the user's console changed
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$stdout = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
+$stderr = New-Object System.IO.StreamWriter([Console]::OpenStandardError(), $utf8)
+$stderr.AutoFlush = $true
 
 if ($env:SSHR_EXT_PROTOCOL -ne '1') {
-	[Console]::Error.WriteLine('putty: run me with sshr ext import putty, not by hand')
+	$stderr.WriteLine('putty: run me with sshr ext import putty, not by hand')
 	exit 2
 }
 
@@ -86,11 +92,11 @@ $sessions = [ordered]@{}
 if ($Files) {
 	foreach ($f in $Files) {
 		if (-not (Test-Path -LiteralPath $f -PathType Leaf)) {
-			[Console]::Error.WriteLine("putty: $(Clean $f) is not a file")
+			$stderr.WriteLine("putty: $(Clean $f) is not a file")
 			exit 1
 		}
 		if ((Get-Item -LiteralPath $f).Length -gt 4MB) {
-			[Console]::Error.WriteLine("putty: $(Clean $f) is over 4 MiB, it is skipped")
+			$stderr.WriteLine("putty: $(Clean $f) is over 4 MiB, it is skipped")
 			continue
 		}
 		$cur = $null
@@ -141,7 +147,7 @@ foreach ($name in $sessions.Keys) {
 	if ($user -ne '') { $h.user = $user }
 	$keyFile = Clean "$($v['PublicKeyFile'])"
 	if ($keyFile -match '\.ppk$') {
-		[Console]::Error.WriteLine("putty: $($h.name): the key $keyFile is a PuTTY key, convert it with puttygen key.ppk -O private-openssh -o key and set it in sshr")
+		$stderr.WriteLine("putty: $($h.name): the key $keyFile is a PuTTY key, convert it with puttygen key.ppk -O private-openssh -o key and set it in sshr")
 	} elseif ($keyFile -ne '') {
 		$h.key_file = $keyFile
 	}
@@ -151,9 +157,10 @@ foreach ($name in $sessions.Keys) {
 		if ((OkPort $v['ProxyPort']) -and [int]$v['ProxyPort'] -ne 22) { $jump = $jump + ':' + [int]$v['ProxyPort'] }
 		$h.jump = $jump
 	} elseif ("$($v['ProxyMethod'])" -ne '' -and "$($v['ProxyMethod'])" -ne '0') {
-		[Console]::Error.WriteLine("putty: $($h.name): its proxy (ProxyMethod $(Clean "$($v['ProxyMethod'])")) is not carried, sshr goes direct or through jump hosts")
+		$stderr.WriteLine("putty: $($h.name): its proxy (ProxyMethod $(Clean "$($v['ProxyMethod'])")) is not carried, sshr goes direct or through jump hosts")
 	}
 	[void]$hosts.Add($h)
 }
 
-ConvertTo-Json -InputObject ([ordered]@{ hosts = $hosts }) -Depth 4 -Compress
+$stdout.WriteLine((ConvertTo-Json -InputObject ([ordered]@{ hosts = $hosts }) -Depth 4 -Compress))
+$stdout.Flush()
