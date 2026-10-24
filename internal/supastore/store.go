@@ -51,6 +51,10 @@ const (
 	listPage = 1000
 	// errorMax bounds an error answer read
 	errorMax = 64 << 10
+	// smallAnswer bounds the answer of a write or delete, it has no body
+	smallAnswer = 64 << 10
+	// listAnswer bounds a page of names, a name is at most 76 bytes
+	listAnswer = 1 << 20
 )
 
 var keyRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -134,8 +138,9 @@ func New(cfg Config, key string, client *http.Client) (*Store, error) {
 }
 
 // rpc calls one function with a POST, every call goes to the primary
-// database, a read replica never answers
-func (s *Store) rpc(fn string, args, out any) error {
+// database, a read replica never answers, an answer longer than limit is
+// ErrTooLarge and is not read further
+func (s *Store) rpc(fn string, args, out any, limit int64) error {
 	body, err := json.Marshal(args)
 	if err != nil {
 		return err
@@ -163,10 +168,17 @@ func (s *Store) rpc(fn string, args, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+		b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+		if err != nil {
+			return fmt.Errorf("Supabase %s: %w", fn, err)
+		}
+		if int64(len(b)) > limit {
+			return syncclient.ErrTooLarge
+		}
 		if out == nil {
 			return nil
 		}
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		if err := json.Unmarshal(b, out); err != nil {
 			return fmt.Errorf("Supabase %s: %v", fn, err)
 		}
 		return nil
@@ -212,7 +224,8 @@ func answerError(fn string, status int, code string) error {
 // database, a bigger object is not sent
 func (s *Store) Get(name string, max int) ([]byte, error) {
 	var b64 string
-	if err := s.rpc("sshr_get", map[string]any{"p_name": name, "p_max": max}, &b64); err != nil {
+	// base64 is 4/3 of the bytes, Postgres adds a line break every 76
+	if err := s.rpc("sshr_get", map[string]any{"p_name": name, "p_max": max}, &b64, int64(max)*3/2+4096); err != nil {
 		return nil, err
 	}
 	// encode in Postgres breaks lines, the decoder skips them
@@ -228,18 +241,18 @@ func (s *Store) Get(name string, max int) ([]byte, error) {
 
 // Put writes an object over any that is there
 func (s *Store) Put(name string, data []byte) error {
-	return s.rpc("sshr_put", map[string]any{"p_name": name, "p_data": base64.StdEncoding.EncodeToString(data)}, nil)
+	return s.rpc("sshr_put", map[string]any{"p_name": name, "p_data": base64.StdEncoding.EncodeToString(data)}, nil, smallAnswer)
 }
 
 // Create writes an object only when the name is free, the primary key of
 // the table decides between two at once, the same bytes again succeed
 func (s *Store) Create(name string, data []byte) error {
-	return s.rpc("sshr_create", map[string]any{"p_name": name, "p_data": base64.StdEncoding.EncodeToString(data)}, nil)
+	return s.rpc("sshr_create", map[string]any{"p_name": name, "p_data": base64.StdEncoding.EncodeToString(data)}, nil, smallAnswer)
 }
 
 // Delete removes an object, a missing one is no error
 func (s *Store) Delete(name string) error {
-	return s.rpc("sshr_delete", map[string]any{"p_name": name}, nil)
+	return s.rpc("sshr_delete", map[string]any{"p_name": name}, nil, smallAnswer)
 }
 
 // List names the objects under prefix, page by page
@@ -250,7 +263,7 @@ func (s *Store) List(prefix string) ([]string, error) {
 		var page []struct {
 			Name string `json:"name"`
 		}
-		if err := s.rpc("sshr_list", map[string]any{"p_prefix": prefix, "p_after": after}, &page); err != nil {
+		if err := s.rpc("sshr_list", map[string]any{"p_prefix": prefix, "p_after": after}, &page, listAnswer); err != nil {
 			return nil, err
 		}
 		for _, p := range page {

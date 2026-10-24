@@ -336,3 +336,26 @@ func TestSyncThroughSupabase(t *testing.T) {
 		t.Fatalf("hosts on b %+v", got)
 	}
 }
+
+// an answer longer than asked for is not read to the end (#270)
+func TestAnswerSizeLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`"`))
+		chunk := []byte(strings.Repeat("A", 1<<16))
+		for i := 0; i < 200; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+		w.Write([]byte(`"`))
+	}))
+	defer srv.Close()
+	s, err := New(Config{URL: srv.URL, Key: pubKey}, testKey, nil)
+	must(t, err)
+	if _, err := s.Get("blobs/x", 10); !errors.Is(err, syncclient.ErrTooLarge) {
+		t.Errorf("a long answer to a small get: %v", err)
+	}
+	if err := s.Delete("blobs/x"); !errors.Is(err, syncclient.ErrTooLarge) {
+		t.Errorf("a long answer to a delete: %v", err)
+	}
+}
