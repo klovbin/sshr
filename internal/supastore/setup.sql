@@ -100,5 +100,10 @@ grant execute on function public.sshr_get(text, int), public.sshr_put(text, text
 -- the key of this account, only its sha256 is stored, set only while the
 -- project has no key, a key change goes through --replace
 insert into sshr.keys (hash) select '\x{{KEY_HASH}}' where not exists (select 1 from sshr.keys);
+do $$ begin
+  if not exists (select 1 from sshr.keys where hash = '\x{{KEY_HASH}}') then
+    raise warning 'the project has another sshr key already, this key was not set, run sshr sync supabase-sql --replace to change it';
+  end if;
+end $$;
 
 notify pgrst, 'reload schema';

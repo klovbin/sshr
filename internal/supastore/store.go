@@ -93,7 +93,7 @@ func NewKey() (string, error) {
 // a removed device the old key must stop working
 func SetupSQL(key string, replace bool) string {
 	sum := sha256.Sum256([]byte(key))
-	sql := strings.Replace(setupSQL, "{{KEY_HASH}}", hex.EncodeToString(sum[:]), 1)
+	sql := strings.ReplaceAll(setupSQL, "{{KEY_HASH}}", hex.EncodeToString(sum[:]))
 	if replace {
 		// the new key in first, the others out after it, in one
 		// transaction, a failure leaves the old key working

@@ -30,7 +30,7 @@ import (
 // programs are not on PATH (nix shell nixpkgs#postgresql_17 nixpkgs#postgrest),
 // url is a proxy that takes /rest/v1 off as the gateway of Supabase does,
 // rest is PostgREST itself
-func realREST(t *testing.T) (url, rest, jwtSecret string, runSQL func(string)) {
+func realREST(t *testing.T) (url, rest, jwtSecret string, runSQL func(string) string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("starts PostgreSQL")
@@ -108,11 +108,15 @@ func realREST(t *testing.T) (url, rest, jwtSecret string, runSQL func(string)) {
 		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(gateway.Close)
-	runSQL = func(sql string) {
+	runSQL = func(sql string) string {
 		t.Helper()
 		f := filepath.Join(dir, "run.sql")
 		os.WriteFile(f, []byte(sql), 0o600)
-		run("psql", "-h", sock, "-p", fmt.Sprint(pgPort), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-f", f)
+		out, err := exec.Command("psql", "-h", sock, "-p", fmt.Sprint(pgPort), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-f", f).CombinedOutput()
+		if err != nil {
+			t.Fatalf("psql: %v\n%s", err, out)
+		}
+		return string(out)
 	}
 	return gateway.URL, rest, jwtSecret, runSQL
 }
@@ -322,8 +326,11 @@ func TestRealPostgresReplaceKey(t *testing.T) {
 	if _, err := old.Get("account", 10); !errors.Is(err, ErrKeyRefused) {
 		t.Errorf("the old key after a change: %v", err)
 	}
-	// an old setup SQL run again does not bring the old key back (#275)
-	runSQL(SetupSQL(testKey, false))
+	// an old setup SQL run again does not bring the old key back (#275),
+	// psql shows the warning of #280 and the script still succeeds
+	if out := runSQL(SetupSQL(testKey, false)); !strings.Contains(out, "this key was not set") {
+		t.Errorf("no warning that the key was not set: %s", out)
+	}
 	if _, err := old.Get("account", 10); !errors.Is(err, ErrKeyRefused) {
 		t.Errorf("the old key after its setup SQL ran again: %v", err)
 	}

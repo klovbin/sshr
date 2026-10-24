@@ -226,6 +226,9 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Print(supastore.SetupSQL(key, replaceKey))
 		fmt.Fprintln(os.Stderr, "Run the SQL above in the SQL editor of the Supabase project, then sshr sync init --backend supabase --url https://<ref>.supabase.co --key <publishable key>")
+		if !replaceKey {
+			fmt.Fprintln(os.Stderr, "It sets the key only in a project without one, a project with a key keeps it and the editor warns, change a key with --replace")
+		}
 	case "store-key":
 		if err := sf.replaceKey(c); err != nil {
 			fatal(err)
