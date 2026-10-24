@@ -1,0 +1,6 @@
+What it is for: run the sync backend yourself
+
+Why it helps: no vendor cloud, a small binary with a data folder
+
+Why this way: tokens are stored hashed, joins are rate limited, pushes
+are compare-and-swap so devices cannot overwrite each other
