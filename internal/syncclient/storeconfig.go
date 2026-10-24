@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"reflect"
 
@@ -192,4 +194,30 @@ func sameJSON(a, b json.RawMessage) bool {
 		return false
 	}
 	return reflect.DeepEqual(x, y)
+}
+
+// CheckStoreURL takes the HTTPS address of a store, plain HTTP only to a
+// loopback IP, the sync state can be edited and must not send the
+// requests in the clear, a user and password in the address would end up
+// in the state, what names the address in the errors
+func CheckStoreURL(what, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		// the address is not repeated, it may hold a password
+		return fmt.Errorf("bad %s, it has to look like https://host[:port][/path]", what)
+	}
+	if u.User != nil {
+		return fmt.Errorf("the %s must not carry a user or password, they go apart", what)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		// a loopback address, not the name localhost, a resolver may send
+		// that name elsewhere
+		if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+	}
+	return fmt.Errorf("the %s has to be https://, plain http only to this machine: %s", what, u.Redacted())
 }

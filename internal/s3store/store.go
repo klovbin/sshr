@@ -9,9 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -82,29 +80,8 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 }
 
 // CheckEndpoint takes an HTTPS address, plain HTTP only to a loopback IP,
-// the sync state can be edited and must not send the requests in the
-// clear, a user and password in the address would end up in the state
-func CheckEndpoint(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		// the address is not repeated, it may hold a password
-		return errors.New("bad S3 endpoint, it has to look like https://host[:port]")
-	}
-	if u.User != nil {
-		return errors.New("the S3 endpoint must not carry a user or password, the key id and secret go apart")
-	}
-	switch u.Scheme {
-	case "https":
-		return nil
-	case "http":
-		// a loopback address, not the name localhost, a resolver may send
-		// that name elsewhere
-		if ip := net.ParseIP(u.Hostname()); ip != nil && ip.IsLoopback() {
-			return nil
-		}
-	}
-	return fmt.Errorf("the S3 endpoint has to be https://, plain http only to this machine: %s", u.Redacted())
-}
+// see syncclient.CheckStoreURL
+func CheckEndpoint(raw string) error { return syncclient.CheckStoreURL("S3 endpoint", raw) }
 
 func ctx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), requestTimeout)
