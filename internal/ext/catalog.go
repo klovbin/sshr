@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -131,13 +132,17 @@ func parseCatalog(b []byte) ([]Entry, []string, error) {
 	return out, warnings, nil
 }
 
+// catalogURLRe is the characters an entry address may hold, no space, no
+// control or bidi character that git would echo into the terminal
+var catalogURLRe = regexp.MustCompile(`^[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]{1,300}$`)
+
 // checkEntry checks the format of an entry, not what its code does
 func checkEntry(e Entry) error {
 	if err := CheckName(e.Name); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(e.URL, "https://") || !isGitURL(e.URL) {
-		return fmt.Errorf("the address %q is not an https git address", clean(e.URL, 200))
+	if !strings.HasPrefix(e.URL, "https://") || !isGitURL(e.URL) || !catalogURLRe.MatchString(e.URL) {
+		return fmt.Errorf("the address %q is not an https git address of plain URL characters", clean(e.URL, 200))
 	}
 	if !commitRe.MatchString(e.Commit) {
 		return errors.New("no full commit hash")

@@ -20,7 +20,10 @@ func TestParseCatalog(t *testing.T) {
 		{"name":"short","url":"https://example.com/s.git","commit":"abc"},
 		{"name":"../x","url":"https://example.com/x.git","commit":"` + goodCommit + `"},
 		{"name":"odd","url":"https://example.com/o.git","commit":"` + goodCommit + `","kinds":["daemon"]},
-		{"name":"scp","url":"git@example.com:a/b.git","commit":"` + goodCommit + `"}
+		{"name":"scp","url":"git@example.com:a/b.git","commit":"` + goodCommit + `"},
+		{"name":"csi","url":"https://example.com/a\u009b2J.git","commit":"` + goodCommit + `"},
+		{"name":"bidi","url":"https://example.com/a\u202egit.exe","commit":"` + goodCommit + `"},
+		{"name":"space","url":"https://example.com/a b.git","commit":"` + goodCommit + `"}
 	]}`)
 	entries, warnings, err := parseCatalog(b)
 	if err != nil {
@@ -32,7 +35,7 @@ func TestParseCatalog(t *testing.T) {
 	if d := entries[0].Description; d != "says hi[2J" {
 		t.Errorf("description %q", d)
 	}
-	if len(warnings) != 7 {
+	if len(warnings) != 10 {
 		t.Errorf("warnings %q", warnings)
 	}
 	if _, _, err := parseCatalog([]byte(`{"version":2,"extensions":[]}`)); err == nil || !strings.Contains(err.Error(), "version 2") {
