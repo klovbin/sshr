@@ -104,7 +104,7 @@ func TestSyncStoreFlagMistakes(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"sync", "pull", "--bucket", "b"}, "are for sshr sync init and join"},
+		{[]string{"sync", "pull", "--bucket", "b"}, "WebDAV and Supabase flags are for sshr sync init and join"},
 		{[]string{"sync", "init", "--backend", "s3", "--endpoint", "https://e.example", "--bucket", "--key-id", "K"}, "--bucket needs a value"},
 		{[]string{"sync", "join", "--server"}, "--server needs a value"},
 	} {

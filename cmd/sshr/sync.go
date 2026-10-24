@@ -88,7 +88,7 @@ func cmdSync(store *app.Store, args []string) {
 		}
 	}
 	if sf.given && sub != "init" && sub != "join" && sub != "store-key" {
-		fatal(fmt.Errorf("--backend and the S3 flags are for sshr sync init and join, later runs read them from the sync state"))
+		fatal(fmt.Errorf("--backend and the S3, WebDAV and Supabase flags are for sshr sync init and join, later runs read them from the sync state"))
 	}
 	switch sub {
 	case "init":
@@ -99,7 +99,7 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		if server == "" {
-			fatal(fmt.Errorf("sshr sync init needs --server <url>, --backend s3 or --backend webdav"))
+			fatal(fmt.Errorf("sshr sync init needs --server <url> or --backend s3, webdav or supabase"))
 		}
 		if err := c.Init(server, name); err != nil {
 			fatal(err)
