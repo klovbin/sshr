@@ -420,3 +420,38 @@ func TestRotationAfterRoleMoved(t *testing.T) {
 		t.Fatal("the old key change is still pending on a")
 	}
 }
+
+// lostAnswerRT sends a request and then reports a server error for a
+// manifest PUT, the server stored it but the answer never arrived
+type lostAnswerRT struct{}
+
+func (lostAnswerRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(r)
+	if err == nil && isManifestPut(r) {
+		resp.Body.Close()
+		return answer(http.StatusBadGateway), nil
+	}
+	return resp, err
+}
+
+// TestKitStoredButAnswerLost checks that a kit whose manifest was stored
+// with its answer lost keeps its device in the account instead of
+// revoking it (#309)
+func TestKitStoredButAnswerLost(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	w.a.HTTP = &http.Client{Transport: lostAnswerRT{}}
+	if _, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait); err == nil {
+		t.Fatal("the lost answer was not reported")
+	}
+	w.a.HTTP = nil
+	must(t, w.b.Pull())
+	if w.b.st.Recovery == "" {
+		t.Skip("the manifest was not stored, nothing to check")
+	}
+	b, err := w.a.backend().Devices()
+	must(t, err)
+	if !strings.Contains(string(b), w.b.st.Recovery) {
+		t.Fatal("the kit device the account lists was removed from the server")
+	}
+}

@@ -114,8 +114,15 @@ func (c *Client) createRecoveryKit(pass string, wait time.Duration) (*RecoveryKi
 	})
 	if err != nil {
 		// the kit device waits for approval on the server, it would take a
-		// place there and could be approved by mistake
-		c.backend().RemoveDevice(dev.ID)
+		// place there and could be approved by mistake, unless the manifest
+		// got stored and only its answer was lost, then the account lists
+		// it and a new kit replaces it
+		if perr := c.Pull(); perr == nil && c.st.Recovery == dev.ID {
+			return nil, fmt.Errorf("the kit device went into the account but the kit could not be shown, run sshr sync recovery create again to replace it: %v", err)
+		}
+		if rerr := c.backend().RemoveDevice(dev.ID); rerr != nil && !errors.Is(rerr, ErrNotFound) {
+			c.logf("the device of the failed kit still waits for approval on the server, do not approve it: %v", rerr)
+		}
 		return nil, err
 	}
 	key, err := c.vaultKey(c.st.Epoch)
