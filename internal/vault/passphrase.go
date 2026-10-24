@@ -367,7 +367,7 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 	defer vaultMu.Unlock()
 	if vaultKey != nil {
 		touchKey()
-		return vaultKey, nil
+		return bytes.Clone(vaultKey), nil
 	}
 	if keySetPending {
 		return nil, keychainError(fmt.Errorf("%w: a vault key may still reach the keychain from a call that ran out of time, start sshr again", errKeyringTimeout))
@@ -392,7 +392,7 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 	}
 	vaultKey = key
 	touchKey()
-	return key, nil
+	return bytes.Clone(key), nil
 }
 
 // vaultModeLock is held while the vault mode changes, it is not the lock

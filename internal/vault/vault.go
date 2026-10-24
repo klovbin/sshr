@@ -5,6 +5,7 @@
 package vault
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -174,14 +175,16 @@ func getVaultKey() ([]byte, bool, error) {
 	return key, true, nil
 }
 
-// Key returns the vault key, creating it on first use, the keychain is
-// read once per process
+// Key returns a copy of the vault key, creating it on first use, the
+// keychain is read once per process and again after the key was dropped
+// when idle, the copy is the caller's, the cached key may be zeroed by the
+// idle drop at any time after the call
 func Key() ([]byte, error) {
 	vaultMu.Lock()
 	defer vaultMu.Unlock()
 	if vaultKey != nil {
 		touchKey()
-		return vaultKey, nil
+		return bytes.Clone(vaultKey), nil
 	}
 	var key []byte
 	if Mode() == ModePassphrase {
@@ -209,7 +212,7 @@ func Key() ([]byte, error) {
 	}
 	vaultKey = key
 	touchKey()
-	return key, nil
+	return bytes.Clone(key), nil
 }
 
 // ErrVaultKeyLost means the keychain no longer holds the vault key the

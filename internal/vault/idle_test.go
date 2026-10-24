@@ -23,6 +23,9 @@ func TestVaultKeyIdleDrop(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := bytes.Clone(k1)
+	vaultMu.Lock()
+	cached := vaultKey
+	vaultMu.Unlock()
 	held := func() bool {
 		vaultMu.Lock()
 		defer vaultMu.Unlock()
@@ -44,8 +47,12 @@ func TestVaultKeyIdleDrop(t *testing.T) {
 	if held() {
 		t.Fatal("the key was kept past the idle time")
 	}
-	if !bytes.Equal(k1, make([]byte, len(k1))) {
+	if !bytes.Equal(cached, make([]byte, len(cached))) {
 		t.Error("the dropped key was not zeroed")
+	}
+	// the caller's copy is its own, the drop does not change it (#345)
+	if !bytes.Equal(k1, want) {
+		t.Error("the copy a caller got was changed by the drop")
 	}
 	k2, err := Key()
 	if err != nil || !bytes.Equal(k2, want) {
