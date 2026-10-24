@@ -4,6 +4,7 @@
 package syncserver
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -351,9 +352,12 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request, _ ctxDevice
 	reply(w, http.StatusOK, out)
 }
 
-func (s *Server) activate(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) activate(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	defer s.lock(a)()
+	if !s.onlyPrimary(w, a, dev, "approves devices") {
+		return
+	}
 	ds, err := s.loadDevices(a)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -373,9 +377,12 @@ func (s *Server) activate(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
 	fail(w, http.StatusNotFound, "no such device")
 }
 
-func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	defer s.lock(a)()
+	if !s.onlyPrimary(w, a, dev, "removes devices") {
+		return
+	}
 	ds, err := s.loadDevices(a)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -529,6 +536,44 @@ func (s *Server) current(a string) uint64 {
 	return cs[len(cs)-1]
 }
 
+// head is the stored head manifest of account a and who signed it, nil
+// before the first push
+func (s *Server) head(a string) (*syncproto.Manifest, *syncproto.Signed, error) {
+	c := s.current(a)
+	if c == 0 {
+		return nil, nil, nil
+	}
+	b, err := os.ReadFile(filepath.Join(s.accountDir(a), "manifests", fmt.Sprintf("%d.json", c)))
+	if err != nil {
+		return nil, nil, err
+	}
+	var sm syncproto.Signed
+	var m syncproto.Manifest
+	if err := json.Unmarshal(b, &sm); err != nil {
+		return nil, nil, err
+	}
+	if err := json.Unmarshal(sm.Body, &m); err != nil {
+		return nil, nil, err
+	}
+	return &m, &sm, nil
+}
+
+// onlyPrimary refuses a device that is not the primary device of the head
+// of account a, an account no primary was named in yet lets every device
+// as before
+func (s *Server) onlyPrimary(w http.ResponseWriter, a string, dev ctxDevice, what string) bool {
+	m, _, err := s.head(a)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if m != nil && m.Version >= 2 && m.Primary != "" && m.Primary != dev.id {
+		fail(w, http.StatusForbidden, "only the primary device of the account "+what)
+		return false
+	}
+	return true
+}
+
 func (s *Server) getManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
 	a := r.PathValue("a")
 	c := s.current(a)
@@ -600,6 +645,10 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		fail(w, http.StatusBadRequest, "counter must be the current one plus one")
 		return
 	}
+	if err := s.checkRoles(a, &sm, &m); err != nil {
+		fail(w, http.StatusForbidden, err.Error())
+		return
+	}
 	dir := s.accountDir(a)
 	live := map[string]bool{}
 	for _, e := range m.Entries {
@@ -623,6 +672,33 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 	s.collect(a, live)
 	w.Header().Set("ETag", strconv.FormatUint(m.Counter, 10))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkRoles applies the rule of the primary device to a new manifest
+// against the stored head (syncproto.CheckPrimary), a manifest that needs
+// the primary must carry a valid signature of the device it names as
+// signer, the server cannot check the MAC but it holds the signing keys of
+// the devices in the head, the clients check the same again
+func (s *Server) checkRoles(a string, sm *syncproto.Signed, m *syncproto.Manifest) error {
+	prev, _, err := s.head(a)
+	if err != nil || prev == nil {
+		return err
+	}
+	if err := syncproto.CheckPrimary(prev, m, sm.Signer); err != nil {
+		return err
+	}
+	if m.Version < 2 {
+		return nil
+	}
+	for _, d := range prev.Devices {
+		if d.ID == sm.Signer {
+			if len(d.SignPub) != ed25519.PublicKeySize || !ed25519.Verify(d.SignPub, syncproto.SignInput(sm.Body), sm.Sig) {
+				return errors.New("the signature of the manifest does not verify")
+			}
+			return nil
+		}
+	}
+	return errors.New("the manifest is signed by a device that is not in the account")
 }
 
 // collect drops old manifests past keepHistory and blobs no manifest

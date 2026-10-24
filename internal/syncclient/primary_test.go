@@ -3,6 +3,8 @@ package syncclient
 import (
 	"crypto/rand"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,10 +13,10 @@ import (
 	"sshr.dev/internal/vault"
 )
 
-// forgePush writes the next manifest as device c would sign it, with edit
+// forgeManifest is the next manifest as device c would sign it, with edit
 // applied to a copy of the head, the way a stolen device with a changed
 // sshr could, it skips every check of the client
-func forgePush(t *testing.T, c *Client, edit func(*syncproto.Manifest)) {
+func forgeManifest(t *testing.T, c *Client, edit func(*syncproto.Manifest)) (uint64, []byte) {
 	t.Helper()
 	must(t, c.load())
 	_, raw, err := c.backend().Head()
@@ -29,7 +31,7 @@ func forgePush(t *testing.T, c *Client, edit func(*syncproto.Manifest)) {
 	must(t, err)
 	b, _, err := c.keys.signManifest(&m, key, c.st.DeviceID)
 	must(t, err)
-	must(t, c.backend().PutManifest(m.Counter-1, b))
+	return m.Counter, b
 }
 
 // TestPrimaryDevice checks that the device that made the account is its
@@ -57,6 +59,15 @@ func TestPrimaryDevice(t *testing.T) {
 	if _, err := w.b.Approve(pending[0].ID); err == nil || !strings.Contains(err.Error(), "only the primary device") {
 		t.Fatalf("approve on b = %v", err)
 	}
+	// a changed sshr on b goes to sshr-sync directly, the server refuses
+	// to revoke the token of a and to activate c
+	if err := w.b.backend().RemoveDevice(w.a.st.DeviceID); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("the server let b revoke a: %v", err)
+	}
+	if err := w.b.backend().Activate(pending[0].ID); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("the server let b activate c: %v", err)
+	}
+	must(t, w.a.Pull())
 }
 
 // TestPrimaryRefusesForgedChanges checks that the devices of the owner do
@@ -84,7 +95,14 @@ func TestPrimaryRefusesForgedChanges(t *testing.T) {
 			key := make([]byte, 32)
 			rand.Read(key)
 			must(t, vault.SecretSet(w.b.prefix()+"key-"+strconv.Itoa(w.b.st.Epoch+1), key))
-			forgePush(t, w.b, func(m *syncproto.Manifest) { c.edit(w, m) })
+			n, b := forgeManifest(t, w.b, func(m *syncproto.Manifest) { c.edit(w, m) })
+			// sshr-sync refuses it itself
+			if err := w.b.backend().PutManifest(n-1, b); err == nil || !strings.Contains(err.Error(), "403") {
+				t.Fatalf("the server took the forged change: %v", err)
+			}
+			// a server that does not check, or an object store, keeps it,
+			// the owner's devices must refuse it on their own
+			must(t, os.WriteFile(filepath.Join(w.manifestDir(), strconv.FormatUint(n, 10)+".json"), b, 0o600))
 			err := w.a.Pull()
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("a took the forged change: %v", err)

@@ -949,54 +949,18 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 }
 
 // checkPrimary refuses a manifest that changes who is in the account
-// without the primary device: adding or removing a device, a new vault key
-// or a new primary must be signed by the primary of the manifest before,
-// the first format 2 manifest of an older account names its own signer, a
-// device refusing a change keeps its hosts and stops syncing, the account
-// is not taken from the owner
+// without the primary device (syncproto.CheckPrimary), the state of this
+// device stands for the manifest before, a device refusing a change keeps
+// its hosts and stops syncing, the account is not taken from the owner
 func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error {
-	if m.Version < c.st.Format {
-		return fmt.Errorf("change %d is of format %d after format %d, an older sshr cannot write here, it would drop the primary device", m.Counter, m.Version, c.st.Format)
-	}
-	if m.Version < 2 {
-		return nil
-	}
-	listed := false
-	for _, d := range m.Devices {
-		listed = listed || d.ID == m.Primary
-	}
-	if !listed {
-		return fmt.Errorf("change %d names a primary device that is not in the account", m.Counter)
-	}
-	if c.st.Primary == "" {
-		if m.Primary != sm.Signer {
-			return fmt.Errorf("change %d makes device %s primary but was written by device %s, the first primary is the device that writes the first change of this format", m.Counter, short(m.Primary, 8), short(sm.Signer, 8))
+	prev := &syncproto.Manifest{Version: c.st.Format, Primary: c.st.Primary, Epoch: c.st.Epoch, Devices: c.st.Trusted}
+	if err := syncproto.CheckPrimary(prev, m, sm.Signer); err != nil {
+		if prev.Primary != "" && m.Version >= 2 {
+			return fmt.Errorf("%w, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here", err)
 		}
-		return nil
-	}
-	privileged := m.Primary != c.st.Primary || m.Epoch > c.st.Epoch || !sameDevices(c.st.Trusted, m.Devices)
-	if privileged && sm.Signer != c.st.Primary {
-		return fmt.Errorf("change %d adds or removes a device, changes the vault key or the primary device, but it was written by device %s and not by the primary device %s, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here", m.Counter, short(sm.Signer, 8), short(c.st.Primary, 8))
+		return err
 	}
 	return nil
-}
-
-// sameDevices tells whether two device lists hold the same devices with
-// the same keys, a new name alone changes nothing
-func sameDevices(a, b []syncproto.Device) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	keys := make(map[string]string, len(a))
-	for _, d := range a {
-		keys[d.ID] = string(d.SignPub) + "\x00" + string(d.KEMPub)
-	}
-	for _, d := range b {
-		if k, ok := keys[d.ID]; !ok || k != string(d.SignPub)+"\x00"+string(d.KEMPub) {
-			return false
-		}
-	}
-	return true
 }
 
 // errNotPrimary refuses what only the primary device may do, before

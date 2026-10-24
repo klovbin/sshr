@@ -150,9 +150,7 @@ func manifestMAC(vaultKey, body []byte) []byte {
 	return m.Sum(nil)
 }
 
-func signInput(body []byte) []byte {
-	return append([]byte("sshr-sync manifest\x00"), body...)
-}
+func signInput(body []byte) []byte { return syncproto.SignInput(body) }
 
 // signManifest makes the stored form of m, MAC'd with the vault key of its
 // epoch and signed by this device

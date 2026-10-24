@@ -6,6 +6,7 @@ package syncproto
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 )
 
 // FormatVersion is the version of Manifest, a new optional field keeps
@@ -110,4 +111,68 @@ type NewAccountRequest struct {
 type TokenResponse struct {
 	Account string `json:"account"`
 	Token   string `json:"token"`
+}
+
+// SignInput is what a device signs for a manifest body
+func SignInput(body []byte) []byte {
+	return append([]byte("sshr-sync manifest\x00"), body...)
+}
+
+// SameDevices tells whether two device lists hold the same devices with
+// the same keys, a new name alone changes nothing
+func SameDevices(a, b []Device) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	keys := make(map[string]string, len(a))
+	for _, d := range a {
+		keys[d.ID] = string(d.SignPub) + "\x00" + string(d.KEMPub)
+	}
+	for _, d := range b {
+		if k, ok := keys[d.ID]; !ok || k != string(d.SignPub)+"\x00"+string(d.KEMPub) {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckPrimary refuses a manifest m signed by signer that changes who is
+// in the account without the primary device of prev, the state before it:
+// adding or removing a device, a new vault key epoch or a new primary must
+// be signed by the primary of prev, the first format 2 manifest after
+// format 1 names its own signer, a format 1 manifest after format 2 is
+// refused, prev.Version is the highest format seen, the clients and
+// sshr-sync check the same rule
+func CheckPrimary(prev, m *Manifest, signer string) error {
+	if m.Version < prev.Version {
+		return fmt.Errorf("change %d is of format %d after format %d, an older sshr cannot write here, it would drop the primary device", m.Counter, m.Version, prev.Version)
+	}
+	if m.Version < 2 {
+		return nil
+	}
+	listed := false
+	for _, d := range m.Devices {
+		listed = listed || d.ID == m.Primary
+	}
+	if !listed {
+		return fmt.Errorf("change %d names a primary device that is not in the account", m.Counter)
+	}
+	if prev.Primary == "" {
+		if m.Primary != signer {
+			return fmt.Errorf("change %d makes device %s primary but was written by device %s, the first primary is the device that writes the first change of this format", m.Counter, short(m.Primary), short(signer))
+		}
+		return nil
+	}
+	privileged := m.Primary != prev.Primary || m.Epoch > prev.Epoch || !SameDevices(prev.Devices, m.Devices)
+	if privileged && signer != prev.Primary {
+		return fmt.Errorf("change %d adds or removes a device, changes the vault key or the primary device, but it was written by device %s and not by the primary device %s", m.Counter, short(signer), short(prev.Primary))
+	}
+	return nil
+}
+
+func short(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }
