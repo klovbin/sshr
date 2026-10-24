@@ -93,7 +93,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 ### The agent of sshr answers only its own ssh
 - **What:** the ssh agent that serves a key kept in sshr, 1Password or Bitwarden during a session accepts a connection only from sshr itself or a process it started (ssh, the ssh of a jump host, mosh), on Linux and macOS
 - **What for:** the socket path is in the environment of ssh, any program of the same user that found it could ask the agent to sign and log in elsewhere with the key while the session runs
-- **Why it helps:** a script or tool running as you gets no use of the key, it would have to run inside the session sshr started
+- **Why it helps:** a script or tool running as you outside sshr gets no use of the key, a program sshr started still can, in a long running `sshr serve` or `sshr mcp` the local commands of hosts and extension commands are such programs
 - **Why this way:** the kernel names the process at the other end of the socket (SO_PEERCRED on Linux, LOCAL_PEERPID on macOS) and sshr walks up its parents to its own process, 32 steps at most, a peer that cannot be named is refused, a Windows named pipe gives no such answer through the library sshr uses, there any process of the user is let in as before
 
 ### The vault key forgotten when idle

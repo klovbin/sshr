@@ -12,10 +12,12 @@ const maxPeerDepth = 32
 
 // checkAgentPeer lets in the process at the other end of an agent
 // connection when it is sshr itself or one it started, ssh, the ssh of a
-// jump host or mosh, any other program of the same user is refused, it
-// could log in elsewhere with the key while a session runs, the error
-// says why, where the system gives no peer process (Windows pipes) every
-// peer of the user is let in
+// jump host or mosh, any program of the same user outside sshr is
+// refused, it could log in elsewhere with the key while a session runs,
+// a program sshr started (a local command of a host, an extension in
+// sshr serve) passes too, the check knows the tree and not the one ssh,
+// the error says why, where the system gives no peer process (Windows
+// pipes) every peer of the user is let in
 func checkAgentPeer(c net.Conn) error {
 	pid, ok, err := peerPID(c)
 	if err != nil {
