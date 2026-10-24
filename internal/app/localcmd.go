@@ -3,7 +3,9 @@ package app
 import (
 	"io"
 	"os"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"sshr.dev/internal/settings"
 )
@@ -36,7 +38,7 @@ func RunLocalCommand(command string, h *Host, exit int, stdin io.Reader, stdout,
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.Env = append(os.Environ(),
 		"SSHR_HOST_ID="+h.ID,
-		"SSHR_HOST_NAME="+h.Name,
+		"SSHR_HOST_NAME="+envSafe(h.Name, runtime.GOOS == "windows"),
 		"SSHR_HOST="+h.Host,
 		"SSHR_PORT="+strconv.Itoa(effectivePort(h.Port)),
 		"SSHR_USER="+h.User,
@@ -45,4 +47,21 @@ func RunLocalCommand(command string, h *Host, exit int, stdin io.Reader, stdout,
 		cmd.Env = append(cmd.Env, "SSHR_EXIT="+strconv.Itoa(exit))
 	}
 	return cmd.Run()
+}
+
+// envSafe is a host name another sync device may have set, made safe for
+// the environment of a local command: control characters are dropped (a
+// NUL would stop the command from starting), on Windows the characters
+// cmd.exe acts on in %SSHR_HOST_NAME% become _, the address, user and port
+// are checked when a host is saved and need none of this
+func envSafe(s string, windows bool) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			return -1
+		case windows && strings.ContainsRune(`&|<>^%"()!`, r):
+			return '_'
+		}
+		return r
+	}, s)
 }

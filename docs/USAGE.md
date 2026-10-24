@@ -172,7 +172,7 @@ sshr hooks on
 sshr connect web
 ```
 
-The command before runs before ssh starts, if it fails sshr does not connect, the command after runs when the session ends, also after an error, the exit code of the session is in `SSHR_EXIT`. Both run through `sh -c` (`cmd /C` on Windows) on this machine with `SSHR_HOST_NAME`, `SSHR_HOST`, `SSHR_PORT`, `SSHR_USER` and `SSHR_HOST_ID` set. They are off until `sshr hooks on` (`local_commands` in `~/.sshr/settings.json`), `connect --local-commands` and `--no-local-commands` decide for one run, a connect with commands that are off says so. `sshr hooks list` shows them, `sshr hooks unset web [before|after]` removes them, `sshr rm` removes them with the host. They stay on this machine: settings never sync and only `sshr hooks` writes them.
+The command before runs before ssh starts, if it fails sshr does not connect, the command after runs when the session ends, also after an error, the exit code of the session is in `SSHR_EXIT`. Both run through `sh -c` (`cmd /C` on Windows) on this machine with `SSHR_HOST_NAME`, `SSHR_HOST`, `SSHR_PORT`, `SSHR_USER` and `SSHR_HOST_ID` set. They are off until `sshr hooks on` (`local_commands` in `~/.sshr/settings.json`), `connect --local-commands` and `--no-local-commands` decide for one run, a connect with commands that are off says so. `sshr hooks list` shows them, `sshr hooks unset web [before|after]` removes them, `sshr rm` removes them with the host. They stay on this machine: settings never sync and only `sshr hooks` writes them. The host name can be set on another device, quote `"$SSHR_HOST_NAME"` and never pass it to `eval`, sshr drops control characters from it and on Windows turns the characters cmd.exe acts on (`& | < > ^ % " ( ) !`) into `_`.
 
 ## Health check
 
