@@ -193,7 +193,7 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Printf("Removed %s, the vault key was changed, what it already downloaded it keeps\n", d.Name)
 		if ref, err := c.StoreRef(); err == nil && ref != nil && ref.Kind == "webdav" {
-			fmt.Println("This account is in a WebDAV folder and the removed device still knows the password, it can delete files and stop the sync\nChange the password (in Nextcloud make a new app password and delete the old one), then run on every device that stays:\n  sshr sync store-key")
+			fmt.Println("This account is in a WebDAV folder and the removed device still knows the password, it can delete files and stop the sync\nChange the password (in Nextcloud make a new app password and delete the old one), then run on every device that stays:\n  sshr sync store-key\nwith --user <name> on each of them if the user changes too")
 		} else if err == nil && ref != nil {
 			fmt.Println("This account is in a bucket and the removed device still holds the bucket key, it can delete objects and stop the sync\nMake a new key for the bucket, delete the old one, then run on every device that stays:\n  sshr sync store-key --key-id <new key id>")
 		}
