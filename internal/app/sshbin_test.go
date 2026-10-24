@@ -125,19 +125,28 @@ func TestNoBareSSH(t *testing.T) {
 	}
 }
 
-// TestChildSSH checks the ssh scp and mosh are told to use (#313): the
-// chosen one on Windows, nothing elsewhere, never a path with spaces
+// TestChildSSH checks the ssh scp and mosh are told to use (#313, #316):
+// the chosen one on Windows, the one of SSHR_SSH anywhere, a path with
+// spaces goes to scp but not to mosh
 func TestChildSSH(t *testing.T) {
 	sys := func() (string, error) { return `C:\Windows\System32\OpenSSH\ssh.exe`, nil }
-	spaced := func() (string, error) { return `C:\Program Files\OpenSSH\ssh.exe`, nil }
-	if got := childSSH("windows", sys); got != `C:\Windows\System32\OpenSSH\ssh.exe` {
-		t.Errorf("windows: %q", got)
-	}
-	if got := childSSH("linux", sys); got != "" {
-		t.Errorf("linux: %q", got)
-	}
-	if got := childSSH("windows", spaced); got != "" {
-		t.Errorf("a path with spaces: %q", got)
+	spaced := func() (string, error) { return `C:\Program Files\Git\usr\bin\ssh.exe`, nil }
+	own := func() (string, error) { return "/opt/ssh9/bin/ssh", nil }
+	for _, c := range []struct {
+		name, goos, own string
+		path            func() (string, error)
+		mosh            bool
+		want            string
+	}{
+		{"windows", "windows", "", sys, true, `C:\Windows\System32\OpenSSH\ssh.exe`},
+		{"linux", "linux", "", sys, true, ""},
+		{"linux SSHR_SSH", "linux", "/opt/ssh9/bin/ssh", own, false, "/opt/ssh9/bin/ssh"},
+		{"spaces for scp", "windows", `C:\Program Files\Git\usr\bin\ssh.exe`, spaced, false, `C:\Program Files\Git\usr\bin\ssh.exe`},
+		{"spaces for mosh", "windows", `C:\Program Files\Git\usr\bin\ssh.exe`, spaced, true, ""},
+	} {
+		if got := childSSH(c.goos, c.path, c.own, c.mosh); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

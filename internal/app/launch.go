@@ -114,7 +114,7 @@ func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 	m := &SessionPlan{Host: &hc, Tool: "mosh", Via: p.Via, Session: session, Fallback: p, batch: o.Batch}
 	// mosh starts ssh itself, on Windows the ssh sshr chose (#313)
 	sshName := "ssh"
-	if ssh := childSSH(runtime.GOOS, SSHPath); ssh != "" {
+	if ssh := childSSH(runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), true); ssh != "" {
 		sshName = ssh
 	}
 	m.Args = []string{"--ssh=" + sshName + " " + strings.Join(sshOpts, " "), "--", dest}

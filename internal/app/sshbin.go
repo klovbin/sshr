@@ -48,15 +48,15 @@ func sshCommand(args ...string) *exec.Cmd {
 func SSHCommand(args ...string) *exec.Cmd { return sshCommand(args...) }
 
 // childSSH is the ssh a program that starts ssh itself (scp, mosh) is told
-// to use, on Windows the one SSHPath chose, elsewhere "" since their own
-// PATH lookup finds the same, a path with spaces is not passed, mosh would
-// split it
-func childSSH(goos string, path func() (string, error)) string {
-	if goos != "windows" {
+// to use: the one SSHR_SSH names on any system, on Windows the one SSHPath
+// chose, otherwise "" since their own PATH lookup finds the same, mosh
+// splits --ssh on spaces, a path with spaces is not passed to it
+func childSSH(goos string, path func() (string, error), own string, mosh bool) string {
+	if own == "" && goos != "windows" {
 		return ""
 	}
 	p, err := path()
-	if err != nil || strings.ContainsAny(p, " \t") {
+	if err != nil || mosh && strings.ContainsAny(p, " \t") {
 		return ""
 	}
 	return p
