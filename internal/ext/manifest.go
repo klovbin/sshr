@@ -85,11 +85,11 @@ func ParseManifest(data []byte) (Manifest, error) {
 	}
 	for goos, argv := range m.Command {
 		if err := checkArgv(argv); err != nil {
-			return Manifest{}, fmt.Errorf("%s: command for %s: %v", ManifestFile, goos, err)
+			return Manifest{}, fmt.Errorf("%s: command for %q: %v", ManifestFile, goos, err)
 		}
 		for _, a := range argv {
 			if err := printable("a command argument", a); err != nil {
-				return Manifest{}, fmt.Errorf("%s: command for %s: %v", ManifestFile, goos, err)
+				return Manifest{}, fmt.Errorf("%s: command for %q: %v", ManifestFile, goos, err)
 			}
 		}
 	}

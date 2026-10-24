@@ -75,3 +75,12 @@ func TestManifestRefusesControlCharacters(t *testing.T) {
 		t.Errorf("a plain manifest: %v", err)
 	}
 }
+
+// the key of a command is quoted in an error, it cannot drive the terminal
+// (#266)
+func TestManifestErrorQuotesTheCommandKey(t *testing.T) {
+	_, err := ParseManifest([]byte(`{"protocol":1,"name":"x","version":"1","description":"d","kinds":["command"],"command":{"\u001b[2J":["../x"]}}`))
+	if err == nil || strings.ContainsRune(err.Error(), 0x1b) {
+		t.Errorf("error %q", err)
+	}
+}
