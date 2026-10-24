@@ -66,8 +66,8 @@ func TestRecoveryKitTypos(t *testing.T) {
 		g[1] = 'A'
 	}
 	bad[3] = string(g)
-	if _, err := decodeKit(strings.Join(bad, " "), noPass); err == nil || !strings.Contains(err.Error(), "group 4") {
-		t.Fatalf("a typo in group 4: %v", err)
+	if _, err := decodeKit(strings.Join(bad, " "), noPass); err == nil || !strings.Contains(err.Error(), "group 4") || strings.Contains(err.Error(), bad[3]) {
+		t.Fatalf("a typo in group 4, named without its characters (#307): %v", err)
 	}
 	swapped := append([]string(nil), groups...)
 	s := []byte(swapped[2])

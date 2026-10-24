@@ -114,7 +114,9 @@ func decodeKit(text string, pass func() (string, error)) (recoveryKit, error) {
 			r = '0'
 		}
 		if !strings.ContainsRune(kitAlphabet, r) {
-			return recoveryKit{}, fmt.Errorf("recovery kit: %q is not a character of a kit", r)
+			// the character itself is not named, it may be part of the
+			// secret and the error may end up in a log or a report
+			return recoveryKit{}, errors.New("recovery kit: a character that is no part of a kit, only digits and the letters A to Z go in")
 		}
 		clean = append(clean, byte(r))
 	}
@@ -126,7 +128,7 @@ func decodeKit(text string, pass func() (string, error)) (recoveryKit, error) {
 		}
 		data := string(g[:len(g)-1])
 		if groupCheck(data, n) != g[len(g)-1] {
-			return recoveryKit{}, fmt.Errorf("recovery kit: group %d (%s) has a typo", n+1, string(g))
+			return recoveryKit{}, fmt.Errorf("recovery kit: group %d has a typo", n+1)
 		}
 		chars = append(chars, data...)
 	}
