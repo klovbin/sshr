@@ -225,10 +225,13 @@ func (s *Store) Create(name string, data []byte) error {
 	switch {
 	case written(code):
 		return nil
-	// Nextcloud and ownCloud lock the upload of a name, of two creates at
-	// once the loser gets 423 and the other device wrote first
-	case code == http.StatusPreconditionFailed || code == http.StatusLocked:
+	case code == http.StatusPreconditionFailed:
 		return syncclient.ErrExists
+	// Nextcloud and ownCloud lock the upload of a name, of two creates at
+	// once the loser gets 423, a lock of another client gives it too, so
+	// only the manifest code reads it as a lost race
+	case code == http.StatusLocked:
+		return fmt.Errorf("WebDAV PUT %s: %w", name, syncclient.ErrLocked)
 	default:
 		return statusError("PUT", name, code)
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -481,5 +482,27 @@ func TestGapStopsReading(t *testing.T) {
 	}
 	if got > keepHistory+manifestPage {
 		t.Errorf("read %d manifests past the gap", got)
+	}
+}
+
+// lockStore answers every create with ErrLocked, a WebDAV lock
+type lockStore struct{ *memStore }
+
+func (s lockStore) Create(string, []byte) error { return ErrLocked }
+
+// a lock on the next manifest is a lost race, a lock on an envelope is an
+// error and not a newer key the device already has (#257)
+func TestLockedCreates(t *testing.T) {
+	store := newMemStore()
+	must(t, store.Put(objAccount, []byte("acct")))
+	o := ObjectBackend{Store: lockStore{store}}
+	body, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: 1})
+	signed, _ := json.Marshal(syncproto.Signed{Body: body})
+	if err := o.PutManifest(0, signed); !errors.Is(err, ErrCASLost) {
+		t.Errorf("locked manifest: %v", err)
+	}
+	env, _ := json.Marshal(syncproto.Envelope{Epoch: 2})
+	if err := o.PutEnvelope(strings.Repeat("a", 32), env); err == nil || errors.Is(err, ErrStaleEpoch) {
+		t.Errorf("locked envelope: %v", err)
 	}
 }

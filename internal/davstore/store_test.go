@@ -300,7 +300,7 @@ func TestCreateLockedIsTaken(t *testing.T) {
 	defer srv.Close()
 	s, err := New(Config{URL: srv.URL + "/dav", User: "u"}, "pw", nil)
 	must(t, err)
-	if err := s.Create("manifests/1", []byte("1")); !errors.Is(err, syncclient.ErrExists) {
+	if err := s.Create("manifests/1", []byte("1")); !errors.Is(err, syncclient.ErrLocked) || errors.Is(err, syncclient.ErrExists) {
 		t.Errorf("create on 423: %v", err)
 	}
 }

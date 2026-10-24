@@ -35,6 +35,11 @@ type ObjectStore interface {
 // ErrExists means Create found the name taken
 var ErrExists = errors.New("the object exists already")
 
+// ErrLocked means the store refused a write while a lock is held, for a
+// manifest that is another device writing the same change, for any other
+// object a lock of another client, nothing was written
+var ErrLocked = errors.New("the store holds a lock on the object, try again later")
+
 // ErrTooLarge means an object is bigger than its kind may be, a store
 // does not get to fill the memory of a device
 var ErrTooLarge = errors.New("the object is too large")
@@ -414,7 +419,9 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 		}
 	}
 	err = o.Store.Create(manifestName(m.Counter), signed)
-	if errors.Is(err, ErrExists) {
+	// a lock on the next manifest is another device creating it, the
+	// push pulls and tries again
+	if errors.Is(err, ErrExists) || errors.Is(err, ErrLocked) {
 		return ErrCASLost
 	}
 	if err != nil {
