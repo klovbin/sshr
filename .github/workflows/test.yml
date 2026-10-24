@@ -48,6 +48,14 @@ jobs:
           CGO_ENABLED: "0"
         run: go test -tags nocgo $(go list -tags nocgo ./... | grep -v /internal/ui)
 
+      # the race detector needs cgo, Linux and macOS have a C compiler on
+      # the runner, the windows runner gets the plain run above
+      - name: tests with the race detector
+        if: runner.os != 'Windows'
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -tags nocgo $(go list -tags nocgo ./... | grep -v /internal/ui)
+
       - name: build the CLI
         env:
           CGO_ENABLED: "0"
