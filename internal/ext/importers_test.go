@@ -403,6 +403,8 @@ func TestMobaXtermImporter(t *testing.T) {
 	ini := "[Bookmarks]\r\nSubRep=\r\nImgNum=42\r\n" +
 		"web \x80=#109#0%10.0.0.5%2222%deploy%%-1%-1%%gw1.example__PIPE__gw2.example%22__PIPE__2200%ops__PIPE__%0%0%0%_CurrentDrive_:\\keys\\web.ppk%%-1%0%0%2%socks.example%1080%%0%0%1%%0%%%%0%-1%-1%0#MobaFont%10%0%0%-1%15%236,236,236%30,30,30%180,180,192%0%-1%0%%xterm%-1%0%_Std_Colors_0_%80%24%0%0%-1%<none>%%0%0%-1%-1#0# #-1\r\n" +
 		"desk=#91#4%10.0.0.9%3389%%0%0%0%0%-1%0%0%-1#MobaFont#0# #-1\r\n" +
+		"a=1= #109#0%a1.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"a=2=#109#0%a2.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"\r\n[Bookmarks_1]\r\nSubRep=Clients\\Acme\r\nImgNum=41\r\n" +
 		"db=#109#0%db.local%22%<default>%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\keys\\id_ed25519%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
 		"web \x80=#109#0%10.1.0.5%22%%%-1%-1%%%%%0%-1%0%%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
@@ -418,8 +420,12 @@ func TestMobaXtermImporter(t *testing.T) {
 	for _, h := range hosts {
 		got[h.Key] = h
 	}
-	if len(hosts) != 4 {
+	if len(hosts) != 6 {
 		t.Fatalf("%+v", hosts)
+	}
+	// a name with = keeps it (#327)
+	if got["a=1"].Host != "a1.example" || got["a=2"].Host != "a2.example" {
+		t.Errorf("names with =: %+v", got)
 	}
 	web := got["web \u20ac"]
 	if web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" || web.KeyFile != "" ||

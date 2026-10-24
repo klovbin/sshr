@@ -122,12 +122,12 @@ foreach ($f in $Files) {
 			continue
 		}
 		if ($section -notmatch '^Bookmarks(_[0-9]+)?$') { continue }
-		$eq = $line.IndexOf('=')
-		if ($eq -le 0) { continue }
-		$name = $line.Substring(0, $eq).Trim()
-		$value = $line.Substring($eq + 1)
-		if ($name -eq 'SubRep') { $folder = $value; continue }
-		if ($name -eq 'ImgNum') { continue }
+		if ($line -match '^SubRep=(.*)$') { $folder = $Matches[1]; continue }
+		# a name may hold =, the value starts with the reconnect flag, which
+		# has none, and #icon#
+		if ($line -notmatch '^(.+?)=([^=#]*#[0-9]+#.*)$') { continue }
+		$name = $Matches[1].Trim()
+		$value = $Matches[2]
 		$parts = $value.Split('#')
 		if ($parts.Count -lt 3) { continue }
 		$g = $parts[2].Split('%')
