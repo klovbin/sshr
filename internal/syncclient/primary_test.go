@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"sshr.dev/internal/hosts"
 	"sshr.dev/internal/syncproto"
 	"sshr.dev/internal/vault"
 )
@@ -172,6 +173,39 @@ func TestPrimaryRefusesRepeatedDevice(t *testing.T) {
 	must(t, os.WriteFile(filepath.Join(w.manifestDir(), strconv.FormatUint(n, 10)+".json"), b, 0o600))
 	if err := w.a.Pull(); err == nil || !strings.Contains(err.Error(), "twice") {
 		t.Fatalf("a took the list: %v", err)
+	}
+}
+
+// TestPrimaryAfterAFailedPull checks that a pull whose apply fails does
+// not keep the primary of the manifests it did not apply: the device would
+// refuse them on the next pull and stay stuck (#296)
+func TestPrimaryAfterAFailedPull(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	c := w.client("c-")
+	code, err := w.a.Invite()
+	must(t, err)
+	_, err = c.Join(w.srv.URL, code, "c")
+	must(t, err)
+	pending, err := w.a.Pending()
+	must(t, err)
+	// one manifest of a adds c and changes web, the next hands the role to b
+	editHost(t, w.a, web.ID, func(h *hosts.Host) { h.Port, h.Password = 2201, "" })
+	_, err = w.a.Approve(pending[0].ID)
+	must(t, err)
+	_, err = w.a.HandPrimary(w.b.st.DeviceID[:8], func(string, string) bool { return true })
+	must(t, err)
+	blob := filepath.Join(filepath.Dir(w.manifestDir()), "blobs", w.a.st.Entries[web.ID].Blob)
+	saved, err := os.ReadFile(blob)
+	must(t, err)
+	must(t, os.Remove(blob))
+	if err := w.b.Pull(); err == nil {
+		t.Fatal("the pull did not fail without the blob")
+	}
+	must(t, os.WriteFile(blob, saved, 0o600))
+	must(t, w.b.Pull())
+	if w.b.st.Primary != w.b.st.DeviceID {
+		t.Fatalf("primary on b %q", w.b.st.Primary)
 	}
 }
 

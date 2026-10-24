@@ -1027,6 +1027,9 @@ func (c *Client) pull() error {
 	before := *c.st
 	rollback := func() {
 		c.st.Counter, c.st.Head, c.st.Trusted, c.st.Epoch, c.st.Approver = before.Counter, before.Head, before.Trusted, before.Epoch, before.Approver
+		// the primary and the format belong to the manifests put back, the
+		// next pull checks them again from here
+		c.st.Primary, c.st.Format = before.Primary, before.Format
 	}
 	var last *syncproto.Manifest
 	for i := range history {
