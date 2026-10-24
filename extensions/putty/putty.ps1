@@ -117,10 +117,11 @@ if ($Files) {
 	$root = "HKCU:\$sessionsKey"
 	if (Test-Path $root) {
 		foreach ($key in Get-ChildItem $root) {
+			# the values are read from the key itself, Get-ItemProperty mixes
+			# in PSPath and the like and expands %VARS% of a REG_EXPAND_SZ
 			$values = @{}
-			$props = Get-ItemProperty -LiteralPath $key.PSPath
-			foreach ($p in $props.PSObject.Properties) {
-				if ($p.Name -notlike 'PS*') { $values[$p.Name] = [string]$p.Value }
+			foreach ($n in $key.GetValueNames()) {
+				$values[$n] = [string]$key.GetValue($n, $null, 'DoNotExpandEnvironmentNames')
 			}
 			$sessions[$key.PSChildName] = $values
 		}
