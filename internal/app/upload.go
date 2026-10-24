@@ -51,7 +51,7 @@ func SSHArgs(h *Host) []string {
 // used, a host that asks for its password every time fails with
 // ErrAsksPassword, the upload goes through the host's jump hosts like a
 // normal connection
-func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (string, error) {
+func (e sshEnv) UploadImage(h *Host, data []byte, ext string, batch bool) (string, error) {
 	if _, err := SSHPath(); err != nil {
 		return "", err
 	}
@@ -73,7 +73,7 @@ func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (strin
 		`printf "%s" "$f"`,
 	}, "\n")
 
-	args, err := s.ConnectArgs(h)
+	args, err := e.ConnectArgs(h)
 	if err != nil {
 		return "", err
 	}

@@ -165,7 +165,7 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 	if parts := SplitJump(h.Jump); len(parts) > 0 {
 		var hops []string
 		for _, p := range parts {
-			hop, saved, err := s.resolveHop(p)
+			hop, saved, err := s.env().resolveHop(p)
 			if err != nil {
 				return "", "", err
 			}

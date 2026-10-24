@@ -17,16 +17,16 @@ import (
 // itself comes from the agent AttachAuth starts, the user's own agent and
 // key files are not offered, agent forwarding is off so the server never
 // reaches the key
-func (s *Store) vaultKeyArgs(h *Host) []string {
+func (e sshEnv) vaultKeyArgs(h *Host) []string {
 	if !h.ServedByAgent() {
 		return nil
 	}
 	// the host file may come from a copy without its .pub next to it
-	if _, err := os.Stat(s.pubPath(h)); err != nil {
-		s.writePub(h)
+	if _, err := os.Stat(e.Hosts.PubPath(h)); err != nil {
+		e.Hosts.WritePub(h)
 	}
 	return []string{
-		"-i", s.pubPath(h),
+		"-i", e.Hosts.PubPath(h),
 		"-o", "IdentitiesOnly=yes",
 		"-o", "IdentityAgent=SSH_AUTH_SOCK",
 		"-o", "ForwardAgent=no",

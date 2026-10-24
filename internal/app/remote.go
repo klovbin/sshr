@@ -55,7 +55,7 @@ func remoteTimeoutScript(secs int) string {
 // output, like an upload from the app, a key, an agent or a saved password
 // is used, a host that asks for its password every time fails with
 // ErrAsksPassword, the command is stopped after timeout on the server too
-func (s *Store) RunRemote(h *Host, command string, stdin io.Reader, timeout time.Duration) (*RemoteResult, error) {
+func (e sshEnv) RunRemote(h *Host, command string, stdin io.Reader, timeout time.Duration) (*RemoteResult, error) {
 	sshPath, err := SSHPath()
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (s *Store) RunRemote(h *Host, command string, stdin io.Reader, timeout time
 	if h.PasswordMode == PasswordAsk {
 		return nil, ErrAsksPassword
 	}
-	args, err := s.ConnectArgs(h)
+	args, err := e.ConnectArgs(h)
 	if err != nil {
 		return nil, err
 	}

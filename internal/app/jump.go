@@ -17,8 +17,8 @@ const maxJumpDepth = 8
 
 // resolveHop returns the saved host a jump part names, or a host built from
 // [user@]host[:port] when nothing is saved under that name
-func (s *Store) resolveHop(part string) (h *Host, saved bool, err error) {
-	found, err := s.Find(part)
+func (e sshEnv) resolveHop(part string) (h *Host, saved bool, err error) {
+	found, err := e.Hosts.Find(part)
 	if err == nil {
 		return found, true, nil
 	}
@@ -34,7 +34,7 @@ func (s *Store) resolveHop(part string) (h *Host, saved bool, err error) {
 // h.Jump, plain hops go to ssh as -J, if any hop is a saved host, ssh runs
 // sshr itself as ProxyCommand instead, because -J would not pass that hop's
 // key or password
-func (s *Store) JumpArgs(h *Host) ([]string, error) {
+func (e sshEnv) JumpArgs(h *Host) ([]string, error) {
 	// the host file may come from another device or an older version
 	spec, err := normalizeJump(h.Via())
 	if err != nil {
@@ -46,7 +46,7 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	}
 	anySaved := false
 	for _, p := range parts {
-		_, saved, err := s.resolveHop(p)
+		_, saved, err := e.resolveHop(p)
 		if err != nil {
 			return nil, err
 		}
@@ -73,18 +73,18 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 
 // ConnectArgs is SSHArgs plus the jump options for h, a host with a
 // Gateway is checked first and goes through it when down directly
-func (s *Store) ConnectArgs(h *Host) ([]string, error) {
-	return s.connectArgs(h, true)
+func (e sshEnv) ConnectArgs(h *Host) ([]string, error) {
+	return e.connectArgs(h, true)
 }
 
 // DirectArgs is ConnectArgs without the check of a host with a Gateway,
 // the options of the direct way, for showing a command without waiting
 // on the network
-func (s *Store) DirectArgs(h *Host) ([]string, error) {
-	return s.connectArgs(h, false)
+func (e sshEnv) DirectArgs(h *Host) ([]string, error) {
+	return e.connectArgs(h, false)
 }
 
-func (s *Store) connectArgs(h *Host, check bool) ([]string, error) {
+func (e sshEnv) connectArgs(h *Host, check bool) ([]string, error) {
 	// the host file may come from another device or an older version
 	if err := checkAddress(h.Host); err != nil {
 		return nil, err
@@ -93,13 +93,13 @@ func (s *Store) connectArgs(h *Host, check bool) ([]string, error) {
 	if check {
 		pickRoute(h)
 	}
-	jump, err := s.JumpArgs(h)
+	jump, err := e.JumpArgs(h)
 	if err != nil {
 		return nil, err
 	}
-	args := append(SSHArgs(h), s.vaultKeyArgs(h)...)
-	args = append(args, s.agentArgs(h)...)
-	args = append(args, s.reuseArgs(h)...)
+	args := append(SSHArgs(h), e.vaultKeyArgs(h)...)
+	args = append(args, e.agentArgs(h)...)
+	args = append(args, e.reuseArgs(h)...)
 	return append(args, jump...), nil
 }
 
@@ -107,7 +107,7 @@ func (s *Store) connectArgs(h *Host, check bool) ([]string, error) {
 // targetHost:targetPort through the last hop of chain, the hops before it
 // become that hop's own jump, with a single saved hop its own Jump setting
 // is used, so jump hosts can be chained by saving them that way
-func (s *Store) ProxyHop(chain, targetHost, targetPort string) (*Host, []string, error) {
+func (e sshEnv) ProxyHop(chain, targetHost, targetPort string) (*Host, []string, error) {
 	depth, _ := strconv.Atoi(os.Getenv("SSHR_JUMP_DEPTH"))
 	if depth >= maxJumpDepth {
 		return nil, nil, fmt.Errorf("jump chain is longer than %d hops (does it point back at itself?)", maxJumpDepth)
@@ -119,7 +119,7 @@ func (s *Store) ProxyHop(chain, targetHost, targetPort string) (*Host, []string,
 		return nil, nil, errors.New("empty jump chain")
 	}
 	last, prev := parts[len(parts)-1], parts[:len(parts)-1]
-	hop, _, err := s.resolveHop(last)
+	hop, _, err := e.resolveHop(last)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -127,7 +127,7 @@ func (s *Store) ProxyHop(chain, targetHost, targetPort string) (*Host, []string,
 	if len(prev) > 0 {
 		hopCopy.Jump = strings.Join(prev, ",")
 	}
-	args, err := s.ConnectArgs(&hopCopy)
+	args, err := e.ConnectArgs(&hopCopy)
 	if err != nil {
 		return nil, nil, err
 	}

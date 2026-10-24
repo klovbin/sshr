@@ -51,10 +51,10 @@ func ControlDir() (string, error) {
 }
 
 // reuseOn tells whether connections should share a master, the CLI flags
-// set s.Reuse and SSHR_REUSE for jump hops, otherwise the setting decides
-func (s *Store) reuseOn() bool {
-	if s.Reuse != nil {
-		return *s.Reuse
+// set e.Reuse and SSHR_REUSE for jump hops, otherwise the setting decides
+func (e sshEnv) reuseOn() bool {
+	if e.Reuse != nil {
+		return *e.Reuse
 	}
 	if v, err := strconv.ParseBool(os.Getenv("SSHR_REUSE")); err == nil {
 		return v
@@ -66,8 +66,8 @@ func (s *Store) reuseOn() bool {
 // reuseArgs returns the ControlMaster options for h, or nil when reuse is
 // off, on Windows (its OpenSSH has no ControlMaster) and when the user's own
 // ssh config already sets ControlMaster for this host, then theirs is used
-func (s *Store) reuseArgs(h *Host) []string {
-	if runtime.GOOS == "windows" || !s.reuseOn() {
+func (e sshEnv) reuseArgs(h *Host) []string {
+	if runtime.GOOS == "windows" || !e.reuseOn() {
 		return nil
 	}
 	if userControlMaster(h) {
@@ -107,7 +107,7 @@ func userControlMaster(h *Host) bool {
 }
 
 // CloseMaster stops the master connection to h, if there is one
-func (s *Store) CloseMaster(h *Host) error {
+func (e sshEnv) CloseMaster(h *Host) error {
 	if runtime.GOOS == "windows" {
 		return errors.New("connection reuse is not available on Windows")
 	}

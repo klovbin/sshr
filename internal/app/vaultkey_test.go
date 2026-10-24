@@ -62,7 +62,7 @@ func TestVaultKeySealed(t *testing.T) {
 	if got.KeySealed == "" || got.KeyPub != pub {
 		t.Errorf("key lost on edit: %+v", got)
 	}
-	args := strings.Join(s.vaultKeyArgs(got), " ")
+	args := strings.Join(s.env().vaultKeyArgs(got), " ")
 	if !strings.Contains(args, "IdentitiesOnly=yes") || !strings.Contains(args, "IdentityAgent=SSH_AUTH_SOCK") {
 		t.Errorf("vaultKeyArgs = %q", args)
 	}

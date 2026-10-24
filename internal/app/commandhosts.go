@@ -26,7 +26,7 @@ func (s *Store) writeTarget(b *strings.Builder, h *Host, depth int) {
 	}
 	for _, part := range SplitJump(h.Jump + "," + h.Gateway) {
 		b.WriteString("\x00hop\x00")
-		hop, saved, err := s.resolveHop(part)
+		hop, saved, err := s.env().resolveHop(part)
 		if err != nil || !saved {
 			b.WriteString(part)
 			continue

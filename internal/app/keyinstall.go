@@ -60,8 +60,8 @@ func ReadPublicKey(path string) (string, error) {
 // InstallKeyArgs is the ssh command that appends a public key, given on
 // its stdin, to authorized_keys of h, logging in the way the host does,
 // a password is asked or taken from sshr as for connect
-func (s *Store) InstallKeyArgs(h *Host) ([]string, error) {
-	args, err := s.ConnectArgs(h)
+func (e sshEnv) InstallKeyArgs(h *Host) ([]string, error) {
+	args, err := e.ConnectArgs(h)
 	if err != nil {
 		return nil, err
 	}

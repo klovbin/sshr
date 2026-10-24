@@ -65,7 +65,7 @@ func TestAgentHostPicksKey(t *testing.T) {
 	if h.KeyPub != pubs["work"] {
 		t.Fatalf("KeyPub = %q", h.KeyPub)
 	}
-	args := strings.Join(s.agentArgs(h), " ")
+	args := strings.Join(s.env().agentArgs(h), " ")
 	if !strings.Contains(args, `IdentityAgent="`+sock+`"`) || !strings.Contains(args, "IdentitiesOnly=yes") {
 		t.Errorf("agentArgs = %q", args)
 	}
@@ -93,7 +93,7 @@ func TestAgentHostSystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := strings.Join(s.agentArgs(h), " ")
+	args := strings.Join(s.env().agentArgs(h), " ")
 	if args != "-o IdentityAgent=SSH_AUTH_SOCK" || h.PasswordMode != "" {
 		t.Errorf("agentArgs = %q, host = %+v", args, h)
 	}
@@ -130,7 +130,7 @@ func TestAgentPipeSurvivesSSHParsing(t *testing.T) {
 		t.Skip("the pipe path is Windows only")
 	}
 	s := &Store{Dir: t.TempDir()}
-	args := s.agentArgs(&Host{KeyMode: KeyAgent, Agent: AgentOnePassword})
+	args := s.env().agentArgs(&Host{KeyMode: KeyAgent, Agent: AgentOnePassword})
 	val := argvSplit(strings.TrimPrefix(args[1], "IdentityAgent="))
 	if val != "//./pipe/openssh-ssh-agent" {
 		t.Fatalf("ssh reads the agent as %q", val)

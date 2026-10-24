@@ -41,7 +41,7 @@ func TestReuseArgs(t *testing.T) {
 		s := &Store{Dir: t.TempDir()}
 		on := true
 		s.Reuse = &on
-		if args := s.reuseArgs(&Host{Host: "h", User: "u", Port: 22}); args != nil {
+		if args := s.env().reuseArgs(&Host{Host: "h", User: "u", Port: 22}); args != nil {
 			t.Fatalf("reuse on Windows = %v", args)
 		}
 		return
@@ -60,22 +60,22 @@ func TestReuseArgs(t *testing.T) {
 
 	fakeSSHG(t, "false")
 	s.Reuse = &off
-	if args := s.reuseArgs(h); args != nil {
+	if args := s.env().reuseArgs(h); args != nil {
 		t.Errorf("reuse off = %v", args)
 	}
 	s.Reuse = &on
-	if args := strings.Join(s.reuseArgs(h), " "); !strings.Contains(args, "ControlMaster=auto") || !strings.Contains(args, filepath.Join(dir, "sshr", "%C")) {
+	if args := strings.Join(s.env().reuseArgs(h), " "); !strings.Contains(args, "ControlMaster=auto") || !strings.Contains(args, filepath.Join(dir, "sshr", "%C")) {
 		t.Errorf("reuse on = %s", args)
 	}
 	s.Reuse = nil
 	t.Setenv("SSHR_REUSE", "0")
-	if args := s.reuseArgs(h); args != nil {
+	if args := s.env().reuseArgs(h); args != nil {
 		t.Errorf("SSHR_REUSE=0 = %v", args)
 	}
 	// the user's own ControlMaster wins
 	s.Reuse = &on
 	fakeSSHG(t, "auto")
-	if args := s.reuseArgs(h); args != nil {
+	if args := s.env().reuseArgs(h); args != nil {
 		t.Errorf("with controlmaster auto in ssh config = %v", args)
 	}
 }

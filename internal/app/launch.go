@@ -63,12 +63,12 @@ func MoshStartFailed(code int, elapsed time.Duration) bool {
 
 // PlanSession builds the command line of a session to h with the options
 // of o, it checks a host with a gateway once, on a copy of h
-func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
+func (e sshEnv) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 	if o.Batch && h.PasswordMode == PasswordAsk {
 		return nil, ErrAsksPassword
 	}
 	hc := *h
-	opts, err := s.ConnectArgs(&hc)
+	opts, err := e.ConnectArgs(&hc)
 	if err != nil {
 		return nil, err
 	}

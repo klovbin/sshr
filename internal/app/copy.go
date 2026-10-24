@@ -13,11 +13,11 @@ import (
 // connection as ssh, scp takes the port as -P, -p there keeps file times,
 // -r is always given, so folders copy too, legacy uses the old scp
 // protocol (-O), which needs no SFTP subsystem on the server
-func (s *Store) CopyArgs(h *Host, send, legacy bool, sources []string, dest string) ([]string, error) {
+func (e sshEnv) CopyArgs(h *Host, send, legacy bool, sources []string, dest string) ([]string, error) {
 	if len(sources) == 0 {
 		return nil, errors.New("nothing to copy")
 	}
-	conn, err := s.ConnectArgs(h)
+	conn, err := e.ConnectArgs(h)
 	if err != nil {
 		return nil, err
 	}

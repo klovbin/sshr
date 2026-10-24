@@ -35,7 +35,7 @@ func agentSocket(name string) string {
 // agentArgs are the ssh options for a host with KeyAgent, with a chosen
 // key ssh offers only that one, servers stop after about six keys and an
 // agent with more fails before it reaches the right one
-func (s *Store) agentArgs(h *Host) []string {
+func (e sshEnv) agentArgs(h *Host) []string {
 	if h.KeyMode != KeyAgent {
 		return nil
 	}
@@ -50,10 +50,10 @@ func (s *Store) agentArgs(h *Host) []string {
 		args = append(args, "-o", `IdentityAgent="`+strings.ReplaceAll(filepath.ToSlash(sock), "%", "%%")+`"`)
 	}
 	if h.KeyPub != "" {
-		if _, err := os.Stat(s.pubPath(h)); err != nil {
-			s.writePub(h)
+		if _, err := os.Stat(e.Hosts.PubPath(h)); err != nil {
+			e.Hosts.WritePub(h)
 		}
-		args = append(args, "-i", s.pubPath(h), "-o", "IdentitiesOnly=yes")
+		args = append(args, "-i", e.Hosts.PubPath(h), "-o", "IdentitiesOnly=yes")
 	}
 	return args
 }
