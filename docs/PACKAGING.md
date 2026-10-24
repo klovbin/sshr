@@ -32,7 +32,7 @@ pkgrel=1
 pkgdesc='SSH host manager with an encrypted vault, device sync and an MCP server'
 arch=('x86_64' 'aarch64')
 url='https://github.com/klovbin/sshr'
-license=('MIT')
+license=('AGPL-3.0-only')
 depends=('openssh')
 provides=('sshr')
 conflicts=('sshr')
@@ -83,7 +83,7 @@ class Sshr < Formula
   homepage "https://github.com/klovbin/sshr"
   url "https://github.com/klovbin/sshr/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "<sha256 of the tarball>"
-  license "MIT"
+  license "AGPL-3.0-only"
 
   depends_on "go" => :build
 
@@ -125,7 +125,7 @@ Users run `brew install klovbin/tap/sshr`.
     "version": "0.1.0",
     "description": "SSH host manager with an encrypted vault, device sync and an MCP server",
     "homepage": "https://github.com/klovbin/sshr",
-    "license": "MIT",
+    "license": "AGPL-3.0-only",
     "architecture": {
         "64bit": {
             "url": "https://github.com/klovbin/sshr/releases/download/v0.1.0/sshr_windows_amd64.exe#/sshr.exe",
