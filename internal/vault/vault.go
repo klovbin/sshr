@@ -180,6 +180,7 @@ func Key() ([]byte, error) {
 	vaultMu.Lock()
 	defer vaultMu.Unlock()
 	if vaultKey != nil {
+		touchKey()
 		return vaultKey, nil
 	}
 	var key []byte
@@ -207,6 +208,7 @@ func Key() ([]byte, error) {
 		return nil, err
 	}
 	vaultKey = key
+	touchKey()
 	return key, nil
 }
 
@@ -461,6 +463,7 @@ func ResetForTest(lockPath string) {
 	vaultMu.Lock()
 	vaultKey = nil
 	keySetPending = false
+	stopIdle()
 	vaultMu.Unlock()
 	keyringMu.Lock()
 	keyringDownUntil = time.Time{}

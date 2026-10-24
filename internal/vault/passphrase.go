@@ -366,6 +366,7 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 	vaultMu.Lock()
 	defer vaultMu.Unlock()
 	if vaultKey != nil {
+		touchKey()
 		return vaultKey, nil
 	}
 	if keySetPending {
@@ -390,6 +391,7 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 		return nil, err
 	}
 	vaultKey = key
+	touchKey()
 	return key, nil
 }
 

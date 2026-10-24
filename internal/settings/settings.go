@@ -73,6 +73,11 @@ type Settings struct {
 	// keychain, "passphrase" for a file wrapped with a passphrase (#98), off
 	// by default, a forgotten passphrase loses every saved secret
 	Vault string `json:"vault,omitempty"`
+	// VaultIdleMinutes is how long a running sshr keeps the vault key
+	// after its last use, 0 means 15, below 0 keeps it for the whole run,
+	// the window, sshr serve and sshr mcp run for hours and would hold the
+	// key all that time
+	VaultIdleMinutes int `json:"vault_idle_minutes,omitempty"`
 	// AuditLog keeps ~/.sshr/audit.jsonl, a record of every upload,
 	// command and host change made through sshr mcp and sshr serve, off by
 	// default: it is one more file that grows (up to six times AuditMaxMB) and
@@ -129,6 +134,22 @@ type Settings struct {
 const settingsFormat = 1
 
 var settingsKeys = record.JSONKeys(reflect.TypeOf(Settings{}))
+
+// DefaultVaultIdle is how long the vault key is kept after its last use
+// when vault_idle_minutes is not set
+const DefaultVaultIdle = 15 * time.Minute
+
+// VaultIdle is how long the vault key is kept after its last use, 0 for
+// the whole run
+func (s Settings) VaultIdle() time.Duration {
+	switch {
+	case s.VaultIdleMinutes < 0:
+		return 0
+	case s.VaultIdleMinutes == 0:
+		return DefaultVaultIdle
+	}
+	return time.Duration(s.VaultIdleMinutes) * time.Minute
+}
 
 // DefaultHealthInterval is how often the app checks the hosts when the
 // check is on and the interval is not set
