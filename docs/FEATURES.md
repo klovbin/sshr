@@ -90,6 +90,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
 - **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
+### Keys on a hardware token
+- **What:** `sshr key new --sk [--resident] [--verify-required]` makes a key on a FIDO token (YubiKey and the like) with ssh-keygen, ed25519-sk first and ecdsa-sk when the token has no Ed25519, the handle file is a key file like any other (`-k`), `sshr show` names it a hardware key, pasting a handle into sshr is refused with the reason
+- **What for:** a key file in `~/.ssh` or in a backup can be copied and used anywhere, a key that never leaves a token cannot
+- **Why it helps:** a stolen laptop, backup or synced folder gives no working key, every login needs the token and a touch, with `--verify-required` its PIN too, `--resident` brings the key to a new machine with `ssh-keygen -K`
+- **Why this way:** OpenSSH talks to the token itself (8.2 and newer on both sides, 8.9 for the OpenSSH of Windows), so sshr only runs ssh-keygen with the right options and passes the handle with `-i`, the agent of sshr cannot sign with a token, so a handle is never sealed into the vault, the type is read from the public part of the file, which is not encrypted
+
 ### Saved passwords and ask mode
 - **What:** a password sealed with XChaCha20-Poly1305 under a key from the system keychain, or nothing stored and ssh asks each time
 - **What for:** routers, NAS boxes, cheap VPS panels and client machines where a key is not an option

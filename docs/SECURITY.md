@@ -6,7 +6,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 
 | Who | What they can do | What sshr does | What is left |
 |----|----|----|----|
-| someone with the disk (a stolen laptop, a backup) | read `~/.sshr` | passwords and stored keys are sealed with a vault key kept in the system keychain, or in a file under an Argon2id passphrase | the host list, addresses and users are in clear, the passphrase file can be guessed offline when the passphrase is weak |
+| someone with the disk (a stolen laptop, a backup) | read `~/.sshr` | passwords and stored keys are sealed with a vault key kept in the system keychain, or in a file under an Argon2id passphrase, a key made with `sshr key new --sk` stays on its token and its handle is useless without it | the host list, addresses and users are in clear, the passphrase file can be guessed offline when the passphrase is weak |
 | another user of the machine | open files and sockets | `~/.sshr` and the sockets are 0600 in 0700 folders, the API socket refuses peers of another user | root sees everything |
 | a program running as you | everything you can | nothing hides secrets from it, extensions get no secret from sshr in their environment | it can read the keychain the way sshr does, attach to sshr, edit the audit log |
 | the sync server | store, drop, hold back and reorder what devices upload | hosts are encrypted and signed per device, manifests are chained and MAC'd, a new device is trusted only after comparing fingerprints | it sees the number of hosts, push times and device names, it can show two devices different histories, compare the state fingerprint |

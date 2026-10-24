@@ -22,6 +22,7 @@ type (
 const (
 	ControlPersist   = sshcmd.ControlPersist
 	DefaultKeyName   = sshcmd.DefaultKeyName
+	DefaultSKKeyName = sshcmd.DefaultSKKeyName
 	ProxyCommandName = sshcmd.ProxyCommandName
 	UploadTTL        = sshcmd.UploadTTL
 )
@@ -49,3 +50,11 @@ func StripAuthEnv(env []string) []string        { return sshcmd.StripAuthEnv(env
 func KeygenArgs(path, comment string, noPassphrase bool) ([]string, error) {
 	return sshcmd.KeygenArgs(path, comment, noPassphrase)
 }
+
+var SKKeyTypes = sshcmd.SKKeyTypes
+
+func SKKeygenArgs(path, comment, typ string, resident, verify bool) ([]string, error) {
+	return sshcmd.SKKeygenArgs(path, comment, typ, resident, verify)
+}
+
+func SKUnsupported(stderr string) bool { return sshcmd.SKUnsupported(stderr) }

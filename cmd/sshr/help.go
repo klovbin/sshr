@@ -72,10 +72,18 @@ way, connect goes through the gateway when the host does not answer
 Examples:
   sshr show web`},
 	{name: "key", usage: `sshr key new [name] [--no-passphrase]
+sshr key new [name] --sk [--resident] [--verify-required]
 sshr key install <host> [public key file] [--use]`, short: "make a key, put it on a host",
 		details: `new makes an ed25519 key in ~/.ssh (sshr_ed25519 by default) with
 ssh-keygen, which asks for the passphrase, an existing key is never
 overwritten
+
+new --sk makes the key on a FIDO token (YubiKey and the like), the
+private half never leaves it, ~/.ssh gets a handle (sshr_sk by default)
+that is useless without the token, ed25519-sk first, ecdsa-sk when the
+token has no Ed25519, every login asks for a touch, the server needs
+OpenSSH 8.2 or newer, the handle is used as a key file (-k), it cannot be
+pasted into sshr
 
 install appends a public key to ~/.ssh/authorized_keys on the host,
 logging in the way the host does (a password is asked or taken from
@@ -84,10 +92,15 @@ of ~/.ssh/sshr_ed25519.pub, id_ed25519.pub, id_ecdsa.pub, id_rsa.pub
 
 Options:
   --no-passphrase   new: no passphrase on the key
+  --sk              new: the key lives on a FIDO token
+  --resident        new --sk: keep the key on the token, ssh-keygen -K brings
+                    it to a new machine
+  --verify-required new --sk: ask the PIN of the token on every login too
   --use             install: the host logs in with this key from then on
 
 Examples:
   sshr key new
+  sshr key new --sk --verify-required
   sshr key install web --use`},
 	{name: "rm", aliases: []string{"remove"}, usage: "sshr rm <name or id>", short: "remove a host"},
 	{name: "connect", aliases: []string{"ssh"}, usage: "sshr connect [options] <name or id>", short: "ssh into a host",

@@ -72,3 +72,27 @@ func TestInstallKeyScript(t *testing.T) {
 		t.Errorf("authorized_keys mode %v", fi.Mode())
 	}
 }
+
+// a key on a FIDO token: the type, resident and verify-required reach
+// ssh-keygen, the path is never overwritten
+func TestSKKeygenArgs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sk")
+	args, err := SKKeygenArgs(path, "c", "ed25519-sk", true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-t ed25519-sk -f " + path + " -C c -O resident -O verify-required"
+	if got := strings.Join(args, " "); got != want {
+		t.Errorf("args %q, want %q", got, want)
+	}
+	if args, _ := SKKeygenArgs(path, "c", "ecdsa-sk", false, false); strings.Contains(strings.Join(args, " "), "-O") {
+		t.Errorf("options without asking: %q", args)
+	}
+	os.WriteFile(path, []byte("x"), 0o600)
+	if _, err := SKKeygenArgs(path, "c", "ed25519-sk", false, false); err == nil {
+		t.Error("an existing handle would be overwritten")
+	}
+	if !SKUnsupported("Key enrollment failed: requested feature not supported\n") || SKUnsupported("Key enrollment failed: invalid PIN") {
+		t.Error("SKUnsupported")
+	}
+}

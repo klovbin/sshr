@@ -42,15 +42,16 @@ const (
 
 // The errors of the hosts, the same values as in package hosts
 var (
-	ErrHostEmpty        = hosts.ErrHostEmpty
-	ErrUserRequired     = hosts.ErrUserRequired
-	ErrNotFound         = hosts.ErrNotFound
-	ErrPortInvalid      = hosts.ErrPortInvalid
-	ErrPasswordRequired = hosts.ErrPasswordRequired
-	ErrKeyRequired      = hosts.ErrKeyRequired
-	ErrChanged          = hosts.ErrChanged
-	ErrKeyPassphrase    = hosts.ErrKeyPassphrase
-	ErrNewerFormat      = hosts.ErrNewerFormat
+	ErrHostEmpty          = hosts.ErrHostEmpty
+	ErrUserRequired       = hosts.ErrUserRequired
+	ErrNotFound           = hosts.ErrNotFound
+	ErrPortInvalid        = hosts.ErrPortInvalid
+	ErrPasswordRequired   = hosts.ErrPasswordRequired
+	ErrKeyRequired        = hosts.ErrKeyRequired
+	ErrChanged            = hosts.ErrChanged
+	ErrKeyPassphrase      = hosts.ErrKeyPassphrase
+	ErrHardwareKeyInVault = hosts.ErrHardwareKeyInVault
+	ErrNewerFormat        = hosts.ErrNewerFormat
 )
 
 // ParsePort reads a TCP port
@@ -67,6 +68,10 @@ func ExpandHome(path string) string { return hosts.ExpandHome(path) }
 
 // CheckPrivateKey refuses a key file that is not a private key
 func CheckPrivateKey(path string) error { return hosts.CheckPrivateKey(path) }
+
+// HardwareKeyFile is the type of a key file that is the handle of a key on
+// a FIDO token, empty for any other file, see hosts.HardwareKeyType
+func HardwareKeyFile(path string) string { return hosts.HardwareKeyFile(path) }
 
 // FromOtherDevice prepares a host synced from another device
 func FromOtherDevice(in Host, local *Host) (Host, []string) { return hosts.FromOtherDevice(in, local) }

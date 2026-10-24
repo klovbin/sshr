@@ -11,6 +11,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+
+	"sshr.dev/internal/hosts"
 )
 
 // vaultKeyArgs are the ssh options for a host with a vault key, the key
@@ -69,6 +71,9 @@ func loadKey(h *Host) (any, error) {
 		}
 	default:
 		return nil, fmt.Errorf("%s keeps no key in sshr", h.Name)
+	}
+	if typ := hosts.HardwareKeyType(plain); typ != "" {
+		return nil, fmt.Errorf("the key of %s is the handle of a hardware key (%s), sshr cannot serve it from its agent, save the handle as a key file and keep the token plugged in", h.Name, typ)
 	}
 	raw, err := ssh.ParseRawPrivateKey(plain)
 	if err != nil {

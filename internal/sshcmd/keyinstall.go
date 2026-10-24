@@ -13,16 +13,15 @@ import (
 // DefaultKeyName is the file sshr key new writes in ~/.ssh
 const DefaultKeyName = "sshr_ed25519"
 
+// DefaultSKKeyName is the handle file sshr key new --sk writes in ~/.ssh,
+// the type is not in the name, a token may make ECDSA instead of Ed25519
+const DefaultSKKeyName = "sshr_sk"
+
 // KeygenArgs is the ssh-keygen command for a new ed25519 key at path, it
 // refuses a path where a key or its .pub already is, ssh-keygen asks for
 // the passphrase itself so it never reaches a command line
 func KeygenArgs(path, comment string, noPassphrase bool) ([]string, error) {
-	for _, p := range []string{path, path + ".pub"} {
-		if _, err := os.Lstat(p); err == nil {
-			return nil, fmt.Errorf("%s already exists, sshr never overwrites a key, choose another name", p)
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := newKeyPath(path); err != nil {
 		return nil, err
 	}
 	args := []string{"-t", "ed25519", "-f", path, "-C", comment}
@@ -30,6 +29,49 @@ func KeygenArgs(path, comment string, noPassphrase bool) ([]string, error) {
 		args = append(args, "-N", "")
 	}
 	return args, nil
+}
+
+// SKKeyTypes are the key types of a FIDO token in the order sshr key new
+// tries them, a token without Ed25519 makes ECDSA P-256 keys
+var SKKeyTypes = []string{"ed25519-sk", "ecdsa-sk"}
+
+// SKKeygenArgs is the ssh-keygen command for a new key of type typ on a
+// FIDO token at path: the private key stays on the token, path gets a
+// handle that is useless without it, resident keeps the key on the token
+// so ssh-keygen -K brings it to a new machine, verify asks the PIN on
+// every login besides the touch, ssh-keygen asks for the touch, the PIN
+// and an optional passphrase of the handle itself
+func SKKeygenArgs(path, comment, typ string, resident, verify bool) ([]string, error) {
+	if err := newKeyPath(path); err != nil {
+		return nil, err
+	}
+	args := []string{"-t", typ, "-f", path, "-C", comment}
+	if resident {
+		args = append(args, "-O", "resident")
+	}
+	if verify {
+		args = append(args, "-O", "verify-required")
+	}
+	return args, nil
+}
+
+// SKUnsupported tells from the error output of ssh-keygen that the token
+// does not make keys of the asked type, the next type of SKKeyTypes is
+// worth a try then
+func SKUnsupported(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "feature not supported") || strings.Contains(s, "unsupported algorithm")
+}
+
+// newKeyPath refuses a path where a key or its .pub already is, sshr never
+// overwrites a key, and makes its folder
+func newKeyPath(path string) error {
+	for _, p := range []string{path, path + ".pub"} {
+		if _, err := os.Lstat(p); err == nil {
+			return fmt.Errorf("%s already exists, sshr never overwrites a key, choose another name", p)
+		}
+	}
+	return os.MkdirAll(filepath.Dir(path), 0o700)
 }
 
 // installKeyScript adds the key line read from stdin to authorized_keys
