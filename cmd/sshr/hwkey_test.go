@@ -45,6 +45,14 @@ func TestAuthorizedKeyTypes(t *testing.T) {
 	if len(other) != 1 || !strings.HasPrefix(other[0], "ssh-ed25519 SHA256:") || !strings.HasSuffix(other[0], "laptop") {
 		t.Errorf("other %q", other)
 	}
+	// a comment cannot move the cursor (#361)
+	_, other = authorizedKeyTypes([]byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl a\x1b[2Ab‮c\r\n"))
+	if len(other) != 1 || strings.ContainsAny(other[0], "\x1b‮\r") || !strings.HasSuffix(other[0], "a?[2Ab?c") {
+		t.Errorf("comment printed as %q", other)
+	}
+	if _, err := authorizedKeysOf("web", &app.RemoteResult{ExitCode: 1, Stderr: []byte("x\x1b]0;y\a")}); err == nil || strings.ContainsAny(err.Error(), "\x1b\a") {
+		t.Errorf("stderr of the server in %v", err)
+	}
 	if sk, other := authorizedKeyTypes(nil); len(sk)+len(other) != 0 {
 		t.Error("an empty file gave keys")
 	}

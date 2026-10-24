@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/ssh"
 
@@ -150,9 +151,9 @@ func authorizedKeysOf(name string, res *app.RemoteResult) ([]byte, error) {
 	case 3:
 		return nil, nil
 	case 255:
-		return nil, fmt.Errorf("ssh to %s failed: %s", name, strings.TrimSpace(string(res.Stderr)))
+		return nil, fmt.Errorf("ssh to %s failed: %s", name, terminalSafe(strings.TrimSpace(string(res.Stderr))))
 	}
-	return nil, fmt.Errorf("reading ~/.ssh/authorized_keys on %s failed (exit %d): %s", name, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	return nil, fmt.Errorf("reading ~/.ssh/authorized_keys on %s failed (exit %d): %s", name, res.ExitCode, terminalSafe(strings.TrimSpace(string(res.Stderr))))
 }
 
 // authorizedKeyTypes sorts the lines of an authorized_keys file into keys
@@ -165,7 +166,7 @@ func authorizedKeyTypes(data []byte) (sk, other []string) {
 		if err != nil {
 			break
 		}
-		line := strings.TrimSpace(pub.Type() + " " + ssh.FingerprintSHA256(pub) + " " + comment)
+		line := strings.TrimSpace(pub.Type() + " " + ssh.FingerprintSHA256(pub) + " " + terminalSafe(comment))
 		if strings.HasPrefix(pub.Type(), "sk-") {
 			sk = append(sk, line)
 		} else {
@@ -174,4 +175,17 @@ func authorizedKeyTypes(data []byte) (sk, other []string) {
 		data = rest
 	}
 	return sk, other
+}
+
+// terminalSafe puts ? for control characters and the marks that turn
+// text around, whoever can write authorized_keys on the server could
+// otherwise move the cursor and hide lines of the list, the joiner of
+// emoji stays
+func terminalSafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.In(r, unicode.Bidi_Control) {
+			return '?'
+		}
+		return r
+	}, s)
 }
