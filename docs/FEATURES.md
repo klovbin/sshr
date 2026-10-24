@@ -90,6 +90,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
 - **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
+### Process memory closed to other programs
+- **What:** every sshr process (the CLI, the window, the askpass helper, `sshr mcp` and `sshr serve`) makes itself not dumpable on Linux and refuses debuggers on macOS at start, and sets no core files, `SSHR_ALLOW_DEBUG=1` skips it
+- **What for:** the vault key and the passwords sshr opened sit in its memory while it runs, any program of the same user could read them with ptrace or `/proc/pid/mem`, a crash could write them to a core file
+- **Why it helps:** a script or tool running as you no longer reads secrets out of a running sshr without root, and a crash leaves no copy on disk
+- **Why this way:** one system call at start (`prctl(PR_SET_DUMPABLE, 0)`, `ptrace(PT_DENY_ATTACH)`, `setrlimit(RLIMIT_CORE, 0)`), ssh started from sshr gets the defaults back on exec, Windows has no such switch for processes of the same user
+
 ### Keys on a hardware token
 - **What:** `sshr key new --sk [--resident] [--verify-required]` makes a key on a FIDO token (YubiKey and the like) with ssh-keygen, ed25519-sk first and ecdsa-sk when the token has no Ed25519, the handle file is a key file like any other (`-k`), `sshr show` names it a hardware key, pasting a handle into sshr is refused with the reason
 - **What for:** a key file in `~/.ssh` or in a backup can be copied and used anywhere, a key that never leaves a token cannot

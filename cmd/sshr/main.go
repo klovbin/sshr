@@ -6,12 +6,18 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"sshr.dev/internal/app"
 )
 
 func main() {
+	// every mode may hold the vault key or an opened secret, the askpass
+	// call too, the memory is closed to other processes first
+	if err := app.Harden(); err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: warning: memory of this process stays readable: %v\n", err)
+	}
 	// ssh runs sshr as SSH_ASKPASS for hosts with a saved password
 	if app.IsAskpassCall(os.Args[1:]) {
 		os.Exit(app.RunAskpass(os.Args[1]))
