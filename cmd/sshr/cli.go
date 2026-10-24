@@ -538,7 +538,7 @@ func cmdHooks(store *app.Store, args []string) {
 }
 
 func cmdConnect(store *app.Store, args []string) {
-	settings, _ := app.LoadSettings()
+	settings, settingsErr := app.LoadSettings()
 	useMosh := settings.Mosh
 	plain := false
 	var localCommands *bool
@@ -591,6 +591,14 @@ func cmdConnect(store *app.Store, args []string) {
 		if fwds, err = app.FindForwards(h.Forwards, fwdNames); err != nil {
 			fatal(err)
 		}
+	}
+	if settingsErr != nil {
+		// without the settings the local commands are unknown, a VPN the
+		// user expects would silently stay down
+		if localCommands != nil && *localCommands {
+			fatal(fmt.Errorf("settings.json does not read (%v), the local commands are unknown, not connecting", settingsErr))
+		}
+		fmt.Fprintf(os.Stderr, "sshr: settings.json does not read (%v), connecting without its settings and local commands\n", settingsErr)
 	}
 	// before the plan: it checks whether a host with a gateway answers
 	// directly, a VPN the command brings up changes the answer
@@ -679,6 +687,11 @@ func afterConnect(command string, h *app.Host, code int) {
 	beforeExit = nil
 	if command == "" {
 		return
+	}
+	if code < 0 {
+		// ssh killed by a signal has no exit code, ssh itself says 255 for
+		// a connection that ended abnormally
+		code = 255
 	}
 	fmt.Fprintln(os.Stderr, "sshr: running after the session: "+command)
 	if err := app.RunLocalCommand(command, h, code, os.Stdin, os.Stdout, os.Stderr); err != nil {

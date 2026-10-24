@@ -36,7 +36,16 @@ func LocalCommandsOf(st Settings, h *Host, force *bool) (cmd HostCommand, on boo
 func RunLocalCommand(command string, h *Host, exit int, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := shellCommand(command)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	cmd.Env = append(os.Environ(),
+	// SSHR_ variables of a parent (an sshr that runs sshr) must not stand in
+	// for the ones of this host, SSHR_EXIT for a command before above all
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "SSHR_HOST") && !strings.HasPrefix(kv, "SSHR_PORT=") &&
+			!strings.HasPrefix(kv, "SSHR_USER=") && !strings.HasPrefix(kv, "SSHR_EXIT=") {
+			env = append(env, kv)
+		}
+	}
+	cmd.Env = append(env,
 		"SSHR_HOST_ID="+h.ID,
 		"SSHR_HOST_NAME="+envSafe(h.Name, runtime.GOOS == "windows"),
 		"SSHR_HOST="+h.Host,

@@ -34,6 +34,32 @@ func TestLocalCommandAfterFailedConnect(t *testing.T) {
 	}
 }
 
+// TestLocalCommandsBrokenSettings checks that connect says so when
+// settings.json does not read and refuses --local-commands then, and that
+// a command before never sees an SSHR_EXIT of its parent (#291)
+func TestLocalCommandsBrokenSettings(t *testing.T) {
+	tools := fakeTools(t)
+	home := t.TempDir()
+	log := filepath.Join(t.TempDir(), "log")
+	mustRun(t, home, "add", "10.0.0.5", "-u", "deploy", "-n", "web", "--ask-password")
+	mustRun(t, home, "hooks", "set", "web", "before", `echo "exit=$SSHR_EXIT" >>`+log)
+	t.Setenv("SSHR_EXIT", "42")
+	mustRun(t, home, "connect", "--plain", "--local-commands", "web")
+	if b, _ := os.ReadFile(log); string(b) != "exit=\n" {
+		t.Errorf("the command before saw %q", b)
+	}
+	argsOf(t, tools, "ssh")
+	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte("{broken"), 0o600)
+	_, errOut, code := sshrIn(t, home, "connect", "--plain", "--local-commands", "web")
+	if code != 1 || argsOf(t, tools, "ssh") != "" || !strings.Contains(errOut, "settings.json does not read") {
+		t.Errorf("--local-commands with broken settings: %d %q", code, errOut)
+	}
+	_, errOut, code = sshrIn(t, home, "connect", "--plain", "web")
+	if code != 0 || argsOf(t, tools, "ssh") == "" || !strings.Contains(errOut, "connecting without its settings") {
+		t.Errorf("broken settings: %d %q", code, errOut)
+	}
+}
+
 // TestLocalCommandBeforeGatewayCheck checks that the command before runs
 // before connect decides whether a host with a gateway answers directly, a
 // VPN it brings up makes the host answer (#287)
