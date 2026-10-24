@@ -260,7 +260,9 @@ func (c *Client) RestoreClaim(server, account, kitText, name string, pass func()
 		rc.st.ClaimSeen, rc.st.ClaimSeenAt = rc.st.Claim, rc.now()
 		return rc.save()
 	}); err != nil {
-		return time.Time{}, err
+		// a new restore finds the claim made and goes on from it
+		rc.forget()
+		return time.Time{}, fmt.Errorf("the account is claimed, the state of the kit could not be saved here, run the restore again: %v", err)
 	}
 	code := rc.st.Account + "." + strings.ReplaceAll(Fingerprint(self.SignPub), "-", "")
 	if _, err := c.Join(server, code, name); err != nil {
