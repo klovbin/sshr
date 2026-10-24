@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -111,7 +112,12 @@ func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 		return p, nil
 	}
 	m := &SessionPlan{Host: &hc, Tool: "mosh", Via: p.Via, Session: session, Fallback: p, batch: o.Batch}
-	m.Args = []string{"--ssh=ssh " + strings.Join(sshOpts, " "), "--", dest}
+	// mosh starts ssh itself, on Windows the ssh sshr chose (#313)
+	sshName := "ssh"
+	if ssh := childSSH(runtime.GOOS, SSHPath); ssh != "" {
+		sshName = ssh
+	}
+	m.Args = []string{"--ssh=" + sshName + " " + strings.Join(sshOpts, " "), "--", dest}
 	if script := SessionScript(session); script != "" {
 		// mosh-server runs the command itself, without a shell in between
 		m.Args = append(m.Args, "sh", "-c", script)

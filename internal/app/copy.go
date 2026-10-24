@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -19,7 +20,11 @@ func (s *Store) CopyArgs(h *Host, send, legacy bool, sources []string, dest stri
 	if err != nil {
 		return nil, err
 	}
-	args := make([]string, 0, len(conn)+len(sources)+4)
+	args := make([]string, 0, len(conn)+len(sources)+6)
+	// scp starts ssh itself, it must be the ssh sshr chose (#313)
+	if ssh := childSSH(runtime.GOOS, SSHPath); ssh != "" {
+		args = append(args, "-S", ssh)
+	}
 	for i := 0; i < len(conn); i++ {
 		if conn[i] == "-p" && i+1 < len(conn) {
 			args = append(args, "-P", conn[i+1])

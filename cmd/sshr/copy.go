@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"sshr.dev/internal/app"
@@ -47,7 +46,7 @@ func cmdCopy(store *app.Store, send bool, args []string) {
 			}
 		}
 	}
-	scp, err := exec.LookPath("scp")
+	scp, err := app.SCPPath()
 	if err != nil {
 		fatal(fmt.Errorf("scp not found in PATH, it comes with OpenSSH"))
 	}

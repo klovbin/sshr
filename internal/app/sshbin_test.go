@@ -50,7 +50,7 @@ func TestPickSSH(t *testing.T) {
 
 func TestParseSSHVersion(t *testing.T) {
 	for out, want := range map[string][3]int{
-		"OpenSSH_9.6p1, OpenSSL 3.0.13 30 Jan 2024":  {9, 6, 1},
+		"OpenSSH_9.6p1, OpenSSL 3.0.13 30 Jan 2024": {9, 6, 1},
 		"OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2": {8, 1, 1},
 		"OpenSSH_for_Windows_9.5p1, LibreSSL 3.8.2": {9, 5, 1},
 		"Dropbear v2022.83":                         {0, 0, 0},
@@ -108,5 +108,21 @@ func TestNoBareSSH(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestChildSSH checks the ssh scp and mosh are told to use (#313): the
+// chosen one on Windows, nothing elsewhere, never a path with spaces
+func TestChildSSH(t *testing.T) {
+	sys := func() (string, error) { return `C:\Windows\System32\OpenSSH\ssh.exe`, nil }
+	spaced := func() (string, error) { return `C:\Program Files\OpenSSH\ssh.exe`, nil }
+	if got := childSSH("windows", sys); got != `C:\Windows\System32\OpenSSH\ssh.exe` {
+		t.Errorf("windows: %q", got)
+	}
+	if got := childSSH("linux", sys); got != "" {
+		t.Errorf("linux: %q", got)
+	}
+	if got := childSSH("windows", spaced); got != "" {
+		t.Errorf("a path with spaces: %q", got)
 	}
 }

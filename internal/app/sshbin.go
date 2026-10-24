@@ -37,6 +37,38 @@ func sshCommand(args ...string) *exec.Cmd {
 // SSHCommand is sshCommand for the front ends
 func SSHCommand(args ...string) *exec.Cmd { return sshCommand(args...) }
 
+// childSSH is the ssh a program that starts ssh itself (scp, mosh) is told
+// to use, on Windows the one SSHPath chose, elsewhere "" since their own
+// PATH lookup finds the same, a path with spaces is not passed, mosh would
+// split it
+func childSSH(goos string, path func() (string, error)) string {
+	if goos != "windows" {
+		return ""
+	}
+	p, err := path()
+	if err != nil || strings.ContainsAny(p, " \t") {
+		return ""
+	}
+	return p
+}
+
+// SCPPath is the scp to run, on Windows the one next to the chosen ssh, so
+// both come from the same OpenSSH
+func SCPPath() (string, error) {
+	if runtime.GOOS == "windows" {
+		if ssh, err := SSHPath(); err == nil {
+			if scp := filepath.Join(filepath.Dir(ssh), "scp.exe"); fileExists(scp) {
+				return scp, nil
+			}
+		}
+	}
+	p, err := exec.LookPath("scp")
+	if err != nil {
+		return "", errors.New("scp not found in PATH, it comes with OpenSSH")
+	}
+	return p, nil
+}
+
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
