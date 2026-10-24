@@ -138,6 +138,10 @@ func moshRefusal(o LaunchOptions, via string, sshOpts []string) string {
 	if _, err := exec.LookPath("mosh"); err != nil {
 		return "mosh is not installed, using ssh"
 	}
+	// mosh would start the ssh on PATH, not the one SSHR_SSH names
+	if own := os.Getenv("SSHR_SSH"); strings.ContainsAny(own, " \t") {
+		return "SSHR_SSH has spaces, mosh cannot pass it, using ssh"
+	}
 	// mosh splits --ssh on whitespace, any option with a space (a key or
 	// agent path, the sshr path in ProxyCommand) would be cut in two
 	for _, opt := range sshOpts {

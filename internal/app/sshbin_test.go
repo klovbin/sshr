@@ -208,4 +208,12 @@ func TestPickSCP(t *testing.T) {
 	if _, err := pickSCP("linux", sys, "", none, func(string) (string, error) { return "", errors.New("x") }); err == nil {
 		t.Error("no scp went through")
 	}
+	// a wrong SSHR_SSH is said, an SSHR_SSH without scp on Windows refused (#318)
+	bad := func() (string, error) { return "", errors.New("SSHR_SSH names x, there is no such file") }
+	if _, err := pickSCP("linux", bad, "x", none, look); err == nil || !strings.Contains(err.Error(), "SSHR_SSH") {
+		t.Errorf("bad SSHR_SSH: %v", err)
+	}
+	if _, err := pickSCP("windows", sys, `C:\Windows\System32\OpenSSH\ssh.exe`, none, look); err == nil {
+		t.Error("SSHR_SSH without scp on Windows took the scp on PATH")
+	}
 }

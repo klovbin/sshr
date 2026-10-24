@@ -74,14 +74,19 @@ func SCPPath() (string, error) {
 func pickSCP(goos string, sshPath func() (string, error), own string, exists func(string) bool,
 	look func(string) (string, error)) (string, error) {
 	if goos == "windows" || own != "" {
-		if ssh, err := sshPath(); err == nil {
+		ssh, err := sshPath()
+		if err != nil && own != "" {
+			// a wrong SSHR_SSH is said, not passed over for the ssh on PATH
+			return "", err
+		}
+		if err == nil {
 			i := strings.LastIndexAny(ssh, `\/`)
 			for _, name := range []string{"scp.exe", "scp"} {
 				if scp := ssh[:i+1] + name; i >= 0 && exists(scp) {
 					return scp, nil
 				}
 			}
-			if goos == "windows" && own == "" {
+			if goos == "windows" {
 				return "", fmt.Errorf("no scp.exe next to %s, install the OpenSSH client of Windows or name an ssh with SSHR_SSH", ssh)
 			}
 		}
