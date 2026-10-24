@@ -49,10 +49,18 @@ function OkPort($p) {
 	"$p" -match '^[0-9]+$' -and [int]::TryParse("$p", [ref]$n) -and $n -ge 1 -and $n -le 65535
 }
 
-# Ansi is the ANSI code page of the system, the one WinSCP falls back to
+# Ansi is the ANSI code page of the system locale (ACP), the one the
+# program writes in, it can differ from the regional format of the user,
+# the culture is used where there is no registry
 function Ansi {
+	$cp = 0
 	try {
-		[System.Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+		$cp = [int](Get-ItemPropertyValue -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage' -Name ACP)
+	} catch {
+	}
+	if ($cp -le 0) { $cp = [Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage }
+	try {
+		[System.Text.Encoding]::GetEncoding($cp)
 	} catch {
 		[System.Text.Encoding]::GetEncoding(1252)
 	}

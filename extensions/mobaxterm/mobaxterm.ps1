@@ -50,7 +50,7 @@ function OkPort($p) {
 # ReadText decodes a file: UTF-16 by its BOM, an editor may save the
 # file so, UTF-8 with or without a BOM when it decodes as UTF-8, else the
 # ANSI code page of the system, the charset MobaXterm writes, 1252 on a
-# western Windows
+# western Windows (Ansi)
 function ReadText([string]$path) {
 	$b = [System.IO.File]::ReadAllBytes($path)
 	if ($b.Length -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xFE) {
@@ -65,12 +65,24 @@ function ReadText([string]$path) {
 		return (New-Object System.Text.UTF8Encoding($false, $true)).GetString($b, $skip, $b.Length - $skip)
 	} catch {
 	}
+	(Ansi).GetString($b)
+}
+
+# Ansi is the ANSI code page of the system locale (ACP), the one the
+# program writes in, it can differ from the regional format of the user,
+# the culture is used where there is no registry
+function Ansi {
+	$cp = 0
 	try {
-		$ansi = [System.Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+		$cp = [int](Get-ItemPropertyValue -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage' -Name ACP)
 	} catch {
-		$ansi = [System.Text.Encoding]::GetEncoding(1252)
 	}
-	$ansi.GetString($b)
+	if ($cp -le 0) { $cp = [Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage }
+	try {
+		[System.Text.Encoding]::GetEncoding($cp)
+	} catch {
+		[System.Text.Encoding]::GetEncoding(1252)
+	}
 }
 
 # Field decodes the escapes MobaXterm writes for #, %, |, ; and " in a
