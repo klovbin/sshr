@@ -369,3 +369,77 @@ func TestPuttyWindowsImporter(t *testing.T) {
 		}
 	}
 }
+
+// runPwshImporter runs the PowerShell script of an importer with pwsh,
+// the importers of Windows are checked this way on any system, the test
+// is skipped where pwsh is missing
+func runPwshImporter(t *testing.T, name string, files ...string) ([]ExtHost, string) {
+	t.Helper()
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("no pwsh here")
+	}
+	dir := filepath.Join(extensionsDir, name)
+	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, name+".ps1")}, files...)
+	cmd := exec.Command(pwsh, args...)
+	cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
+	var notes bytes.Buffer
+	cmd.Stderr = &notes
+	out, err := Collect(cmd)
+	if err != nil {
+		t.Fatalf("%v: %s", err, notes.String())
+	}
+	hosts, warnings, err := ParseImport(out)
+	if err != nil || len(warnings) > 0 {
+		t.Fatalf("%s printed %s: %v %v", name, out, err, warnings)
+	}
+	return hosts, notes.String()
+}
+
+// TestMobaXtermImporter reads an export of MobaXterm in Windows-1252 with
+// a folder, two gateways, an RDP session and a session outside the
+// bookmarks, and a .moba file of one session
+func TestMobaXtermImporter(t *testing.T) {
+	ini := "[Bookmarks]\r\nSubRep=\r\nImgNum=42\r\n" +
+		"web \x80=#109#0%10.0.0.5%2222%deploy%%-1%-1%%gw1.example__PIPE__gw2.example%22__PIPE__2200%ops__PIPE__%0%0%0%_CurrentDrive_:\\keys\\web.ppk%%-1%0%0%2%socks.example%1080%%0%0%1%%0%%%%0%-1%-1%0#MobaFont%10%0%0%-1%15%236,236,236%30,30,30%180,180,192%0%-1%0%%xterm%-1%0%_Std_Colors_0_%80%24%0%0%-1%<none>%%0%0%-1%-1#0# #-1\r\n" +
+		"desk=#91#4%10.0.0.9%3389%%0%0%0%0%-1%0%0%-1#MobaFont#0# #-1\r\n" +
+		"\r\n[Bookmarks_1]\r\nSubRep=Clients\\Acme\r\nImgNum=41\r\n" +
+		"db=#109#0%db.local%22%<default>%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\keys\\id_ed25519%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
+		"web \x80=#109#0%10.1.0.5%22%%%-1%-1%%%%%0%-1%0%%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
+		"\r\n[Misc]\r\nnot=#109#0%misc.example%22%u%%-1\r\n"
+	tmp := t.TempDir()
+	file := filepath.Join(tmp, "export.mxtsessions")
+	moba := filepath.Join(tmp, "one.moba")
+	if os.WriteFile(file, []byte(ini), 0o600) != nil || os.WriteFile(moba, []byte("single=#109#0%single.example%22%root%%-1%-1#MobaFont#0# #-1\r\n"), 0o600) != nil {
+		t.Fatal("cannot write the files")
+	}
+	hosts, notes := runPwshImporter(t, "mobaxterm", file, moba)
+	got := map[string]ExtHost{}
+	for _, h := range hosts {
+		got[h.Key] = h
+	}
+	if len(hosts) != 4 {
+		t.Fatalf("%+v", hosts)
+	}
+	web := got["web \u20ac"]
+	if web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" || web.KeyFile != "" ||
+		web.Jump != "ops@gw1.example,gw2.example:2200" || len(web.Tags) != 0 {
+		t.Errorf("web: %+v", web)
+	}
+	db := got[`Clients\Acme\db`]
+	if db.Host != "db.local" || db.User != "" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" ||
+		strings.Join(db.Tags, ",") != "Clients,Acme" {
+		t.Errorf("db: %+v", db)
+	}
+	if got[`Clients\Acme\web `+"\u20ac"].Host != "10.1.0.5" || got["single"].User != "root" {
+		t.Errorf("%+v", got)
+	}
+	if !strings.Contains(notes, "puttygen") || !strings.Contains(notes, "proxy (type 2)") {
+		t.Errorf("notes: %s", notes)
+	}
+	for _, h := range hosts {
+		if _, err := h.ToHost("mobaxterm"); err != nil {
+			t.Errorf("%s: %v", h.Name, err)
+		}
+	}
+}

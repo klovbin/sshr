@@ -53,7 +53,7 @@ Needed before a release
 Features
 
 3. Drag and drop files onto a host in the app ([#32](https://github.com/klovbin/sshr/issues/32))
-6. Import from PuTTY on Windows (registry), MobaXterm, Termius, Royal TS as extensions of kind import, Remmina and PuTTY (Linux, macOS, Windows) are done in `extensions/` ([#34](https://github.com/klovbin/sshr/issues/34))
+6. Import from PuTTY on Windows (registry), MobaXterm, Termius, Royal TS as extensions of kind import, Remmina, PuTTY (Linux, macOS, Windows) and MobaXterm are done in `extensions/` ([#34](https://github.com/klovbin/sshr/issues/34))
 
 Later
 

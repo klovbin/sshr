@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "mobaxterm",
+  "version": "0.1.0",
+  "description": "imports the SSH sessions of MobaXterm on Windows (MobaXterm.ini or a .mxtsessions export), no passwords",
+  "command": { "windows": ["./mobaxterm.cmd"] },
+  "kinds": ["import"]
+}
