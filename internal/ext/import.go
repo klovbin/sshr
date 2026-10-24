@@ -173,7 +173,7 @@ func Collect(cmd *exec.Cmd) ([]byte, error) {
 	}
 	data, readErr := io.ReadAll(io.LimitReader(out, importMaxBytes+1))
 	if len(data) > importMaxBytes {
-		cmd.Process.Kill()
+		killTree(cmd)
 		cmd.Wait()
 		return nil, errors.New("the importer printed more than 8 MiB")
 	}
