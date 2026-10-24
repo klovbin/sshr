@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"sshr.dev/internal/sshcmd"
 )
 
 // exportHeader starts the file sshr writes, a file without it is not
@@ -141,7 +143,7 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 		line("IdentityFile", p)
 		line("IdentitiesOnly", "yes")
 	case h.KeyMode == KeyAgent:
-		if sock := agentSocket(h.Agent); sock != "" {
+		if sock := sshcmd.AgentSocket(h.Agent); sock != "" {
 			p, err := exportPath(sock)
 			if err != nil {
 				return "", "", err
@@ -165,7 +167,7 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 	if parts := SplitJump(h.Jump); len(parts) > 0 {
 		var hops []string
 		for _, p := range parts {
-			hop, saved, err := s.env().resolveHop(p)
+			hop, saved, err := s.env().ResolveHop(p)
 			if err != nil {
 				return "", "", err
 			}

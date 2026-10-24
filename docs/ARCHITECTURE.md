@@ -17,8 +17,10 @@ How sshr is built, which package may use which, where data lives and how the mai
          /       |       |        |          \                    |
   internal/ui   api     mcp   syncclient   desktop, clip      syncserver
          \       |       |        |   \                           |
-          internal/app (runs ssh,  |    syncproto <---------------+
-          op, bw, the keychain)    |
+          internal/app (Store,     |    syncproto <---------------+
+          the keychain, op, bw)    |
+                  \                |
+          internal/sshcmd (runs ssh, scp, the agent)
                   \                |
        hosts, health, vault, settings, record, fileio (no programs)
 ```
@@ -33,7 +35,8 @@ How sshr is built, which package may use which, where data lives and how the mai
 | `internal/settings` | `~/.sshr/settings.json`: load, save of the changed fields only, the command list, never synced | `fileio`, `record` |
 | `internal/record` | keeps files readable across versions: unknown keys kept and written back, the `version` of a file | nothing |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
-| `internal/app` | the core: the Store facade over package hosts, ssh command lines, password managers, ssh config import and export | `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `pwmgr` |
+| `internal/sshcmd` | the ssh runner: ssh, scp and mosh command lines, jump hosts, reuse of a connection, copy, remote commands, a session plan, keys of the vault, 1Password and Bitwarden served through a private agent, saved passwords through askpass, the ssh binary to use, on an Env over the host store | `fileio`, `settings`, `vault`, `hosts`, `health`, `pwmgr` |
+| `internal/app` | the core: the Store facade over package hosts with its hooks, the system keychain, password managers, ssh config import and export, the names of sshcmd the front ends use | `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `pwmgr`, `sshcmd` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/s3store` | a sync account in an S3 bucket (AWS S3, R2, MinIO) through the AWS SDK, the create of a manifest is PutObject with If-None-Match: * | `syncclient` |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation, runs no program | `fileio`, `record`, `vault`, `hosts`, `syncproto` |
@@ -65,14 +68,14 @@ Rules that follow:
 | Area | Files |
 |----|----|
 | hosts and their store | package `hosts` (`store.go`, `host.go`, `record.go`, `forward.go`, `tags.go`, `summary.go`, `redact.go`, `hop.go`, `refs.go`, `pub.go`), in app `storefacade.go` (Store, its hooks, DefaultStore, Unlock) and `hosts.go` (aliases), `version.go` |
-| secrets | `vault.go` (the system keychain and the passphrase prompt handed to package vault, wrappers), `keychain_system.go`, `prompt.go`, `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords), `pwmgr.go` and `opstore.go` over package pwmgr, `agent.go` |
-| ssh command lines | `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `forward.go`, `copy.go`, `remote.go` |
+| secrets | `vault.go` (the system keychain and the passphrase prompt handed to package vault, wrappers), `keychain_system.go`, `prompt.go`, `pwmgr.go` and `opstore.go` over package pwmgr, in package `sshcmd` `vaultkey.go` (keys kept in sshr, served through a private agent), `sshauth.go` (AttachAuth, askpass socket for saved passwords, Unlock), `agent.go` |
+| ssh command lines | package `sshcmd` (`env.go`, the Env over the host store, `upload.go` (SSHArgs, the base builder, and uploads), `jump.go` (ConnectArgs, JumpArgs, ProxyHop), `reuse.go`, `session.go`, `copy.go`, `remote.go`, `launch.go`, `keyinstall.go`, `sshbin.go`), in app `sshenv.go` (Store builds the Env and forwards the methods) and `sshcmd.go` (the names the front ends use) |
 | reachability | package `health`, a TCP connect and the SSH banner in process, no ssh, `hostkey.go` there reads the host key |
 | ssh config | `sshconfig.go` (import through `ssh -G`), `sshexport.go` (export, the Include line in `~/.ssh/config`) |
 | settings | `settings.go` (aliases of package settings) |
-| platform | `files.go` (`WriteFileAtomic`, `LockFile`, `WaitLock` over `fileio`), `tty_*.go`, `agentsock_*.go` |
+| platform | `files.go` (`WriteFileAtomic`, `LockFile`, `WaitLock` over `fileio`), in package `sshcmd` `tty_*.go`, `agentsock_*.go` |
 
-The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp` and remote commands. A session is planned in the core too: `Store.PlanSession` (`internal/app/launch.go`) turns a host and `LaunchOptions` (forwards, mosh, plain, tunnel, batch) into the ssh or mosh command line on a copy of the host, with the route through a gateway, the notes for the user and the ssh fallback of a mosh plan, `SessionPlan.Command` attaches the host's secrets. `sshr connect`, `sshr tunnel` and the tunnels of the REST API use it. Running the process, waiting for it, forwarding signals and printing stay with the caller, a GUI must not forward a terminal's signals.
+The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp` and remote commands. A session is planned in the core too: `Store.PlanSession` (`internal/sshcmd/launch.go`) turns a host and `LaunchOptions` (forwards, mosh, plain, tunnel, batch) into the ssh or mosh command line on a copy of the host, with the route through a gateway, the notes for the user and the ssh fallback of a mosh plan, `SessionPlan.Command` attaches the host's secrets. `sshr connect`, `sshr tunnel` and the tunnels of the REST API use it. Running the process, waiting for it, forwarding signals and printing stay with the caller, a GUI must not forward a terminal's signals.
 
 ## Processes
 

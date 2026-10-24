@@ -122,7 +122,7 @@ func TestOnePasswordKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop()
-	if !strings.Contains(strings.Join(s.env().vaultKeyArgs(got), " "), "IdentitiesOnly=yes") {
+	if args, err := s.ConnectArgs(got); err != nil || !strings.Contains(strings.Join(args, " "), "IdentitiesOnly=yes") {
 		t.Error("no agent options for a 1Password key")
 	}
 }

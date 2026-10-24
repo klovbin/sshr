@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 
 	"sshr.dev/internal/hosts"
+
+	"sshr.dev/internal/sshcmd"
 )
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -77,29 +79,8 @@ func (s *Store) hostsChanged() {
 }
 
 // Unlock fills h.Password from the vault, 1Password or Bitwarden before
-// connecting, a host without a saved password is left as it is
-func Unlock(h *Host) error {
-	if h.Password != "" {
-		return nil
-	}
-	switch h.PasswordMode {
-	case PasswordOnePassword:
-		pw, err := opRead(h.PasswordRef)
-		if err != nil {
-			return err
-		}
-		h.Password = string(pw)
-		return nil
-	case PasswordBitwarden:
-		pw, err := bwPassword(h.PasswordRef)
-		if err != nil {
-			return err
-		}
-		h.Password = string(pw)
-		return nil
-	}
-	return unlockSaved(h)
-}
+// connecting, see sshcmd.Unlock
+func Unlock(h *Host) error { return sshcmd.Unlock(h) }
 
 // The methods below are the host store as the front ends and the code
 // that runs ssh know it, they hand the work to hostStore with the hooks
@@ -118,7 +99,7 @@ func (s *Store) db() *hostStore {
 // the ssh config export of this Store
 func (s *Store) hooks() hostHooks {
 	return hostHooks{
-		AgentKey:    prepareAgentKey,
+		AgentKey:    sshcmd.PrepareAgentKey,
 		KeyPub:      fillKeyPub,
 		StoreSecret: s.opStorePassword,
 		Changed: func(tx *hostStore) {

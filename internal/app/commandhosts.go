@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"sshr.dev/internal/settings"
+
+	"sshr.dev/internal/sshcmd"
 )
 
 // CommandTarget binds a host allowed for commands to where it points: its
@@ -21,12 +23,12 @@ func (s *Store) CommandTarget(h *Host) string {
 
 func (s *Store) writeTarget(b *strings.Builder, h *Host, depth int) {
 	b.WriteString(destination(*h))
-	if depth >= maxJumpDepth {
+	if depth >= sshcmd.MaxJumpDepth {
 		return
 	}
 	for _, part := range SplitJump(h.Jump + "," + h.Gateway) {
 		b.WriteString("\x00hop\x00")
-		hop, saved, err := s.env().resolveHop(part)
+		hop, saved, err := s.env().ResolveHop(part)
 		if err != nil || !saved {
 			b.WriteString(part)
 			continue

@@ -3,22 +3,16 @@ package app
 import (
 	"io"
 	"time"
-)
 
-// sshEnv is what the code that runs ssh, scp and the agent needs of a
-// Store: the host store with its hooks, the held one inside Locked, and the
-// "reuse" override of this run
-type sshEnv struct {
-	Hosts *hostStore
-	Reuse *bool
-}
+	"sshr.dev/internal/sshcmd"
+)
 
 // env is the ssh environment of s, built on every call so a Store inside
 // Locked hands out the held host store and the hooks stay attached
-func (s *Store) env() sshEnv { return sshEnv{Hosts: s.db(), Reuse: s.Reuse} }
+func (s *Store) env() sshcmd.Env { return sshcmd.Env{Hosts: s.db(), Reuse: s.Reuse} }
 
 // The methods below are the ssh runner as the front ends know it, see the
-// methods of sshEnv of the same name
+// methods of sshcmd.Env of the same name
 
 func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (string, error) {
 	return s.env().UploadImage(h, data, ext, batch)

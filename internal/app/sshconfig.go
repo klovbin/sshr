@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"sshr.dev/internal/sshcmd"
 )
 
 // sshConfigFile is the config ssh -G reads, empty means the user's own
@@ -141,7 +143,7 @@ func sshG(alias string, config string) (map[string][]string, error) {
 	if config != "" {
 		args = append(args, "-F", config)
 	}
-	cmd := sshCommand(append(args, "--", alias)...)
+	cmd := sshcmd.SSHCommand(append(args, "--", alias)...)
 	cmd.Stdin = nil
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -240,7 +242,7 @@ func hostFromSSHConfig(alias string, g, defaults map[string][]string) (Host, []s
 	if a := first("identityagent"); h.Key == "" && a != "" && a != "none" && a != "SSH_AUTH_SOCK" {
 		h.KeyMode = KeyAgent
 		h.Agent = a
-		if one := ExpandHome(agentSocket(AgentOnePassword)); a == one || strings.HasSuffix(a, "/.1password/agent.sock") {
+		if one := ExpandHome(sshcmd.AgentSocket(AgentOnePassword)); a == one || strings.HasSuffix(a, "/.1password/agent.sock") {
 			h.Agent = AgentOnePassword
 		}
 	}
