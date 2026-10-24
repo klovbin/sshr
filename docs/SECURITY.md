@@ -37,7 +37,7 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 
 ## How a key from sshr or 1Password reaches ssh
 
-- sshr serves the key from an ssh agent inside its own process for as long as ssh runs, on a unix socket in the 0700 control directory (a named pipe on Windows), the private key is only in memory
+- sshr serves the key from an ssh agent inside its own process for as long as ssh runs, on a unix socket in the 0700 control directory (a named pipe on Windows), the private key is only in memory, on Linux and macOS the agent answers only sshr and the processes it started (ssh, the ssh of a jump host, mosh), told by the peer process of the socket and its parents, another program of the same user cannot use the key while a session runs, on Windows the pipe lets in any process of the user
 - ssh gets `-i <id>.pub -o IdentitiesOnly=yes -o IdentityAgent=SSH_AUTH_SOCK -o ForwardAgent=no`, it offers only this key and the server cannot reach the agent
 - 1Password items are read with `op read` on every connect, a new item gets the password as a JSON template on stdin, not in arguments
 - Bitwarden items are read with `bw get password` and `bw get item` (the key is in the item's `sshKey` field) on every connect, with the session from `BW_SESSION`, sshr never sees the master password

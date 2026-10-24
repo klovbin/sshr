@@ -111,6 +111,12 @@ func attachAgentKey(cmd *exec.Cmd, h *Host) (func(), error) {
 			if err != nil {
 				return
 			}
+			// only ssh and the programs sshr started get the key, another
+			// program of the user could log in elsewhere with it
+			if !fromOwnChild(c) {
+				c.Close()
+				continue
+			}
 			go func() {
 				defer c.Close()
 				agent.ServeAgent(keys, c)

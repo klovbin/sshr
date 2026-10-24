@@ -90,6 +90,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
 - **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
+### The agent of sshr answers only its own ssh
+- **What:** the ssh agent that serves a key kept in sshr, 1Password or Bitwarden during a session accepts a connection only from sshr itself or a process it started (ssh, the ssh of a jump host, mosh), on Linux and macOS
+- **What for:** the socket path is in the environment of ssh, any program of the same user that found it could ask the agent to sign and log in elsewhere with the key while the session runs
+- **Why it helps:** a script or tool running as you gets no use of the key, it would have to run inside the session sshr started
+- **Why this way:** the kernel names the process at the other end of the socket (SO_PEERCRED on Linux, LOCAL_PEERPID on macOS) and sshr walks up its parents to its own process, 32 steps at most, a peer that cannot be named is refused, a Windows named pipe gives no such answer through the library sshr uses, there any process of the user is let in as before
+
 ### The vault key forgotten when idle
 - **What:** with the system keychain a running sshr zeroes and forgets its cached vault key 15 minutes after its last use, the next use reads it from the keychain again without asking, `"vault_idle_minutes"` sets the time, below 0 keeps it for the whole run, under a passphrase the key is kept for the whole run
 - **What for:** the window, `sshr serve` and `sshr mcp` run for hours, the key they read once stayed in memory all that time
