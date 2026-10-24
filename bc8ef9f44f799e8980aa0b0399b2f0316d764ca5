@@ -1,0 +1,6 @@
+What it is for: nobody remembers which of seven flags sets which login
+
+Why it helps: adding a host is one command and a few answers
+
+Why this way: with no terminal (a script) it stops instead of guessing,
+so automation always says what it wants
