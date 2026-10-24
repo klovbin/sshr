@@ -85,12 +85,12 @@ MINGW* | MSYS*)
 	# the foreground (-D) in a background job of Git Bash
 	msys() { MSYSTEM=MSYS /c/msys64/usr/bin/bash -lc "$1"; }
 	msys 'pacman -Sy --noconfirm --needed openssh' >/dev/null
-	trap 'msys "kill \$(cat $w/sshd.pid)" || true; cat "$w/sshd.log" || true' EXIT
+	trap 'msys "kill \$(cat $w/sshd.pid)" || true; cat "$w/sshd.log" "$w"/out* || true' EXIT
 	msys "/usr/bin/sshd -t -f $w/sshd_config"
 	msys "exec /usr/bin/sshd -D -f $w/sshd_config -E $w/sshd.log" &
 	;;
 *)
-	trap 'sudo kill "$(cat "$w/sshd.pid")" || true; sudo cat "$w/sshd.log" || true' EXIT
+	trap 'sudo kill "$(cat "$w/sshd.pid")" || true; sudo cat "$w/sshd.log" "$w"/out* || true' EXIT
 	sudo /usr/sbin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
 	;;
 esac
