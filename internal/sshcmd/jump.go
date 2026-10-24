@@ -66,20 +66,24 @@ func (e Env) JumpArgs(h *Host) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// the ssh of Windows hands ProxyCommand to cmd.exe or straight to the
-	// program, neither takes single quotes off and a Go-quoted path gets
-	// its backslashes doubled, a Windows path cannot hold a double quote,
-	// so it goes in plain double quotes there
-	quotedExe := fmt.Sprintf("%q", exe)
-	if runtime.GOOS == "windows" {
-		quotedExe = `"` + exe + `"`
-	}
-	// ssh expands %-tokens in ProxyCommand, so a literal % must be doubled
-	quotedExe = strings.ReplaceAll(quotedExe, "%", "%%")
 	// hopRe lets no quote, $, backquote, backslash or % into a hop, double
 	// quotes keep the shell out and every shell and cmd.exe take them off
-	cmd := fmt.Sprintf(`%s %s "%s" %%h %%p`, quotedExe, ProxyCommandName, strings.Join(parts, ","))
+	cmd := fmt.Sprintf(`%s %s "%s" %%h %%p`, proxyExe(runtime.GOOS, exe), ProxyCommandName, strings.Join(parts, ","))
 	return []string{"-o", "ProxyCommand=" + cmd}, nil
+}
+
+// proxyExe quotes the path of sshr for ProxyCommand, sh runs it on Linux
+// and macOS and expands $ and backquotes inside double quotes, so the path
+// goes in single quotes, the ssh of Windows hands it to cmd.exe or straight
+// to the program, neither takes single quotes off, a Windows path cannot
+// hold a double quote, so it goes in plain double quotes there, ssh expands
+// %-tokens in ProxyCommand, so a literal % is doubled
+func proxyExe(goos, exe string) string {
+	quoted := shQuote(exe)
+	if goos == "windows" {
+		quoted = `"` + exe + `"`
+	}
+	return strings.ReplaceAll(quoted, "%", "%%")
 }
 
 // ConnectArgs is SSHArgs plus the jump options for h, a host with a

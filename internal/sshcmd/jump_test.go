@@ -47,6 +47,20 @@ func TestProxyCommandQuotesHops(t *testing.T) {
 	}
 }
 
+// the path of sshr reaches the shell of ProxyCommand as it is, a $( in it
+// runs nothing (#365), on Windows it keeps its backslashes (#135)
+func TestProxyExeQuoting(t *testing.T) {
+	for _, c := range []struct{ goos, exe, want string }{
+		{"linux", "/tmp/$(touch x)/`id`/sshr", "'/tmp/$(touch x)/`id`/sshr'"},
+		{"darwin", "/opt/it's/50%/sshr", `'/opt/it'\''s/50%%/sshr'`},
+		{"windows", `C:\Program Files\sshr\sshr.exe`, `"C:\Program Files\sshr\sshr.exe"`},
+	} {
+		if got := proxyExe(c.goos, c.exe); got != c.want {
+			t.Errorf("%s %s: %s, want %s", c.goos, c.exe, got, c.want)
+		}
+	}
+}
+
 // a plain user@host hop must not see the target's saved password (#43)
 func TestSavedPasswordHostAvoidsDashJ(t *testing.T) {
 	s := &Store{Dir: t.TempDir()}
