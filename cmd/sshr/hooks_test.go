@@ -3,12 +3,36 @@ package main
 import (
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestLocalCommandAfterFailedConnect checks that the command after runs
+// when connect fails after the command before, here ssh is missing (#288)
+func TestLocalCommandAfterFailedConnect(t *testing.T) {
+	tools := fakeTools(t)
+	home := t.TempDir()
+	log := filepath.Join(t.TempDir(), "log")
+	mustRun(t, home, "add", "10.0.0.5", "-u", "deploy", "-n", "web", "--ask-password")
+	mustRun(t, home, "hooks", "set", "web", "before", "echo up >>"+log)
+	mustRun(t, home, "hooks", "set", "web", "after", `echo "down $SSHR_EXIT" >>`+log)
+	os.Remove(filepath.Join(tools, "ssh"))
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	os.Symlink(sh, filepath.Join(tools, "sh"))
+	t.Setenv("PATH", tools)
+	_, errOut, code := sshrIn(t, home, "connect", "--plain", "--local-commands", "web")
+	b, _ := os.ReadFile(log)
+	if code != 1 || string(b) != "up\ndown 1\n" {
+		t.Errorf("after a failed connect: %d %q, log %q", code, errOut, b)
+	}
+}
 
 // TestLocalCommandBeforeGatewayCheck checks that the command before runs
 // before connect decides whether a host with a gateway answers directly, a

@@ -595,6 +595,9 @@ func cmdConnect(store *app.Store, args []string) {
 	// before the plan: it checks whether a host with a gateway answers
 	// directly, a VPN the command brings up changes the answer
 	local := beforeConnect(settings, h, localCommands)
+	if local != "" {
+		beforeExit = func() { afterConnect(local, h, 1) }
+	}
 	plan, err := store.PlanSession(h, app.LaunchOptions{Forwards: fwds, Mosh: useMosh, Plain: plain})
 	if err != nil {
 		fatal(err)
@@ -673,6 +676,7 @@ func beforeConnect(st app.Settings, h *app.Host, force *bool) string {
 // afterConnect runs the local command after a session, its failure is
 // reported and the exit code stays the one of the session
 func afterConnect(command string, h *app.Host, code int) {
+	beforeExit = nil
 	if command == "" {
 		return
 	}
@@ -1043,8 +1047,17 @@ func fatal(err error) {
 		err = errors.New("the host was saved meanwhile (a sync or the app), nothing is changed, run the command again")
 	}
 	fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
+	if f := beforeExit; f != nil {
+		beforeExit = nil
+		f()
+	}
 	os.Exit(1)
 }
+
+// beforeExit runs when fatal stops sshr, connect sets it to the local
+// command after once the one before ran, so a VPN brought up is taken down
+// when the connect fails later
+var beforeExit func()
 
 // cmdImportSSHConfig adds the hosts of ~/.ssh/config
 func cmdImportSSHConfig(store *app.Store, args []string) {
