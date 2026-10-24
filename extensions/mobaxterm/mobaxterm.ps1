@@ -47,17 +47,30 @@ function OkPort($p) {
 	"$p" -match '^[0-9]+$' -and [int]::TryParse("$p", [ref]$n) -and $n -ge 1 -and $n -le 65535
 }
 
-# ReadText decodes a file: UTF-8 with or without a BOM when it decodes as
-# UTF-8, else Windows-1252, the charset MobaXterm writes
+# ReadText decodes a file: UTF-16 by its BOM, an editor may save the
+# file so, UTF-8 with or without a BOM when it decodes as UTF-8, else the
+# ANSI code page of the system, the charset MobaXterm writes, 1252 on a
+# western Windows
 function ReadText([string]$path) {
 	$b = [System.IO.File]::ReadAllBytes($path)
+	if ($b.Length -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xFE) {
+		return [System.Text.Encoding]::Unicode.GetString($b, 2, $b.Length - 2)
+	}
+	if ($b.Length -ge 2 -and $b[0] -eq 0xFE -and $b[1] -eq 0xFF) {
+		return [System.Text.Encoding]::BigEndianUnicode.GetString($b, 2, $b.Length - 2)
+	}
 	$skip = 0
 	if ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF) { $skip = 3 }
 	try {
-		(New-Object System.Text.UTF8Encoding($false, $true)).GetString($b, $skip, $b.Length - $skip)
+		return (New-Object System.Text.UTF8Encoding($false, $true)).GetString($b, $skip, $b.Length - $skip)
 	} catch {
-		[System.Text.Encoding]::GetEncoding(1252).GetString($b)
 	}
+	try {
+		$ansi = [System.Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage)
+	} catch {
+		$ansi = [System.Text.Encoding]::GetEncoding(1252)
+	}
+	$ansi.GetString($b)
 }
 
 # Field decodes the escapes MobaXterm writes for #, %, |, ; and " in a
@@ -137,6 +150,7 @@ foreach ($f in $Files) {
 	$section = if ($f -match '\.moba$') { 'Bookmarks' } else { '' }
 	$folder = ''
 	$drive = DriveOf $f
+	$before = $hosts.Count
 	foreach ($line in (ReadText $f) -split "`r?`n") {
 		if ($line -match '^\[(.*)\]$') {
 			$section = $Matches[1]
@@ -184,6 +198,9 @@ foreach ($f in $Files) {
 		$tags = @($folder -split '\\' | ForEach-Object { Field $_ } | Where-Object { $_ -ne '' })
 		if ($tags.Count -gt 0) { $h.tags = $tags }
 		[void]$hosts.Add($h)
+	}
+	if ($hosts.Count -eq $before) {
+		$stderr.WriteLine("mobaxterm: no SSH session in $(Clean $f)")
 	}
 }
 

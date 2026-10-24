@@ -417,14 +417,25 @@ func TestMobaXtermImporter(t *testing.T) {
 	if os.WriteFile(file, []byte(ini), 0o600) != nil || os.WriteFile(moba, []byte("single=#109#0%single.example%22%root%%-1%-1#MobaFont#0# #-1\r\n"), 0o600) != nil {
 		t.Fatal("cannot write the files")
 	}
+	// a file saved as UTF-16 by an editor is read too (#330)
+	u16 := filepath.Join(tmp, "u16.mxtsessions")
+	b16 := []byte{0xff, 0xfe}
+	for _, r := range "[Bookmarks]\r\nu16=#109#0%u16.example%22%%%-1#MobaFont#0# #-1\r\n" {
+		b16 = append(b16, byte(r), byte(r>>8))
+	}
+	if os.WriteFile(u16, b16, 0o600) != nil {
+		t.Fatal("cannot write the UTF-16 file")
+	}
+	// a western system, the export is in Windows-1252
+	t.Setenv("LC_ALL", "en_US.UTF-8")
 	// _CurrentDrive_ of an export is the drive of Windows (#329)
 	t.Setenv("SystemDrive", "D:")
-	hosts, notes := runPwshImporter(t, "mobaxterm", file, moba)
+	hosts, notes := runPwshImporter(t, "mobaxterm", file, moba, u16)
 	got := map[string]ExtHost{}
 	for _, h := range hosts {
 		got[h.Key] = h
 	}
-	if len(hosts) != 8 {
+	if len(hosts) != 9 || got["u16"].Host != "u16.example" {
 		t.Fatalf("%+v", hosts)
 	}
 	// a name with = keeps it (#327)
@@ -454,6 +465,16 @@ func TestMobaXtermImporter(t *testing.T) {
 	}
 	if !strings.Contains(notes, "puttygen") || !strings.Contains(notes, "proxy (type 2)") {
 		t.Errorf("notes: %s", notes)
+	}
+	// on a Cyrillic system MobaXterm writes Windows-1251 (#330), pwsh
+	// takes the culture from LC_ALL outside Windows
+	if runtime.GOOS != "windows" {
+		t.Setenv("LC_ALL", "ru_RU.UTF-8")
+		cyr := filepath.Join(tmp, "cyr.mxtsessions")
+		os.WriteFile(cyr, []byte("[Bookmarks]\r\n\xc1\xe0\xe7\xe0=#109#0%cyr.example%22%%%-1#MobaFont#0# #-1\r\n"), 0o600)
+		if c, _ := runPwshImporter(t, "mobaxterm", cyr); len(c) != 1 || c[0].Name != "База" {
+			t.Errorf("1251: %+v", c)
+		}
 	}
 	for _, h := range hosts {
 		if _, err := h.ToHost("mobaxterm"); err != nil {
