@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"sshr.dev/internal/app"
 	"sshr.dev/internal/supastore"
@@ -24,12 +27,17 @@ const syncUsage = `Usage:
                                          ask to add this machine, shows its fingerprint,
                                          an S3 or WebDAV account takes the flags of init instead of --server
   sshr sync pending                      devices waiting for approval
-  sshr sync approve <id|fingerprint>     add a waiting device after comparing fingerprints
+  sshr sync approve <id|fingerprint>     add a waiting device after comparing fingerprints,
+                                         on the primary device
+  sshr sync primary <id|fingerprint> [--yes]
+                                         hand the primary role on, only the primary
+                                         device adds and removes devices
   sshr sync pull [--accept-reset]        only take changes from other devices
   sshr sync push                         same as sshr sync
   sshr sync status                       server, devices, state fingerprint
   sshr sync remove-device <id|fingerprint>
-                                         take a device out, the vault key changes
+                                         take a device out, the vault key changes,
+                                         on the primary device
   sshr sync init --backend webdav --url <folder> --user <name> [--name <device>]
                                          keep the account in a WebDAV folder (Nextcloud),
                                          the password from SSHR_WEBDAV_PASSWORD or a prompt
@@ -162,6 +170,19 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Added %s (%s)\n", d.Name, syncclient.Fingerprint(d.SignPub))
+	case "primary":
+		if len(rest) < 1 || len(rest) > 2 || len(rest) == 2 && rest[1] != "--yes" {
+			fatal(fmt.Errorf("sshr sync primary <id|fingerprint> [--yes], see sshr sync status"))
+		}
+		yes := len(rest) == 2
+		d, err := c.HandPrimary(rest[0], func(name, fingerprint string) bool {
+			fmt.Printf("Make %s the primary device, fingerprint %s\nCompare it with sshr sync status on that device, only the primary device adds and removes devices\n", name, fingerprint)
+			return yes || askYes("Hand the primary role on?")
+		})
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("%s is now the primary device\n", d.Name)
 	case "pull":
 		if err := c.Pull(); err != nil {
 			fatal(err)
@@ -257,4 +278,17 @@ func leftOut(c *syncclient.Client) {
 	}
 	fmt.Fprintf(os.Stderr, "sshr: %s left out of this sync, the lines above say why\n", plural(len(c.LeftOut), "host"))
 	os.Exit(1)
+}
+
+// askYes asks a yes or no question on the terminal, without one the answer
+// is no and the command says to add --yes
+func askYes(q string) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(os.Stderr, "sshr: there is no terminal to ask in, add --yes")
+		return false
+	}
+	fmt.Print(q + " [y/N]: ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	a := strings.ToLower(strings.TrimSpace(line))
+	return a == "y" || a == "yes"
 }

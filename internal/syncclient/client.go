@@ -110,6 +110,8 @@ type pushPlan struct {
 	key   []byte
 	// rotation is saved together with the new manifest
 	rotation *rotation
+	// primary hands the primary role to this device, empty keeps it
+	primary string
 }
 
 // Client syncs one Store
@@ -1451,7 +1453,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	for id, e := range c.st.Skipped {
 		entries[id] = e
 	}
-	changed := devices != nil || c.st.Counter == 0
+	changed := devices != nil || c.st.Counter == 0 || plan.primary != ""
 	fresh := map[string]bool{}
 	for id, plain := range local {
 		if _, ok := c.st.Skipped[id]; ok {
@@ -1545,6 +1547,9 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	primary := c.st.Primary
 	if primary == "" {
 		primary = c.st.DeviceID
+	}
+	if plan.primary != "" {
+		primary = plan.primary
 	}
 	m := &syncproto.Manifest{
 		Version: syncproto.FormatVersion, Account: c.st.Account, Epoch: epoch,
@@ -1678,6 +1683,56 @@ func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Devi
 		keep = append(keep, d)
 	}
 	return target, keep, nil
+}
+
+// HandPrimary makes the device matching prefix the primary device of the
+// account, only the primary device does it, confirm sees the device first
+// and says no to stop before anything is sent, the fingerprint it shows
+// must match the one the other device shows in sshr sync status
+func (c *Client) HandPrimary(prefix string, confirm func(name, fingerprint string) bool) (out *syncproto.Device, err error) {
+	err = c.run(func() error {
+		out, err = c.handPrimary(prefix, confirm)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) handPrimary(prefix string, confirm func(name, fingerprint string) bool) (*syncproto.Device, error) {
+	if err := c.Pull(); err != nil {
+		return nil, err
+	}
+	if err := c.errNotPrimary("hands the primary role on"); err != nil {
+		return nil, err
+	}
+	target, _, err := c.matchDevice(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("no other device matches %q", prefix)
+	}
+	if !confirm(CleanName(target.Name), Fingerprint(target.SignPub)) {
+		return nil, errors.New("not handed on")
+	}
+	id := target.ID
+	err = c.push(func() (pushPlan, error) {
+		if c.st.Primary == id {
+			return pushPlan{}, nil
+		}
+		// another push may have come first, the role is handed on only by
+		// the primary device and only to a device still in the account
+		if err := c.errNotPrimary("hands the primary role on"); err != nil {
+			return pushPlan{}, err
+		}
+		if t, _, err := c.matchDevice(id); err != nil || t == nil {
+			return pushPlan{}, fmt.Errorf("device %s left the account meanwhile", short(id, 8))
+		}
+		return pushPlan{primary: id}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return target, nil
 }
 
 // finishRotation delivers a committed vault key to every kept device and

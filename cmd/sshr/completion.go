@@ -20,7 +20,7 @@ var hostCommands = map[string]bool{
 	"forward": true, "tunnel": true, "close": true, "paste": true, "run": true,
 }
 
-var syncCommands = []string{"init", "invite", "join", "pending", "approve", "pull", "push", "status", "remove-device", "leave"}
+var syncCommands = []string{"init", "invite", "join", "pending", "approve", "pull", "push", "status", "primary", "remove-device", "leave"}
 
 var flagRe = regexp.MustCompile(`(?:^|[\s\[|])(--?[A-Za-z][A-Za-z-]*)`)
 

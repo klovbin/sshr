@@ -114,6 +114,38 @@ func TestPrimaryRefusesForgedChanges(t *testing.T) {
 	}
 }
 
+// TestHandPrimary checks that the primary device hands its role on, the
+// new primary then removes devices, the old one no longer can, and no
+// other device can hand it on
+func TestHandPrimary(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	yes := func(string, string) bool { return true }
+	if _, err := w.b.HandPrimary(w.a.st.DeviceID[:8], yes); err == nil || !strings.Contains(err.Error(), "only the primary device") {
+		t.Fatalf("b took the role: %v", err)
+	}
+	if _, err := w.a.HandPrimary(w.b.st.DeviceID[:8], func(string, string) bool { return false }); err == nil {
+		t.Fatal("handed on without a yes")
+	}
+	if w.a.st.Primary != w.a.st.DeviceID {
+		t.Fatal("a refused hand-over changed the primary")
+	}
+	d, err := w.a.HandPrimary(w.b.st.DeviceID[:8], yes)
+	must(t, err)
+	if d.ID != w.b.st.DeviceID || w.a.st.Primary != w.b.st.DeviceID {
+		t.Fatalf("primary on a after the hand-over: %q", w.a.st.Primary)
+	}
+	must(t, w.b.Pull())
+	if w.b.st.Primary != w.b.st.DeviceID {
+		t.Fatalf("b does not see itself as primary: %q", w.b.st.Primary)
+	}
+	if _, err := w.a.RemoveDevice(w.b.st.DeviceID[:8]); err == nil || !strings.Contains(err.Error(), "only the primary device") {
+		t.Fatalf("the old primary removed a device: %v", err)
+	}
+	_, err = w.b.RemoveDevice(w.a.st.DeviceID[:8])
+	must(t, err)
+}
+
 func keepOnly(ds []syncproto.Device, id string) []syncproto.Device {
 	var out []syncproto.Device
 	for _, d := range ds {

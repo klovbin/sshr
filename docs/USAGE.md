@@ -259,6 +259,7 @@ sshr sync approve <id>                                           # on the primar
 sshr sync                                                        # pull, then push
 sshr sync status                                                 # devices and a state fingerprint
 sshr sync remove-device <id>                                     # on the primary device, rotates the vault key
+sshr sync primary <id>                                           # on the primary device, hands the role on after comparing fingerprints
 sshr sync leave                                                  # stop syncing here, the hosts stay
 ```
 
