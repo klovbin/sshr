@@ -82,6 +82,29 @@ func TestSyncMergeKeepsPasswordWithItsAddress(t *testing.T) {
 	}
 }
 
+// TestSyncMergeAfterKeyRotation checks that a key rotation by another
+// device, which changes the blob of every host without changing the host,
+// keeps the base, a later edit on both sides still merges (#285)
+func TestSyncMergeAfterKeyRotation(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	c := w.client("c-")
+	w.join(c)
+	must(t, w.b.Pull())
+	editHost(t, w.b, web.ID, func(h *hosts.Host) { h.Tags, h.Password = []string{"eu"}, "" })
+	_, err := w.a.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	must(t, w.b.Pull())
+	editHost(t, w.a, web.ID, func(h *hosts.Host) { h.Name, h.Password = "web1", "" })
+	must(t, w.a.Push())
+	must(t, w.b.Push())
+	h, err := w.b.Store.Find(web.ID)
+	must(t, err)
+	if h.Name != "web1" || !slices.Equal(h.Tags, []string{"eu"}) || conflictCopies(w.b) != 0 {
+		t.Fatalf("host after a rotation and a merge: %+v, %d copies\n%s", h, conflictCopies(w.b), w.log.String())
+	}
+}
+
 // TestSyncMergeWithoutBase checks that a host whose synced version is not
 // kept here falls back to a conflict copy
 func TestSyncMergeWithoutBase(t *testing.T) {

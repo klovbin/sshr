@@ -40,6 +40,19 @@ type entryState struct {
 	// Local is a keyed hash of the host as it was written here at the last
 	// sync, a different one means the host was changed here since
 	Local string `json:"local,omitempty"`
+	// Base is the hash of the blob the host here was last in step with, the
+	// base of a field merge (base.go), Blob moves past it when a conflict
+	// copy keeps an unpushed local edit or another device rotates the key,
+	// empty means Blob
+	Base string `json:"base,omitempty"`
+}
+
+// base is the hash of the blob a local edit started from
+func (e entryState) base() string {
+	if e.Base != "" {
+		return e.Base
+	}
+	return e.Blob
 }
 
 type state struct {
@@ -1024,6 +1037,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
 		if seen && e.Lamport == known.Lamport && e.Device == known.Device {
 			if e.Hash != "" {
+				// a key rotation of another device, the content is the same,
+				// the kept base under the old hash stays the base
+				known.Base = known.base()
 				known.Blob = e.Hash
 				c.st.Entries[id] = known
 			}
@@ -1101,7 +1117,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 					// and keeps the old local hash, the change made here
 					// still counts as not pushed and the next push outranks
 					// the remote one, a later pull makes no second copy
-					c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
+					c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local, Base: known.base()}
 					return nil
 				}
 				conflict = true
@@ -1159,7 +1175,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			if err != nil {
 				return err
 			}
-			next.Local = c.localHash(written)
+			next.Local, next.Base = c.localHash(written), e.Hash
 			c.st.Entries[id] = next
 			c.logf("updated %s", h.Name)
 			return nil
@@ -1180,7 +1196,7 @@ func (c *Client) mergeEdit(store *hosts.Store, id string, known entryState, e sy
 	if e.Deleted || known.Deleted || remote == nil {
 		return false, nil
 	}
-	base := c.basePayload(id, known.Blob)
+	base := c.basePayload(id, known.base())
 	if base == nil {
 		return false, nil
 	}
@@ -1198,7 +1214,7 @@ func (c *Client) mergeEdit(store *hosts.Store, id string, known entryState, e sy
 	if err != nil {
 		return false, nil
 	}
-	next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash}
+	next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Base: e.Hash}
 	if hosts.SameSynced(merged, r) {
 		written, err := payloadOf(*h)
 		if err != nil {
@@ -1405,14 +1421,14 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 			// only the key changed, the stamp stays, so a device with its
 			// own edit of this host sees no change from here
 			entries[id] = syncproto.Entry{Hash: h, Lamport: known.Lamport, Device: known.Device}
-			known.Blob = h
+			known.Blob, known.Base = h, h
 			next[id] = known
 			changed = true
 			continue
 		}
 		e := syncproto.Entry{Hash: h, Lamport: known.Lamport + 1, Device: c.st.DeviceID}
 		entries[id] = e
-		next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: h, Local: lh}
+		next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: h, Local: lh, Base: h}
 		changed = true
 	}
 	for id, known := range c.st.Entries {

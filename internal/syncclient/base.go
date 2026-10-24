@@ -81,7 +81,7 @@ func (c *Client) pruneBase() {
 	}
 	keep := map[string]bool{}
 	for _, e := range c.st.Entries {
-		keep[e.Blob] = true
+		keep[e.Blob], keep[e.base()] = true, true
 	}
 	for _, n := range names {
 		if !keep[n.Name()] {
