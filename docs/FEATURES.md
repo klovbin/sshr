@@ -214,6 +214,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** every device refuses a manifest that adds or removes a device or changes the vault key unless the primary device signed it, the owner's devices keep their hosts instead of taking such a change
 - **Why this way:** the primary is a plaintext field of the signed manifest, so a device that was offline through key changes can still check every step, the manifest format goes to 2 so an older sshr stops with "update sshr" instead of taking a removal from any device, an account made before gets the first device that syncs with this version as primary
 
+### Recovery kit
+- **What:** `sshr sync recovery create` prints a kit once, `sshr sync recovery restore` brings the account to a new machine from it when every device is lost
+- **What for:** a lost and a broken laptop must not take the hosts of every server with them
+- **Why it helps:** the new machine gets every host and becomes the primary device, a thief with the paper only claims the account, the owner's devices warn and the primary device cancels during the wait
+- **Why this way:** the kit is a device of the account that rotations reach like any other, the rules let it only claim and, after the wait (7 days by default), hand the account to one new device, sshr-sync and the owner's devices check the wait with their own clocks, an anchor entry only the seed opens shows the fresh machine that the account is the real one, an optional passphrase (Argon2id) makes a photo of the paper useless, typos are caught group by group
+
 ### Merging changes made on two devices
 - **What:** a host changed on two devices before they synced is merged field by field, a rename on one and a new tag on the other give one host with both
 - **What for:** editing on a laptop and a desktop without ending up with `(conflict …)` copies to clean up

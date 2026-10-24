@@ -2,14 +2,19 @@ package syncclient
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"sshr.dev/internal/hosts"
 	"sshr.dev/internal/syncproto"
+	"sshr.dev/internal/vault"
 )
 
 // The recovery kit (#150) is the seed of a device listed in the account
@@ -159,4 +164,232 @@ func (c *Client) CancelRecovery() error {
 		_, err := c.removeDevice(c.st.Recovery)
 		return err
 	})
+}
+
+// recoveryClient is the client of the kit device during a restore: its own
+// folder next to the state of this machine and its own keychain names,
+// no hosts, every entry carried on
+func (c *Client) recoveryClient() *Client {
+	dir := filepath.Join(c.Dir, "recovery")
+	return &Client{
+		Store: &hosts.Store{Dir: filepath.Join(dir, "hosts")}, Dir: dir, KeyPrefix: c.prefix() + "recovery-",
+		Log: c.Log, HTTP: c.HTTP, Now: c.Now, Backend: c.Backend, BackendRef: c.BackendRef,
+		StoreSecret: c.StoreSecret, OpenBackend: c.OpenBackend, kit: true,
+	}
+}
+
+// RestoreClaim starts bringing the account back to this machine from a
+// recovery kit: it checks the kit against the account (the anchor only the
+// seed opens, the counter printed on it), the kit device claims the
+// account and this machine asks to join, ready is when RestoreFinish may
+// hand the account over, the owner's devices warn and can cancel until
+// then, account is from the header of the kit, server too unless the
+// client has a store set up for it
+func (c *Client) RestoreClaim(server, account, kitText, name string, pass func() (string, error)) (ready time.Time, err error) {
+	if err := c.CheckFree(); err != nil {
+		return time.Time{}, err
+	}
+	k, err := decodeKit(kitText, pass)
+	if err != nil {
+		return time.Time{}, err
+	}
+	rc := c.recoveryClient()
+	if _, err := os.Stat(rc.statePath()); err == nil {
+		return time.Time{}, errors.New("a restore is under way on this machine, finish it with sshr sync recovery restore --finish")
+	}
+	if err := os.MkdirAll(rc.Store.Dir, 0o700); err != nil {
+		return time.Time{}, err
+	}
+	srv, err := c.serverOf(server)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if err := vault.SecretSet(rc.prefix()+"device", k.Seed); err != nil {
+		return time.Time{}, err
+	}
+	if rc.keys, err = newDeviceKeys(k.Seed); err != nil {
+		return time.Time{}, err
+	}
+	self := rc.keys.device("")
+	rc.st = &state{Server: srv, Account: strings.TrimSpace(account), DeviceID: self.ID, Token: k.Token, Name: "recovery kit", Entries: map[string]entryState{}, Skipped: map[string]syncproto.Entry{}}
+	rc.keepBackend()
+	if err := rc.bootstrap(k); err != nil {
+		rc.forget()
+		return time.Time{}, err
+	}
+	if err := rc.saveNew(); err != nil {
+		rc.forget()
+		return time.Time{}, err
+	}
+	if rc.st.Claim == 0 {
+		err = rc.run(func() error {
+			if err := rc.load(); err != nil {
+				return err
+			}
+			return rc.push(func() (pushPlan, error) {
+				if rc.st.Claim != 0 {
+					return pushPlan{}, nil
+				}
+				return pushPlan{recovery: &recoveryFields{device: rc.st.Recovery, wait: rc.st.RecoveryWait, claim: rc.st.Counter + 1}}, nil
+			})
+		})
+		if err != nil {
+			return time.Time{}, fmt.Errorf("the kit could not claim the account: %v", err)
+		}
+	} else {
+		rc.logf("the account was claimed with this kit already on change %d", rc.st.Claim)
+	}
+	if err := rc.run(func() error {
+		if err := rc.load(); err != nil {
+			return err
+		}
+		rc.st.ClaimSeen, rc.st.ClaimSeenAt = rc.st.Claim, rc.now()
+		return rc.save()
+	}); err != nil {
+		return time.Time{}, err
+	}
+	code := rc.st.Account + "." + strings.ReplaceAll(Fingerprint(self.SignPub), "-", "")
+	if _, err := c.Join(server, code, name); err != nil {
+		return time.Time{}, fmt.Errorf("the account is claimed, this machine could not ask to join, run sshr sync recovery restore --finish later: %v", err)
+	}
+	return rc.now().Add(time.Duration(rc.st.RecoveryWait) * time.Second), nil
+}
+
+// bootstrap reads the head of the account as the kit device sees it on a
+// fresh machine: no history before, so the account is checked by what
+// only the real one has, the anchor entry the seed opens, and by the
+// counter printed on the kit
+func (c *Client) bootstrap(k recoveryKit) error {
+	_, raw, err := c.backend().Head()
+	if err != nil {
+		return fmt.Errorf("reading the account: %v", err)
+	}
+	var sm syncproto.Signed
+	var m syncproto.Manifest
+	if err := json.Unmarshal(raw, &sm); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(sm.Body, &m); err != nil {
+		return err
+	}
+	switch {
+	case m.Account != c.st.Account:
+		return errors.New("the store holds another account than the one on the kit")
+	case m.Counter < k.Floor:
+		return fmt.Errorf("the account is at change %d, older than the kit (%d), the server shows an old state, this kit is not used against it", m.Counter, k.Floor)
+	case m.Version < 2 || m.Recovery != c.st.DeviceID:
+		return errors.New("this kit was replaced or cancelled, its device is no longer the recovery kit of the account")
+	}
+	if err := checkFormat(m.Version); err != nil {
+		return err
+	}
+	if err := verifySignature(&sm, m.Devices); err != nil {
+		return err
+	}
+	key, err := c.envelopeKey(m.Epoch)
+	if err != nil {
+		return fmt.Errorf("the vault key for the kit: %v", err)
+	}
+	if err := verifyMAC(&sm, key); err != nil {
+		return err
+	}
+	e, ok := m.Entries[anchorID(c.st.DeviceID)]
+	if !ok {
+		return errors.New("the account has no anchor of this kit, it is not the account the kit was made for")
+	}
+	plain, err := c.fetchBlob(anchorID(c.st.DeviceID), e.Hash, key, m.Epoch)
+	if err != nil || subtle.ConstantTimeCompare(plain, anchorPayload(k.Seed)) != 1 {
+		return errors.New("the anchor of the kit does not match, this is not the account the kit was made for")
+	}
+	if err := vault.SecretSet(c.prefix()+"key-"+fmt.Sprint(m.Epoch), key); err != nil {
+		return err
+	}
+	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Epoch = m.Counter, syncproto.BodyHash(sm.Body), m.Devices, m.Epoch
+	c.st.Primary, c.st.Format, c.st.Recovery, c.st.RecoveryWait, c.st.Claim = m.Primary, m.Version, m.Recovery, m.RecoveryWait, m.Claim
+	for id, e := range m.Entries {
+		c.st.Skipped[id] = e
+	}
+	return nil
+}
+
+// forget drops what a restore cut short left of the kit device here
+func (c *Client) forget() {
+	vault.SecretDelete(c.prefix() + "device")
+	vault.SecretDelete(c.prefix() + "key-" + fmt.Sprint(c.st.Epoch))
+	vault.SecretDelete(c.storeSecretName())
+	os.RemoveAll(c.Dir)
+}
+
+// RestoreFinish hands the account to this machine once the wait of the
+// claim is over: the kit device adds it as the primary device, this
+// machine takes the hosts, removes the kit device (the vault key changes)
+// and forgets the kit, a new kit is made with CreateRecoveryKit
+func (c *Client) RestoreFinish() error {
+	rc := c.recoveryClient()
+	if _, err := os.Stat(rc.statePath()); err != nil {
+		return errors.New("no restore is under way on this machine, start one with sshr sync recovery restore")
+	}
+	if err := c.load(); err != nil {
+		return err
+	}
+	me := c.st.DeviceID
+	c.st = nil
+	err := rc.run(func() error {
+		if err := rc.pull(); err != nil {
+			return fmt.Errorf("the kit device cannot read the account, the claim was probably cancelled on the primary device: %v", err)
+		}
+		if left := rc.st.ClaimSeenAt.Add(time.Duration(rc.st.RecoveryWait) * time.Second).Sub(rc.now()); left > 0 {
+			return fmt.Errorf("the account can be handed over in %s", left.Round(time.Minute))
+		}
+		b, err := rc.backend().Devices()
+		if err != nil {
+			return err
+		}
+		var recs []syncproto.DeviceRecord
+		if err := json.Unmarshal(b, &recs); err != nil {
+			return err
+		}
+		var dev *syncproto.Device
+		for i := range recs {
+			if recs[i].ID == me {
+				dev = &recs[i].Device
+			}
+		}
+		if dev == nil {
+			return errors.New("the join request of this machine is gone from the account, start again")
+		}
+		if err := rc.push(func() (pushPlan, error) {
+			if rc.st.Primary == me {
+				return pushPlan{}, nil
+			}
+			return pushPlan{
+				devices:  append(append([]syncproto.Device(nil), rc.st.Trusted...), *dev),
+				primary:  me,
+				recovery: &recoveryFields{device: rc.st.Recovery, wait: rc.st.RecoveryWait},
+			}, nil
+		}); err != nil {
+			return err
+		}
+		key, err := rc.vaultKey(rc.st.Epoch)
+		if err != nil {
+			return err
+		}
+		if err := rc.putEnvelope(*dev, rc.st.Epoch, key); err != nil {
+			return err
+		}
+		return rc.backend().Activate(me)
+	})
+	if err != nil {
+		return err
+	}
+	if err := c.Pull(); err != nil {
+		return fmt.Errorf("the account is handed to this machine but its first sync failed, run sshr sync: %v", err)
+	}
+	if err := c.CancelRecovery(); err != nil {
+		return fmt.Errorf("this machine is the primary device now, the old kit device is still in the account, run sshr sync recovery cancel: %v", err)
+	}
+	rc.st = nil
+	rc.Leave(true)
+	os.RemoveAll(rc.Dir)
+	return nil
 }

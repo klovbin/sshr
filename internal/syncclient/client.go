@@ -174,6 +174,12 @@ type Client struct {
 	// LeftOut names the hosts the last run did not sync and why, a run
 	// that left hosts out still succeeds, the caller says so
 	LeftOut map[string]string
+	// kit is set on the client of a recovery kit device, it imports no
+	// host and carries every entry on as it is (recovery.go)
+	kit bool
+	// verified are the entries of the manifest verify took last in this
+	// run, the state has them only once the pull applied the newest one
+	verified map[string]syncproto.Entry
 }
 
 // leaveOut notes a host the run did not sync
@@ -200,7 +206,7 @@ func (c *Client) run(fn func() error) error {
 		return err
 	}
 	defer unlock()
-	c.running, c.st, c.LeftOut = true, nil, nil
+	c.running, c.st, c.LeftOut, c.verified = true, nil, nil, nil
 	defer func() { c.running = false }()
 	return fn()
 }
@@ -985,6 +991,7 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		c.st.Recovery, c.st.RecoveryWait, c.st.Claim = m.Recovery, m.RecoveryWait, m.Claim
 	}
 	c.st.Format = max(c.st.Format, m.Version)
+	c.verified = m.Entries
 	return &m, nil
 }
 
@@ -995,8 +1002,12 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 // claim of the recovery kit is noted with the time this device saw it and
 // a hand-over by the kit is taken only after the wait by that clock
 func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error {
+	entries := c.verified
+	if entries == nil {
+		entries = c.knownEntries()
+	}
 	prev := &syncproto.Manifest{Version: c.st.Format, Primary: c.st.Primary, Epoch: c.st.Epoch, Devices: c.st.Trusted,
-		Recovery: c.st.Recovery, RecoveryWait: c.st.RecoveryWait, Claim: c.st.Claim, Entries: c.knownEntries()}
+		Recovery: c.st.Recovery, RecoveryWait: c.st.RecoveryWait, Claim: c.st.Claim, Entries: entries}
 	step, err := syncproto.CheckPrimary(prev, m, sm.Signer)
 	if err == nil && step == syncproto.StepRecover {
 		wait := time.Duration(prev.RecoveryWait) * time.Second
@@ -1124,6 +1135,7 @@ func (c *Client) pull() error {
 		c.st.Primary, c.st.Format = before.Primary, before.Format
 		c.st.Recovery, c.st.RecoveryWait, c.st.Claim = before.Recovery, before.RecoveryWait, before.Claim
 		c.st.ClaimSeen, c.st.ClaimSeenAt = before.ClaimSeen, before.ClaimSeenAt
+		c.verified = nil
 	}
 	var last *syncproto.Manifest
 	for i := range history {
@@ -1171,8 +1183,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := m.Entries[id]
-		if isAnchor(id) {
-			// the anchor of a recovery kit is no host, it is carried on
+		if isAnchor(id) || c.kit {
+			// the anchor of a recovery kit is no host, it is carried on, the
+			// kit device itself keeps no hosts and carries every entry
 			c.st.Skipped[id] = e
 			continue
 		}
@@ -1694,6 +1707,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	c.st.Epoch, c.st.Skipped = epoch, skipped
 	c.st.Primary, c.st.Format = primary, syncproto.FormatVersion
 	c.st.Recovery, c.st.RecoveryWait, c.st.Claim = rf.device, rf.wait, rf.claim
+	c.verified = m.Entries
 	if plan.rotation != nil {
 		c.st.Rotation = plan.rotation
 	}

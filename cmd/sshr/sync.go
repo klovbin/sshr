@@ -33,6 +33,12 @@ const syncUsage = `Usage:
   sshr sync primary <id|fingerprint> [--yes]
                                          hand the primary role on, only the primary
                                          device adds and removes devices
+  sshr sync recovery create [--passphrase] [--wait <days>]
+                                         print a recovery kit, on the primary device
+  sshr sync recovery cancel              take the kit out, also cancels a claim
+  sshr sync recovery restore --server <url> --account <id>
+                                         bring the account to a new machine from a kit,
+                                         then --finish after the wait
   sshr sync pull [--accept-reset]        only take changes from other devices
   sshr sync push                         same as sshr sync
   sshr sync status                       server, devices, state fingerprint
@@ -89,15 +95,15 @@ func cmdSync(store *app.Store, args []string) {
 			c.AcceptReset = true
 		case a == "--replace" && sub == "supabase-sql":
 			replaceKey = true
-		case strings.HasPrefix(a, "-") && sub != "primary":
-			// primary reads its own --yes
+		case strings.HasPrefix(a, "-") && sub != "primary" && sub != "recovery":
+			// primary and recovery read their own flags
 			fmt.Fprintln(os.Stderr, syncUsage)
 			os.Exit(1)
 		default:
 			rest = append(rest, a)
 		}
 	}
-	if sf.given && sub != "init" && sub != "join" && sub != "store-key" {
+	if sf.given && sub != "init" && sub != "join" && sub != "store-key" && sub != "recovery" {
 		fatal(fmt.Errorf("--backend and the S3, WebDAV and Supabase flags are for sshr sync init and join, later runs read them from the sync state"))
 	}
 	switch sub {
@@ -186,7 +192,7 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Printf("%s is now the primary device\n", d.Name)
 	case "recovery":
-		cmdSyncRecovery(c, rest)
+		cmdSyncRecovery(c, rest, server, name, &sf)
 	case "pull":
 		if err := c.Pull(); err != nil {
 			fatal(err)
@@ -298,11 +304,13 @@ func askYes(q string) bool {
 }
 
 const recoveryUsage = `Usage: sshr sync recovery create [--passphrase] [--wait <days>]
-       sshr sync recovery cancel`
+       sshr sync recovery cancel
+       sshr sync recovery restore --server <url> --account <id> [--name <device>]
+       sshr sync recovery restore --finish`
 
 // cmdSyncRecovery makes, replaces and cancels the recovery kit of the
 // account on the primary device
-func cmdSyncRecovery(c *syncclient.Client, args []string) {
+func cmdSyncRecovery(c *syncclient.Client, args []string, server, name string, sf *storeFlags) {
 	if len(args) == 0 {
 		fatal(fmt.Errorf("%s", recoveryUsage))
 	}
@@ -340,6 +348,53 @@ func cmdSyncRecovery(c *syncclient.Client, args []string) {
 		fmt.Print(kit.Header)
 		fmt.Println()
 		fmt.Println(kit.Secret)
+	case "restore":
+		if len(args) == 2 && args[1] == "--finish" {
+			if err := c.RestoreFinish(); err != nil {
+				fatal(err)
+			}
+			fmt.Println("The account is back on this machine, it is the primary device now, the old kit is worth nothing")
+			fmt.Println("Make a new kit now: sshr sync recovery create")
+			return
+		}
+		account := ""
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--account" && i+1 < len(args) {
+				i++
+				account = args[i]
+				continue
+			}
+			fatal(fmt.Errorf("%s", recoveryUsage))
+		}
+		if account == "" || (server == "" && sf.backend == "") {
+			fatal(fmt.Errorf("%s\nthe account, the server or the store are on the kit", recoveryUsage))
+		}
+		if err := c.CheckFree(); err != nil {
+			fatal(err)
+		}
+		var err error
+		if server, err = sf.setup(c, server); err != nil {
+			fatal(err)
+		}
+		fmt.Fprintln(os.Stderr, "Type the groups of the kit, then an empty line:")
+		var text strings.Builder
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() && strings.TrimSpace(sc.Text()) != "" {
+			text.WriteString(sc.Text() + " ")
+		}
+		ready, err := c.RestoreClaim(server, account, text.String(), name, func() (string, error) {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return "", fmt.Errorf("the kit needs its passphrase and there is no terminal to ask in")
+			}
+			fmt.Fprint(os.Stderr, "Passphrase of the kit: ")
+			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			return string(b), err
+		})
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("The kit claimed the account, the devices of the owner warn about it and the primary device can cancel it\nRun sshr sync recovery restore --finish after %s\n", ready.Local().Format(time.DateTime))
 	case "cancel":
 		if err := c.CancelRecovery(); err != nil {
 			fatal(err)

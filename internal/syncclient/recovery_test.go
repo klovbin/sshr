@@ -1,9 +1,13 @@
 package syncclient
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"sshr.dev/internal/syncserver"
 )
 
 // TestCreateRecoveryKit checks that the primary device makes a kit: its
@@ -64,5 +68,89 @@ func TestCreateRecoveryKit(t *testing.T) {
 	must(t, w.b.Pull())
 	if w.b.st.Recovery != "" || len(w.b.st.Trusted) != 2 {
 		t.Fatalf("after cancel b sees recovery %q, %d devices", w.b.st.Recovery, len(w.b.st.Trusted))
+	}
+}
+
+// TestRestoreFromKit checks a restore on a fresh machine (#150): the kit
+// claims the account, the hand-over waits, the owner's devices warn, after
+// the wait the new machine gets the hosts and is the primary device, the
+// kit device is out and the paper is worth nothing
+func TestRestoreFromKit(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	w.srv.Config.Handler.(*syncserver.Server).Now = now
+	kit, err := w.a.CreateRecoveryKit("pw", DefaultRecoveryWait)
+	must(t, err)
+	must(t, w.b.Pull())
+	w.b.Now = now
+
+	n := w.client("n-")
+	n.Now = now
+	pass := func() (string, error) { return "pw", nil }
+	if _, err := n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new laptop", func() (string, error) { return "wrong", nil }); err == nil {
+		t.Fatal("a wrong passphrase went through")
+	}
+	ready, err := n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new laptop", pass)
+	must(t, err)
+	if ready.Sub(clock) != DefaultRecoveryWait {
+		t.Fatalf("ready in %s", ready.Sub(clock))
+	}
+	must(t, w.b.Pull())
+	if !strings.Contains(w.log.String(), "recovery kit of this account was used") {
+		t.Fatalf("b did not warn:\n%s", w.log.String())
+	}
+	if err := n.RestoreFinish(); err == nil || !strings.Contains(err.Error(), "handed over in") {
+		t.Fatalf("finish before the wait: %v", err)
+	}
+	clock = clock.Add(DefaultRecoveryWait + time.Hour)
+	must(t, n.RestoreFinish())
+	if n.st == nil {
+		must(t, n.load())
+	}
+	if n.st.Primary != n.st.DeviceID || n.st.Recovery != "" {
+		t.Fatalf("on n: primary %q (n %q), recovery %q", n.st.Primary, n.st.DeviceID, n.st.Recovery)
+	}
+	if _, err := n.Store.Find(web.ID); err != nil {
+		t.Fatalf("n has no hosts: %v", err)
+	}
+	must(t, w.b.Pull())
+	if w.b.st.Primary != n.st.DeviceID {
+		t.Fatalf("b sees primary %q", w.b.st.Primary)
+	}
+	if _, err := os.Stat(filepath.Join(n.Dir, "recovery")); !os.IsNotExist(err) {
+		t.Fatalf("the kit device is still on n: %v", err)
+	}
+	// the paper is worth nothing now
+	m := w.client("m-")
+	if _, err := m.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "thief", pass); err == nil {
+		t.Fatal("a used kit claimed the account again")
+	}
+}
+
+// TestRestoreCancelled checks that the primary device cancels a claim and
+// the restore then fails
+func TestRestoreCancelled(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	w.srv.Config.Handler.(*syncserver.Server).Now = now
+	kit, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	n := w.client("n-")
+	n.Now = now
+	_, err = n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "thief", noPass)
+	must(t, err)
+	w.a.Now = now
+	must(t, w.a.CancelRecovery())
+	clock = clock.Add(DefaultRecoveryWait + time.Hour)
+	if err := n.RestoreFinish(); err == nil {
+		t.Fatal("a cancelled claim finished")
+	}
+	must(t, w.b.Pull())
+	if w.b.st.Primary != w.a.st.DeviceID {
+		t.Fatalf("primary moved to %q", w.b.st.Primary)
 	}
 }

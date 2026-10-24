@@ -27,7 +27,7 @@ Moving hosts in and out
 
 - import from `~/.ssh/config` through `ssh -G`
 - export to `~/.ssh/config` with an `Include` line, kept up to date, off by default
-- sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), changes to different fields of one host on two devices merge into one host ([#152](https://github.com/klovbin/sshr/issues/152)), only the primary device adds and removes devices ([#292](https://github.com/klovbin/sshr/issues/292)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
+- sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), changes to different fields of one host on two devices merge into one host ([#152](https://github.com/klovbin/sshr/issues/152)), only the primary device adds and removes devices ([#292](https://github.com/klovbin/sshr/issues/292)), a paper recovery kit with a claim, a wait and a cancel ([#150](https://github.com/klovbin/sshr/issues/150)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
 
 For other programs
 
@@ -58,7 +58,7 @@ Features
 Later
 
 7. sshr on iOS and Android, ssh in process, keys in the phone's keystore, joins sync like any device ([#25](https://github.com/klovbin/sshr/issues/25))
-9. Sync: automatic background sync, a paper recovery key, pairing by QR code
+9. Sync: automatic background sync, pairing by QR code
 12. Sync through a store you already have, Supabase, a 1Password vault or a folder Syncthing or Dropbox syncs, still end to end encrypted, the store sees only ciphertext ([#128](https://github.com/klovbin/sshr/issues/128))
 10. Sync without a server: device to device over the local network or the user's own WireGuard tunnel, TLS 1.3 with device keys pinned at pairing
 11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required
