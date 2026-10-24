@@ -101,7 +101,9 @@ function ReadText([string]$path) {
 # the registry and in older files
 function On([string]$s) {
 	$s = $s.Trim().ToLower()
-	$s -eq 'on' -or ($s -match '^-?[0-9]+$' -and [long]$s -ne 0)
+	# a digit other than 0 makes a number non-zero, no cast that could
+	# overflow and stop the import
+	$s -eq 'on' -or ($s -match '^-?[0-9]+$' -and $s -match '[1-9]')
 }
 
 # SplitUser splits user@host the way WinSCP does, a user in the host field

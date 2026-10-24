@@ -556,8 +556,11 @@ func TestWinSCPImporter(t *testing.T) {
 		"[Sessions\\ftpsite]\r\nHostName=ftp.example\r\n\r\n[Sessions\\sshsite]\r\nHostName=ssh.example\r\nFSProtocol=2\r\n"+
 		// a workspace and a hidden session are no sites (#333)
 		"\r\n[Sessions\\work/0000]\r\nHostName=w.example\r\nFSProtocol=1\r\nIsWorkspace=1\r\n"+
-		"\r\n[Sessions\\_!_hidden]\r\nHostName=h.example\r\nFSProtocol=1\r\n"), 0o600)
-	if d, _ := runPwshImporter(t, "winscp", defs); len(d) != 1 || d[0].Host != "ssh.example" || d[0].User != "root" || d[0].Port != 2200 {
+		"\r\n[Sessions\\_!_hidden]\r\nHostName=h.example\r\nFSProtocol=1\r\n"+
+		// a boolean too large for a number does not stop the import (#334)
+		"\r\n[Sessions\\big]\r\nHostName=big.example\r\nFSProtocol=1\r\nTunnel=99999999999999999999\r\nTunnelHostName=t.example\r\n"), 0o600)
+	if d, _ := runPwshImporter(t, "winscp", defs); len(d) != 2 || d[0].Host != "ssh.example" || d[0].User != "root" || d[0].Port != 2200 ||
+		d[1].Jump != "t.example" {
 		t.Errorf("defaults: %+v", d)
 	}
 }
