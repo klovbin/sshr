@@ -267,7 +267,8 @@ requirement off. The list is in settings.json and never syncs, a stolen
 sync device cannot turn it off. The server decides in the end, sshr only
 keeps itself from logging in another way. check reads authorized_keys on
 the host, lists the keys that are not on a token and prints the lines of
-sshd_config that make the server take nothing else, it changes nothing
+sshd_config that turn off passwords and the other ways in, keys sshd
+takes from other files or a command are not read, it changes nothing
 there`},
 	{name: "hooks", usage: `sshr hooks list
 sshr hooks on|off

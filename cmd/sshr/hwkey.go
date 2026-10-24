@@ -97,8 +97,9 @@ func hwkeyStatus(store *app.Store, st app.Settings) {
 
 // hwkeyCheck reads ~/.ssh/authorized_keys on the host, logging in the way
 // the host does, and lists the keys that are not on a token, with the
-// lines of sshd_config that make the server take nothing else, it only
-// reads, the server is left as it is
+// lines of sshd_config that turn off passwords and other ways in, it
+// only reads, the server is left as it is, the keys sshd takes from
+// elsewhere are named and not read
 func hwkeyCheck(store *app.Store, h *app.Host) {
 	res, err := store.RunRemote(h, authorizedKeysCommand, nil, 30*time.Second)
 	if err != nil {
@@ -121,7 +122,8 @@ func hwkeyCheck(store *app.Store, h *app.Host) {
 	} else if len(other) > 0 {
 		fmt.Println("remove the keys above from authorized_keys on the server, they log in without the token")
 	}
-	fmt.Println("with only keys on a token there, these lines in /etc/ssh/sshd_config make the server take nothing else:")
+	fmt.Println("only ~/.ssh/authorized_keys was read, sshd may also take keys from other AuthorizedKeysFile paths, AuthorizedKeysCommand or TrustedUserCAKeys, sshd -T as root on the server shows them")
+	fmt.Println("with only keys on a token there, these lines in /etc/ssh/sshd_config turn off passwords and the other ways in:")
 	for _, l := range []string{"PasswordAuthentication no", "KbdInteractiveAuthentication no", "AuthenticationMethods publickey", "PubkeyAuthOptions verify-required    (also ask the PIN of the token)"} {
 		fmt.Println("  " + l)
 	}
