@@ -494,3 +494,59 @@ func TestMobaXtermImporter(t *testing.T) {
 		}
 	}
 }
+
+// TestWinSCPImporter reads a WinSCP.ini with a folder, a tunnel, a user in
+// the host field, an FTP site, escaped names in UTF-8 and in the ANSI code
+// page and an encrypted password that must not show
+func TestWinSCPImporter(t *testing.T) {
+	ini := "[Configuration\\Interface]\r\nHostName=not.a.site\r\n\r\n" +
+		"[Sessions\\Default%20Settings]\r\nHostName=default.example\r\n\r\n" +
+		"[Sessions\\My%20Folder/web%20prod]\r\nHostName=10.0.0.5\r\nPortNumber=2222\r\nUserName=deploy\r\n" +
+		"PublicKeyFile=C:%5Ckeys%5Cweb.ppk\r\nPassword=A35C4E5C1D2B3A4F5E6D\r\n" +
+		"Tunnel=1\r\nTunnelHostName=gw.example\r\nTunnelUserName=ops\r\nTunnelPortNumber=2084\r\nTunnelPasswordPlain=tunnelsecret\r\n\r\n" +
+		"[Sessions\\db]\r\nHostName=u@db.local\r\nUserName=other\r\nFSProtocol=0\r\n" +
+		"PublicKeyFile=C:%5Ckeys%5Cid_ed25519\r\nProxyMethod=2\r\nProxyPassword=proxysecret\r\n\r\n" +
+		"[Sessions\\ftp]\r\nHostName=ftp.example\r\nFSProtocol=5\r\n\r\n" +
+		"[Sessions\\%EF%BB%BF%D0%B1%D0%B0%D0%B7%D0%B0]\r\nHostName=b.example\r\nUserName=%EF%BB%BF%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8C\r\nTunnel=on\r\nTunnelHostName=j.example\r\n\r\n" +
+		"[Sessions\\caf%E9]\r\nHostName=c.example\r\n\r\n" +
+		"[Sessions\\x]\r\nHostName=lower.example\r\n\r\n[Sessions\\X]\r\nHostName=upper.example\r\n"
+	file := filepath.Join(t.TempDir(), "WinSCP.ini")
+	if err := os.WriteFile(file, []byte(ini), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// a western system, an escape without a BOM is Windows-1252
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	hosts, notes := runPwshImporter(t, "winscp", file)
+	got := map[string]ExtHost{}
+	for _, h := range hosts {
+		got[h.Key] = h
+	}
+	if len(hosts) != 6 {
+		t.Fatalf("%+v", hosts)
+	}
+	web := got["My%20Folder/web%20prod"]
+	if web.Name != "web prod" || web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" ||
+		web.KeyFile != "" || web.Jump != "ops@gw.example:2084" || strings.Join(web.Tags, ",") != "My Folder" {
+		t.Errorf("web: %+v", web)
+	}
+	db := got["db"]
+	if db.Host != "db.local" || db.User != "u" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" {
+		t.Errorf("db: %+v", db)
+	}
+	b := got["%EF%BB%BF%D0%B1%D0%B0%D0%B7%D0%B0"]
+	if b.Name != "база" || b.User != "пользователь" || b.Jump != "j.example" {
+		t.Errorf("utf-8: %+v", b)
+	}
+	if got["caf%E9"].Name != "café" || got["x"].Host != "lower.example" || got["X"].Host != "upper.example" {
+		t.Errorf("%+v", got)
+	}
+	if !strings.Contains(notes, "puttygen") || !strings.Contains(notes, "ProxyMethod 2") {
+		t.Errorf("notes: %s", notes)
+	}
+	all := fmt.Sprint(hosts) + notes
+	for _, secret := range []string{"A35C4E", "tunnelsecret", "proxysecret", "ftp.example", "not.a.site", "default.example"} {
+		if strings.Contains(all, secret) {
+			t.Errorf("%s reached the output", secret)
+		}
+	}
+}
