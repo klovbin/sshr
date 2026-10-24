@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"sshr.dev/internal/app"
 )
@@ -64,6 +65,7 @@ func ParseImport(data []byte) (hosts []ExtHost, warnings []string, err error) {
 	}
 	dropped := map[string]bool{}
 	var skipped []string
+	hidden := 0
 	for i, raw := range doc.Hosts {
 		var fields map[string]json.RawMessage
 		var h ExtHost
@@ -83,13 +85,46 @@ func ParseImport(data []byte) (hosts []ExtHost, warnings []string, err error) {
 		if strings.TrimSpace(h.Key) == "" {
 			return nil, nil, fmt.Errorf("host %d has no key, the importer must name each host so a second import finds it again", i+1)
 		}
+		hidden += h.dropHidden()
 		hosts = append(hosts, h)
+	}
+	if hidden > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d control, bidi or zero-width characters were dropped from the hosts, they would hide or reverse text in the list", hidden))
 	}
 	for name := range dropped {
 		warnings = append(warnings, fmt.Sprintf("the field %q is not read, sshr takes no secrets and nothing outside the list from an importer", name))
 	}
 	sort.Strings(warnings)
 	return hosts, append(warnings, skipped...), nil
+}
+
+// dropHidden removes from the fields sshr shows the characters that drive
+// the terminal or hide text: controls, the line and paragraph separators
+// and the format characters (bidi marks such as U+202E, zero-width ones,
+// the BOM), every importer gets the same filter here, the key stays as it
+// is, it gives the ID of the host and is printed only quoted, it returns
+// how many went
+func (h *ExtHost) dropHidden() int {
+	n := 0
+	clean := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) {
+				n++
+				return -1
+			}
+			return r
+		}, s)
+	}
+	for _, f := range []*string{&h.Name, &h.Host, &h.User, &h.KeyFile, &h.Jump, &h.Session} {
+		*f = clean(*f)
+	}
+	for i := range h.Tags {
+		h.Tags[i] = clean(h.Tags[i])
+	}
+	for i := range h.Forwards {
+		h.Forwards[i] = clean(h.Forwards[i])
+	}
+	return n
 }
 
 // HostID is the ID of the host with key from the importer called ext, the

@@ -229,7 +229,9 @@ func extImport(store *app.Store, reg *ext.Registry, args []string) {
 				continue
 			}
 		}
-		fmt.Fprintf(os.Stderr, "! %s: %v\n", e.Key, err)
+		// the key comes from the importer as it is, quoted it cannot drive
+		// the terminal
+		fmt.Fprintf(os.Stderr, "! %q: %v\n", e.Key, err)
 		failed++
 	}
 	fmt.Printf("%d added, %d already there, %d failed\n", added, skipped, failed)

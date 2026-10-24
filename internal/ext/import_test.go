@@ -115,3 +115,24 @@ func TestCollectCapsWhatAnImporterPrints(t *testing.T) {
 		t.Errorf("a failing importer: %v", err)
 	}
 }
+
+// TestParseImportDropsHiddenCharacters checks that the bidi, zero-width and
+// separator characters an importer may pass through are dropped from what
+// sshr shows (#325), the key stays as given
+func TestParseImportDropsHiddenCharacters(t *testing.T) {
+	in := `{"hosts":[{"key":"a\u202eb","name":"pay\u202egnp.exe","host":"h\u200b.example","user":"r\u2066oot","jump":"g\u2028w","tags":["pr\ufeffod"],"key_file":"/k\u00ad"}]}`
+	hosts, warnings, err := ParseImport([]byte(in))
+	if err != nil || len(hosts) != 1 {
+		t.Fatal(hosts, err)
+	}
+	h := hosts[0]
+	if h.Name != "paygnp.exe" || h.Host != "h.example" || h.User != "root" || h.Jump != "gw" || h.Tags[0] != "prod" || h.KeyFile != "/k" {
+		t.Errorf("%+v", h)
+	}
+	if h.Key != "a\u202eb" {
+		t.Errorf("the key changed: %q", h.Key)
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), "6 control, bidi or zero-width") {
+		t.Errorf("warnings %q", warnings)
+	}
+}
