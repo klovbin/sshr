@@ -136,6 +136,8 @@ func extInstall(reg *ext.Registry, args []string) {
 	fmt.Printf("  files:  %d, hash %s\n", st.Files, st.Lock.Tree[:16])
 	if old, err := reg.Find(st.Name); err == nil {
 		fmt.Printf("  it replaces version %s, installed from %s\n", old.Version, ext.CleanText(old.Lock.Source, 300))
+	} else if !errors.Is(err, ext.ErrNotInstalled) {
+		fmt.Printf("  it replaces an installed copy that does not load: %s\n", ext.CleanText(err.Error(), 300))
 	}
 	if fromCatalog {
 		fmt.Printf("  author: %s (catalog %s)\n", entry.Author, catalogURL())

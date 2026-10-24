@@ -355,3 +355,20 @@ func TestLocalFolderNote(t *testing.T) {
 		}
 	}
 }
+
+// an install over an installed copy that no longer loads says it replaces
+// one (#268)
+func TestInstallOverABrokenCopy(t *testing.T) {
+	home := t.TempDir()
+	broken := filepath.Join(home, ".sshr", "extensions", "hello")
+	os.MkdirAll(broken, 0o700)
+	os.WriteFile(filepath.Join(broken, "sshr-ext.json"), []byte(`{"protocol":1,"name":"hello","version":"1\u001b","description":"d","kinds":["command"],"command":{"default":["run.sh"]}}`), 0o600)
+	src := filepath.Join(t.TempDir(), "hello")
+	os.MkdirAll(src, 0o700)
+	os.WriteFile(filepath.Join(src, "sshr-ext.json"), []byte(`{"protocol":1,"name":"hello","version":"2","description":"says hi","kinds":["command"],"command":{"default":["run.sh"]}}`), 0o600)
+	os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh\necho hi\n"), 0o700)
+	out, errOut, code := sshrIn(t, home, "ext", "install", src, "--yes")
+	if code != 0 || !strings.Contains(out, "replaces an installed copy that does not load") {
+		t.Errorf("install over a broken copy: %d %q %q", code, out, errOut)
+	}
+}
