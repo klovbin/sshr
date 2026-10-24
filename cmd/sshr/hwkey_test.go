@@ -3,7 +3,31 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"sshr.dev/internal/app"
 )
+
+// a read that failed is an error, only exit 3 means there is no file
+// (#359)
+func TestAuthorizedKeysOf(t *testing.T) {
+	for _, c := range []struct {
+		res     app.RemoteResult
+		missing bool
+		fails   bool
+	}{
+		{app.RemoteResult{Stdout: []byte("ssh-ed25519 AAAA x\n")}, false, false},
+		{app.RemoteResult{}, false, false},
+		{app.RemoteResult{ExitCode: 3}, true, false},
+		{app.RemoteResult{ExitCode: 1, Stderr: []byte("cat: Permission denied")}, false, true},
+		{app.RemoteResult{ExitCode: 127}, false, true},
+		{app.RemoteResult{ExitCode: 255, Stderr: []byte("Connection refused")}, false, true},
+	} {
+		data, err := authorizedKeysOf("web", &c.res)
+		if (err != nil) != c.fails || err == nil && (data == nil) != c.missing {
+			t.Errorf("exit %d: data %q err %v", c.res.ExitCode, data, err)
+		}
+	}
+}
 
 // authorized_keys is split into keys on a token and others, options before
 // a key and comments are read past, a line that is no key is left out

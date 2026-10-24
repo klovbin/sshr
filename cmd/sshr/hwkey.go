@@ -99,14 +99,18 @@ func hwkeyStatus(store *app.Store, st app.Settings) {
 // lines of sshd_config that make the server take nothing else, it only
 // reads, the server is left as it is
 func hwkeyCheck(store *app.Store, h *app.Host) {
-	res, err := store.RunRemote(h, "cat ~/.ssh/authorized_keys 2>/dev/null", nil, 30*time.Second)
+	res, err := store.RunRemote(h, authorizedKeysCommand, nil, 30*time.Second)
 	if err != nil {
 		fatal(err)
 	}
-	if res.ExitCode == 255 {
-		fatal(fmt.Errorf("ssh to %s failed: %s", h.Name, strings.TrimSpace(string(res.Stderr))))
+	data, err := authorizedKeysOf(h.Name, res)
+	if err != nil {
+		fatal(err)
 	}
-	sk, other := authorizedKeyTypes(res.Stdout)
+	if data == nil {
+		fmt.Printf("%s: there is no ~/.ssh/authorized_keys\n", h.Name)
+	}
+	sk, other := authorizedKeyTypes(data)
 	fmt.Printf("%s: %d key(s) on a hardware token, %d other key(s) in ~/.ssh/authorized_keys\n", h.Name, len(sk), len(other))
 	for _, k := range other {
 		fmt.Println("  not on a token: " + k)
@@ -121,6 +125,29 @@ func hwkeyCheck(store *app.Store, h *app.Host) {
 		fmt.Println("  " + l)
 	}
 	fmt.Println("sshr changes nothing on the server, keep a second token or a console of the provider before you lock it down")
+}
+
+// authorizedKeysCommand prints authorized_keys of the login user, a file
+// that is not there exits 3, so it is told apart from one that does not
+// read
+const authorizedKeysCommand = "test -e ~/.ssh/authorized_keys || exit 3; cat ~/.ssh/authorized_keys"
+
+// authorizedKeysOf is the file authorizedKeysCommand read, nil when there
+// is none, a read that failed is an error with what the server said, an
+// empty answer must not pass for a file without keys
+func authorizedKeysOf(name string, res *app.RemoteResult) ([]byte, error) {
+	switch res.ExitCode {
+	case 0:
+		if res.Stdout == nil {
+			return []byte{}, nil
+		}
+		return res.Stdout, nil
+	case 3:
+		return nil, nil
+	case 255:
+		return nil, fmt.Errorf("ssh to %s failed: %s", name, strings.TrimSpace(string(res.Stderr)))
+	}
+	return nil, fmt.Errorf("reading ~/.ssh/authorized_keys on %s failed (exit %d): %s", name, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
 }
 
 // authorizedKeyTypes sorts the lines of an authorized_keys file into keys
