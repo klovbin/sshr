@@ -31,3 +31,40 @@ func TestHostsKeepsTheExportHook(t *testing.T) {
 		t.Fatalf("the export was not rewritten after a sync import:\n%s", b)
 	}
 }
+
+// the host store inside the ssh and ssh config environments carries the
+// hooks of Store too, ImportSSHConfig adds its hosts through it, so an
+// imported host refreshes an installed export (#222), ImportSSHConfig
+// itself is tested in sshconf where its config file can be pointed away
+// from the user's own
+func TestEnvHostStoresKeepTheHooks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	out := filepath.Join(home, "ssh_config")
+	os.WriteFile(out, []byte("# Written by sshr, edits here are lost, change the hosts in sshr\n\n"), 0o600)
+	s := &Store{Dir: t.TempDir(), SSHConfigOut: out}
+	if _, err := s.confEnv().Hosts.Add(Host{Name: "from-conf-env", Host: "10.0.0.2", User: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.env().Hosts.Add(Host{Name: "from-ssh-env", Host: "10.0.0.3", User: "u"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(out)
+	for _, name := range []string{"from-conf-env", "from-ssh-env"} {
+		if !strings.Contains(string(b), name) {
+			t.Errorf("the export was not rewritten after a host added through the env of %s:\n%s", name, b)
+		}
+	}
+	// a Store inside Locked hands the held store to the env, no second lock
+	err := s.Locked(func(tx *Store) error {
+		if tx.env().Hosts != tx.db() || tx.confEnv().Hosts != tx.db() {
+			t.Error("the env of a held Store is not its held host store")
+		}
+		_, err := tx.confEnv().Hosts.Add(Host{Name: "inside-lock", Host: "10.0.0.4", User: "u"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
