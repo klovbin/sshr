@@ -100,6 +100,10 @@ func TestConnectArgsUnderTheRequirement(t *testing.T) {
 			t.Errorf("no %s in %s", want, line)
 		}
 	}
+	// a key type newer than OpenSSH 8.2 would stop ssh there (#355)
+	if strings.Contains(line, "webauthn") {
+		t.Errorf("a key type older ssh refuses: %s", line)
+	}
 	if strings.Contains(line, "ControlMaster=auto") {
 		t.Errorf("a shared connection under the requirement: %s", line)
 	}
