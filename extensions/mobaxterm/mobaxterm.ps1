@@ -130,7 +130,8 @@ if (-not $Files) {
 }
 
 $hosts = New-Object System.Collections.ArrayList
-$seen = @{}
+# keys compared by case, as sshr does, a PowerShell hashtable ignores it
+$seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 foreach ($f in $Files) {
 	if (-not (Test-Path -LiteralPath $f -PathType Leaf)) {
 		$stderr.WriteLine("mobaxterm: $(Clean $f) is not a file")
@@ -175,8 +176,7 @@ foreach ($f in $Files) {
 		# the folder keeps two sessions of one name in two folders apart
 		$cleanFolder = Field $folder
 		$key = if ($cleanFolder -ne '') { $cleanFolder + '\' + $label } else { $label }
-		if ($seen.ContainsKey($key)) { continue }
-		$seen[$key] = $true
+		if (-not $seen.Add($key)) { continue }
 		$h = [ordered]@{ key = $key; name = $label; host = $hostName }
 		if (OkPort $g[2]) { $h.port = [int]$g[2] }
 		# <default> is the login set in MobaXterm, the Windows user unless changed

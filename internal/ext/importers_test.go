@@ -405,6 +405,8 @@ func TestMobaXtermImporter(t *testing.T) {
 		"desk=#91#4%10.0.0.9%3389%%0%0%0%0%-1%0%0%-1#MobaFont#0# #-1\r\n" +
 		"a=1= #109#0%a1.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"a=2=#109#0%a2.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"x=#109#0%lower.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"X=#109#0%upper.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"gw=#109#0%gw.example%22%%%-1%-1%%j1.example__PIPE__j2.example%22__PIPE__22%<default>__PIPE__me%0#MobaFont#0# #-1\r\n" +
 		"x__DIEZE__1=#109#0%esc.example%22%u__PERCENT__1%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\k__DIEZE__1%%-1#MobaFont#0# #-1\r\n" +
 		"\r\n[Bookmarks_1]\r\nSubRep=Clients\\Acme\r\nImgNum=41\r\n" +
@@ -435,8 +437,12 @@ func TestMobaXtermImporter(t *testing.T) {
 	for _, h := range hosts {
 		got[h.Key] = h
 	}
-	if len(hosts) != 9 || got["u16"].Host != "u16.example" {
+	if len(hosts) != 11 || got["u16"].Host != "u16.example" {
 		t.Fatalf("%+v", hosts)
+	}
+	// names that differ in case stay two hosts (#331)
+	if got["x"].Host != "lower.example" || got["X"].Host != "upper.example" {
+		t.Errorf("case: %+v", got)
 	}
 	// a name with = keeps it (#327)
 	if got["a=1"].Host != "a1.example" || got["a=2"].Host != "a2.example" {
