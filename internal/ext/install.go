@@ -135,9 +135,23 @@ func runGit(home, what string, args ...string) error {
 		return fmt.Errorf("%s did not finish in %s", what, cloneTimeout)
 	}
 	if err != nil {
-		return fmt.Errorf("%s failed: %s", what, strings.TrimSpace(string(out)))
+		return fmt.Errorf("%s failed: %s", what, cleanLines(strings.TrimSpace(string(out)), 2000))
 	}
 	return nil
+}
+
+// cleanLines is clean of every line of s, remote: lines and error text of
+// a git server may carry escape sequences, older git passes them on
+func cleanLines(s string, max int) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = clean(l, max)
+	}
+	out := []rune(strings.Join(lines, "\n"))
+	if len(out) > max {
+		return string(out[:max]) + "…"
+	}
+	return string(out)
 }
 
 // cloneGit fetches the newest commit of url into dest, or commit when it is

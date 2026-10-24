@@ -456,3 +456,16 @@ func TestPrepareRecordsTheFullFolderPath(t *testing.T) {
 		t.Errorf("source %q, want %q", st.Lock.Source, src)
 	}
 }
+
+// the output of a failed git run loses its escape sequences and keeps its
+// lines (#267)
+func TestGitErrorsAreCleaned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the git stub is a shell script")
+	}
+	gitStub(t, source(t, "noisy", "#!/bin/sh\n"), "  printf 'remote: \\033[2Jgone\\nfatal: bad\\n' >&2; exit 1\n")
+	_, err := Prepare("https://example.com/a/noisy.git")
+	if err == nil || strings.ContainsRune(err.Error(), 0x1b) || !strings.Contains(err.Error(), "remote: [2Jgone\nfatal: bad") {
+		t.Errorf("error %q", err)
+	}
+}
