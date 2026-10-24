@@ -3,6 +3,7 @@ package syncclient
 import (
 	"crypto/rand"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -295,4 +296,28 @@ func TestKitTokenWritesNothing(t *testing.T) {
 	}
 	must(t, w.a.CancelRecovery())
 	must(t, w.b.Pull())
+}
+
+// TestRestoreCutShortStartsAgain checks that a restore whose join fails
+// leaves nothing that stops a new restore, the claim made stays and the
+// new run goes on from it (#304)
+func TestRestoreCutShortStartsAgain(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	kit, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	n := w.client("n-")
+	n.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/join") {
+			return answer(http.StatusServiceUnavailable), nil
+		}
+		return nil, nil
+	}}}
+	if _, err := n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass); err == nil {
+		t.Fatal("the join did not fail")
+	}
+	n.HTTP = nil
+	if _, err := n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass); err != nil {
+		t.Fatalf("a second restore: %v", err)
+	}
 }

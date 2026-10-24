@@ -234,7 +234,8 @@ func (c *Client) RestoreClaim(server, account, kitText, name string, pass func()
 			})
 		})
 		if err != nil {
-			return time.Time{}, fmt.Errorf("the kit could not claim the account: %v", err)
+			rc.forget()
+			return time.Time{}, fmt.Errorf("the kit could not claim the account, run the restore again: %v", err)
 		}
 	} else {
 		rc.logf("the account was claimed with this kit already on change %d", rc.st.Claim)
@@ -250,7 +251,9 @@ func (c *Client) RestoreClaim(server, account, kitText, name string, pass func()
 	}
 	code := rc.st.Account + "." + strings.ReplaceAll(Fingerprint(self.SignPub), "-", "")
 	if _, err := c.Join(server, code, name); err != nil {
-		return time.Time{}, fmt.Errorf("the account is claimed, this machine could not ask to join, run sshr sync recovery restore --finish later: %v", err)
+		// a new restore finds the claim made and goes on from it
+		rc.forget()
+		return time.Time{}, fmt.Errorf("the account is claimed, this machine could not ask to join, run the restore again: %v", err)
 	}
 	return rc.now().Add(time.Duration(rc.st.RecoveryWait) * time.Second), nil
 }
@@ -314,8 +317,10 @@ func (c *Client) bootstrap(k recoveryKit) error {
 
 // forget drops what a restore cut short left of the kit device here
 func (c *Client) forget() {
+	if c.st != nil {
+		vault.SecretDelete(c.prefix() + "key-" + fmt.Sprint(c.st.Epoch))
+	}
 	vault.SecretDelete(c.prefix() + "device")
-	vault.SecretDelete(c.prefix() + "key-" + fmt.Sprint(c.st.Epoch))
 	vault.SecretDelete(c.storeSecretName())
 	os.RemoveAll(c.Dir)
 }
