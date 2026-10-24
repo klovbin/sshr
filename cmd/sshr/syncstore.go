@@ -307,7 +307,7 @@ func joinFlags(server string, ref *syncclient.BackendRef) (string, error) {
 		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
 			return "", fmt.Errorf("the WebDAV settings in the sync state: %v", err)
 		}
-		return "--backend webdav --url " + cfg.URL + " --user " + cfg.User, nil
+		return "--backend webdav --url " + shellQuote(cfg.URL) + " --user " + shellQuote(cfg.User), nil
 	}
 	if ref.Kind != "s3" {
 		return "", fmt.Errorf("this sshr cannot open a sync store of kind %q", ref.Kind)
@@ -316,12 +316,29 @@ func joinFlags(server string, ref *syncclient.BackendRef) (string, error) {
 	if err := json.Unmarshal(ref.Config, &cfg); err != nil {
 		return "", fmt.Errorf("the S3 settings in the sync state: %v", err)
 	}
-	out := "--backend s3 --endpoint " + cfg.Endpoint + " --bucket " + cfg.Bucket
+	out := "--backend s3 --endpoint " + shellQuote(cfg.Endpoint) + " --bucket " + shellQuote(cfg.Bucket)
 	if cfg.Prefix != "" {
-		out += " --prefix " + cfg.Prefix
+		out += " --prefix " + shellQuote(cfg.Prefix)
 	}
 	if cfg.Region != "" {
-		out += " --region " + cfg.Region
+		out += " --region " + shellQuote(cfg.Region)
 	}
-	return out + " --key-id " + cfg.KeyID, nil
+	return out + " --key-id " + shellQuote(cfg.KeyID), nil
+}
+
+// shellQuote puts a value of the join line in single quotes when it holds
+// anything a shell would split or expand, a user "John Doe" stays one
+// argument when the line is copied
+func shellQuote(v string) string {
+	safe := v != ""
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._~:/@%+=-,", r)) {
+			safe = false
+			break
+		}
+	}
+	if safe {
+		return v
+	}
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }

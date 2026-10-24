@@ -225,3 +225,17 @@ func TestWebDAVFlags(t *testing.T) {
 		t.Error("opened a folder without a password")
 	}
 }
+
+// the join line keeps a value with a space or shell characters as one
+// argument (#258)
+func TestJoinFlagsQuote(t *testing.T) {
+	cfg, _ := json.Marshal(davstore.Config{URL: "https://cloud.example/dav/a;b $x", User: "John O'Doe"})
+	got, err := joinFlags("", &syncclient.BackendRef{Kind: "webdav", Config: cfg})
+	want := `--backend webdav --url 'https://cloud.example/dav/a;b $x' --user 'John O'\''Doe'`
+	if err != nil || got != want {
+		t.Errorf("join flags\n got %s\nwant %s", got, want)
+	}
+	if shellQuote("") != "''" || shellQuote("u") != "u" {
+		t.Errorf("quote of plain values %q %q", shellQuote(""), shellQuote("u"))
+	}
+}
