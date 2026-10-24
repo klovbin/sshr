@@ -55,6 +55,15 @@ type Server struct {
 	// creates limits account creation and joins per client address
 	creates map[string][]time.Time
 	swept   time.Time
+	// Now is the clock of the recovery wait, nil is time.Now, tests move it
+	Now func() time.Time
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 // New serves accounts stored under dir
@@ -355,8 +364,12 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request, _ ctxDevice
 func (s *Server) activate(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	defer s.lock(a)()
-	if !s.onlyPrimary(w, a, dev, "approves devices") {
-		return
+	// a machine restored from the recovery kit is the primary of the head
+	// and is activated by the kit device that handed the account to it
+	if m, _, err := s.head(a); err != nil || m == nil || m.Recovery == "" || dev.id != m.Recovery || id != m.Primary {
+		if !s.onlyPrimary(w, a, dev, "approves devices") {
+			return
+		}
 	}
 	ds, err := s.loadDevices(a)
 	if err != nil {
@@ -669,6 +682,12 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if m.Claim != 0 && m.Claim == m.Counter {
+		// when the recovery kit claimed the account, the hand-over waits
+		// from here
+		os.MkdirAll(filepath.Join(dir, "claims"), 0o700)
+		writeFile(filepath.Join(dir, "claims", strconv.FormatUint(m.Counter, 10)), []byte(strconv.FormatInt(s.now().Unix(), 10)))
+	}
 	s.collect(a, live)
 	w.Header().Set("ETag", strconv.FormatUint(m.Counter, 10))
 	w.WriteHeader(http.StatusNoContent)
@@ -706,11 +725,24 @@ func (s *Server) checkRoles(a string, sm *syncproto.Signed, m *syncproto.Manifes
 	if m.Epoch < prev.Epoch {
 		return errors.New("the manifest goes back to an older vault key")
 	}
-	if err := syncproto.CheckPrimary(prev, m, sm.Signer); err != nil {
+	step, err := syncproto.CheckPrimary(prev, m, sm.Signer)
+	if err != nil {
 		return err
 	}
 	if m.Version < 2 {
 		return nil
+	}
+	if step == syncproto.StepRecover {
+		// the wait since the claim by the clock of the server, a stolen kit
+		// cannot hand the account over before the owner had time to cancel
+		b, err := os.ReadFile(filepath.Join(s.accountDir(a), "claims", strconv.FormatUint(prev.Claim, 10)))
+		at, perr := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+		if err != nil || perr != nil {
+			return errors.New("the claim of the recovery kit is not known to this server")
+		}
+		if left := time.Unix(at, 0).Add(time.Duration(prev.RecoveryWait) * time.Second).Sub(s.now()); left > 0 {
+			return fmt.Errorf("the recovery kit hands the account over only after the wait, %s left", left.Round(time.Minute))
+		}
 	}
 	for _, d := range prev.Devices {
 		if d.ID == sm.Signer {

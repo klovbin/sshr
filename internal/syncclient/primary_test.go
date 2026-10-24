@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"sshr.dev/internal/hosts"
 	"sshr.dev/internal/syncproto"
+	"sshr.dev/internal/syncserver"
 	"sshr.dev/internal/vault"
 )
 
@@ -232,6 +234,77 @@ func TestServerRefusesBrokenManifests(t *testing.T) {
 			}
 			must(t, w.a.Pull())
 		})
+	}
+}
+
+// TestRecoveryClaimAndWait checks the rules of the recovery kit device
+// (#150): it may claim the account, a hand-over to a new device before the
+// wait is refused by the server and by the owner's devices, after the
+// wait both take it, anything else it writes is refused, and only the
+// primary sets the kit
+func TestRecoveryClaimAndWait(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	r := w.client("r-")
+	w.join(r)
+	must(t, w.b.Pull())
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	w.b.Now = now
+	w.srv.Config.Handler.(*syncserver.Server).Now = now
+	put := func(c *Client, edit func(*syncproto.Manifest)) (uint64, []byte, error) {
+		n, b := forgeManifest(t, c, edit)
+		return n, b, c.backend().PutManifest(n-1, b)
+	}
+
+	// b may not set the kit, a may
+	if _, _, err := put(w.b, func(m *syncproto.Manifest) { m.Recovery, m.RecoveryWait = r.st.DeviceID, syncproto.MinRecoveryWait }); err == nil {
+		t.Fatal("a device that is not primary set the recovery kit")
+	}
+	must(t, w.a.push(func() (pushPlan, error) {
+		return pushPlan{recovery: &recoveryFields{device: r.st.DeviceID, wait: syncproto.MinRecoveryWait}}, nil
+	}))
+	must(t, w.b.Pull())
+	must(t, r.Pull())
+
+	// the kit may not do anything else
+	if _, _, err := put(r, func(m *syncproto.Manifest) { m.Devices = keepOnly(m.Devices, r.st.DeviceID); m.Primary = r.st.DeviceID }); err == nil {
+		t.Fatal("the kit device took the account at once")
+	}
+	_, _, err := put(r, func(m *syncproto.Manifest) { m.Claim = m.Counter })
+	must(t, err)
+	must(t, w.b.Pull())
+	if w.b.st.ClaimSeen == 0 || !strings.Contains(w.log.String(), "recovery kit of this account was used") {
+		t.Fatalf("b did not see the claim:\n%s", w.log.String())
+	}
+	must(t, r.Pull())
+
+	seed := make([]byte, 32)
+	rand.Read(seed)
+	nk, err := newDeviceKeys(seed)
+	must(t, err)
+	newDev := nk.device("restored")
+	handOver := func(m *syncproto.Manifest) {
+		m.Devices = append(m.Devices, newDev)
+		m.Primary, m.Claim = newDev.ID, 0
+	}
+	if _, _, err := put(r, handOver); err == nil || !strings.Contains(err.Error(), "after the wait") {
+		t.Fatalf("the server took a hand-over before the wait: %v", err)
+	}
+	n, b, _ := put(r, handOver)
+	path := filepath.Join(w.manifestDir(), strconv.FormatUint(n, 10)+".json")
+	must(t, os.WriteFile(path, b, 0o600))
+	if err := w.b.Pull(); err == nil || !strings.Contains(err.Error(), "before the wait") {
+		t.Fatalf("b took a hand-over before the wait: %v", err)
+	}
+	must(t, os.Remove(path))
+
+	clock = clock.Add(25 * time.Hour)
+	_, _, err = put(r, handOver)
+	must(t, err)
+	must(t, w.b.Pull())
+	if w.b.st.Primary != newDev.ID {
+		t.Fatalf("primary on b after the wait %q", w.b.st.Primary)
 	}
 }
 

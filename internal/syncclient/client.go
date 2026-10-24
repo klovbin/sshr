@@ -72,9 +72,18 @@ type state struct {
 	// Primary is the primary device of the last verified manifest, Format
 	// the highest manifest format seen, a format 1 manifest after a format
 	// 2 one is refused, it would drop the primary
-	Primary string                `json:"primary,omitempty"`
-	Format  int                   `json:"format,omitempty"`
-	Entries map[string]entryState `json:"entries"`
+	Primary string `json:"primary,omitempty"`
+	Format  int    `json:"format,omitempty"`
+	// Recovery, RecoveryWait and Claim are those of the last verified
+	// manifest (#150), ClaimSeen is the claim this device saw and
+	// ClaimSeenAt when by its own clock, a hand-over by the recovery kit is
+	// taken only RecoveryWait after that
+	Recovery     string                `json:"recovery,omitempty"`
+	RecoveryWait int64                 `json:"recovery_wait,omitempty"`
+	Claim        uint64                `json:"claim,omitempty"`
+	ClaimSeen    uint64                `json:"claim_seen,omitempty"`
+	ClaimSeenAt  time.Time             `json:"claim_seen_at,omitzero"`
+	Entries      map[string]entryState `json:"entries"`
 	// Skipped are remote entries this device could not import (a mode of a
 	// newer sshr, a host that fails validation), a push carries them on
 	// unchanged and every pull tries them again
@@ -112,11 +121,22 @@ type pushPlan struct {
 	rotation *rotation
 	// primary hands the primary role to this device, empty keeps it
 	primary string
+	// recovery replaces the recovery kit fields, nil keeps them
+	recovery *recoveryFields
+}
+
+// recoveryFields are the recovery kit fields of a manifest
+type recoveryFields struct {
+	device string
+	wait   int64
+	claim  uint64
 }
 
 // Client syncs one Store
 type Client struct {
 	Store *hosts.Store
+	// Now is the clock of the recovery wait, nil is time.Now
+	Now func() time.Time
 	// Dir holds state.json, ~/.sshr/sync
 	Dir string
 	// KeyPrefix names the keychain entries of this device, tests give two
@@ -902,7 +922,10 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		}
 		// only the primary device adds devices, a stolen one that invites
 		// would keep a way back in after it is removed
-		if m.Version >= 2 && sm.Signer != m.Primary {
+		// a machine restored from the recovery kit is added by the kit
+		// device as the new primary
+		recovered := m.Recovery != "" && sm.Signer == m.Recovery && m.Primary == c.st.DeviceID
+		if m.Version >= 2 && sm.Signer != m.Primary && !recovered {
 			return nil, errors.New("this device was added by a device that is not the primary device of the account, approve it on the primary device")
 		}
 	}
@@ -953,6 +976,7 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 	c.st.Approver = ""
 	if m.Version >= 2 {
 		c.st.Primary = m.Primary
+		c.st.Recovery, c.st.RecoveryWait, c.st.Claim = m.Recovery, m.RecoveryWait, m.Claim
 	}
 	c.st.Format = max(c.st.Format, m.Version)
 	return &m, nil
@@ -961,16 +985,54 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 // checkPrimary refuses a manifest that changes who is in the account
 // without the primary device (syncproto.CheckPrimary), the state of this
 // device stands for the manifest before, a device refusing a change keeps
-// its hosts and stops syncing, the account is not taken from the owner
+// its hosts and stops syncing, the account is not taken from the owner, a
+// claim of the recovery kit is noted with the time this device saw it and
+// a hand-over by the kit is taken only after the wait by that clock
 func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error {
-	prev := &syncproto.Manifest{Version: c.st.Format, Primary: c.st.Primary, Epoch: c.st.Epoch, Devices: c.st.Trusted}
-	if err := syncproto.CheckPrimary(prev, m, sm.Signer); err != nil {
+	prev := &syncproto.Manifest{Version: c.st.Format, Primary: c.st.Primary, Epoch: c.st.Epoch, Devices: c.st.Trusted,
+		Recovery: c.st.Recovery, RecoveryWait: c.st.RecoveryWait, Claim: c.st.Claim, Entries: c.knownEntries()}
+	step, err := syncproto.CheckPrimary(prev, m, sm.Signer)
+	if err == nil && step == syncproto.StepRecover {
+		wait := time.Duration(prev.RecoveryWait) * time.Second
+		switch {
+		case c.st.ClaimSeen != prev.Claim:
+			err = fmt.Errorf("change %d hands the account to a new device with the recovery kit, but this device never saw the claim it needs, it does not take it", m.Counter)
+		case c.now().Sub(c.st.ClaimSeenAt) < wait:
+			err = fmt.Errorf("change %d hands the account to a new device with the recovery kit before the wait is over (%s left), this device does not take it", m.Counter, (wait - c.now().Sub(c.st.ClaimSeenAt)).Round(time.Minute))
+		}
+	}
+	if err != nil {
 		if prev.Primary != "" {
 			return fmt.Errorf("%w, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here: sshr sync leave, then sshr sync init (on S3 or WebDAV a new --prefix or folder, on Supabase a new project)", err)
 		}
 		return err
 	}
+	if m.Claim != 0 && c.st.ClaimSeen != m.Claim {
+		c.st.ClaimSeen, c.st.ClaimSeenAt = m.Claim, c.now()
+		c.logf("WARNING: the recovery kit of this account was used on change %d, in %s it may hand the account to a new device, if that was not you, run sshr sync recovery cancel on the primary device now", m.Claim, (time.Duration(m.RecoveryWait) * time.Second).Round(time.Hour))
+	}
 	return nil
+}
+
+// knownEntries is the entry list of the last verified manifest as the
+// state keeps it, the recovery kit may not change it
+func (c *Client) knownEntries() map[string]syncproto.Entry {
+	out := make(map[string]syncproto.Entry, len(c.st.Entries)+len(c.st.Skipped))
+	for id, e := range c.st.Entries {
+		out[id] = syncproto.Entry{Hash: e.Blob, Lamport: e.Lamport, Device: e.Device, Deleted: e.Deleted}
+	}
+	for id, e := range c.st.Skipped {
+		out[id] = e
+	}
+	return out
+}
+
+// now is the clock of the recovery wait, tests move it
+func (c *Client) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
 }
 
 // claimPrimary makes this device the first primary of an account made
@@ -1054,6 +1116,8 @@ func (c *Client) pull() error {
 		// the primary and the format belong to the manifests put back, the
 		// next pull checks them again from here
 		c.st.Primary, c.st.Format = before.Primary, before.Format
+		c.st.Recovery, c.st.RecoveryWait, c.st.Claim = before.Recovery, before.RecoveryWait, before.Claim
+		c.st.ClaimSeen, c.st.ClaimSeenAt = before.ClaimSeen, before.ClaimSeenAt
 	}
 	var last *syncproto.Manifest
 	for i := range history {
@@ -1480,7 +1544,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	for id, e := range c.st.Skipped {
 		entries[id] = e
 	}
-	changed := devices != nil || c.st.Counter == 0 || plan.primary != ""
+	changed := devices != nil || c.st.Counter == 0 || plan.primary != "" || plan.recovery != nil
 	fresh := map[string]bool{}
 	for id, plain := range local {
 		if _, ok := c.st.Skipped[id]; ok {
@@ -1578,10 +1642,14 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	if plan.primary != "" {
 		primary = plan.primary
 	}
+	rf := recoveryFields{device: c.st.Recovery, wait: c.st.RecoveryWait, claim: c.st.Claim}
+	if plan.recovery != nil {
+		rf = *plan.recovery
+	}
 	m := &syncproto.Manifest{
 		Version: syncproto.FormatVersion, Account: c.st.Account, Epoch: epoch,
 		Counter: c.st.Counter + 1, Prev: c.st.Head, Devices: devices, Entries: entries,
-		Primary: primary,
+		Primary: primary, Recovery: rf.device, RecoveryWait: rf.wait, Claim: rf.claim,
 	}
 	b, sm, err := c.keys.signManifest(m, key, c.st.DeviceID)
 	if err != nil {
@@ -1597,6 +1665,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
 	c.st.Epoch, c.st.Skipped = epoch, skipped
 	c.st.Primary, c.st.Format = primary, syncproto.FormatVersion
+	c.st.Recovery, c.st.RecoveryWait, c.st.Claim = rf.device, rf.wait, rf.claim
 	if plan.rotation != nil {
 		c.st.Rotation = plan.rotation
 	}
