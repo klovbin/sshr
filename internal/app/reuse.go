@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -94,7 +93,7 @@ func (s *Store) reuseArgs(h *Host) []string {
 // sent over the network) and reports whether ssh config turns on
 // ControlMaster for it
 func userControlMaster(h *Host) bool {
-	out, err := exec.Command("ssh", "-G", "-p", strconv.Itoa(h.Port), "--", h.Dest()).Output()
+	out, err := sshCommand("-G", "-p", strconv.Itoa(h.Port), "--", h.Dest()).Output()
 	if err != nil {
 		return false
 	}
@@ -116,7 +115,7 @@ func (s *Store) CloseMaster(h *Host) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command("ssh", "-o", "ControlPath="+filepath.Join(dir, "%C"),
+	cmd := sshCommand("-o", "ControlPath="+filepath.Join(dir, "%C"),
 		"-p", strconv.Itoa(h.Port), "-O", "exit", "--", h.Dest())
 	out, err := cmd.CombinedOutput()
 	if err != nil {

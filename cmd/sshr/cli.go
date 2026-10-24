@@ -751,7 +751,7 @@ func cmdProxy(store *app.Store, args []string) {
 		fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
 		os.Exit(1)
 	}
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := app.SSHCommand(sshArgs...)
 	// The askpass of the host behind this hop is in our environment, it must
 	// not answer this hop's password prompt
 	cmd.Env = app.StripAuthEnv(os.Environ())

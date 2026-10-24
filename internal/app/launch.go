@@ -145,6 +145,9 @@ func moshRefusal(o LaunchOptions, via string, sshOpts []string) string {
 // ToolPath finds the tool of the plan on PATH, a caller checks it before
 // it tells the user it connects, Command attaches the secrets after that
 func (p *SessionPlan) ToolPath() (string, error) {
+	if p.Tool == "ssh" {
+		return SSHPath()
+	}
 	path, err := exec.LookPath(p.Tool)
 	if err != nil {
 		return "", errors.New(p.Tool + " not found in PATH")

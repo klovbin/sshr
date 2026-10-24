@@ -108,7 +108,7 @@ func cmdKeyInstall(store *app.Store, args []string) {
 		fatal(err)
 	}
 	fmt.Printf("Installing %s on %s...\n", filepath.Base(pub), h.Name)
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := app.SSHCommand(sshArgs...)
 	cmd.Stdin = strings.NewReader(line + "\n")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cleanup, err := app.AttachAuth(cmd, h)

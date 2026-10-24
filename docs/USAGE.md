@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/klovbin/sshr/main/install.sh | sh  
 - adds one line marked `# added by the sshr installer` to your shell startup file when the folder is not in `PATH` (`--no-modify-path` skips it), runs `sshr desktop-entry` when the GUI is installed
 - writes Tab completion for bash and fish when they are installed (`--no-completion` skips it), for zsh it prints the line to add to `~/.zshrc`
 - `--uninstall` removes the binary, the menu entry, the completion files and that line, hosts in `~/.sshr` stay
-- Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are planned ([#17](https://github.com/klovbin/sshr/issues/17))
+- Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are planned ([#17](https://github.com/klovbin/sshr/issues/17)), sshr runs the OpenSSH client of Windows (Settings, Optional features), when the ssh of Git for Windows comes first on PATH the one in `System32\OpenSSH` is taken instead, it reads the Windows paths sshr writes
 
 **Icon and menu:** `sshr desktop-entry` (`--remove` undoes it) writes `sshr.desktop` and icons to `~/.local/share` on Linux and `~/Applications/sshr.app` on macOS (signed ad hoc, it holds a copy of sshr because the Dock shows a bundle icon only for a program inside it, run it again after an update, `install.sh` does), on Windows the icon is a resource of `sshr.exe`, icons are built into the binary, logo files are in `assets/icons`, `go generate ./cmd/sshr` rebuilds the Windows resources
 
@@ -44,6 +44,7 @@ sshr add db.example.com -u admin --no-key         # saved, encrypted
 sshr add db.example.com -u admin --ask-password   # nothing saved, ssh asks every time
 ```
 
+- a saved password needs OpenSSH 8.4 or newer (`ssh -V`), an older ssh would ask on the terminal instead, sshr says so before it connects (Windows 10 before 21H2 ships 8.1, install a newer OpenSSH there)
 - a saved password is sealed with XChaCha20-Poly1305 in the host file, the key is 32 random bytes in the system keychain (Secret Service, macOS Keychain, Windows Credential Manager), never on disk
 - it reaches ssh through sshr's own askpass over a one-shot unix socket, never through a file, argv or the environment, it is tried once (`NumberOfPasswordPrompts=1`, three failures are enough for fail2ban), only a password prompt gets it, host key questions and one-time codes go to the terminal
 - `sshr list` and the host form never decrypt, an empty password field keeps the saved one

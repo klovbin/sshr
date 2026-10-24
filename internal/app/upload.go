@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -53,8 +52,8 @@ func SSHArgs(h *Host) []string {
 // ErrAsksPassword, the upload goes through the host's jump hosts like a
 // normal connection
 func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (string, error) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		return "", errors.New("ssh not found in PATH")
+	if _, err := SSHPath(); err != nil {
+		return "", err
 	}
 	// the name goes into the sh -c script on the server, an extension
 	// like $(cmd) would run there
@@ -92,7 +91,7 @@ func (s *Store) UploadImage(h *Host, data []byte, ext string, batch bool) (strin
 	// The login shell on the server may be fish, so the script runs under sh.
 	args = append(args, "-o", "ConnectTimeout=10", "-T", "--", h.Dest(), "sh -c "+shQuote(script))
 
-	cmd := exec.Command("ssh", args...)
+	cmd := sshCommand(args...)
 	if batch {
 		// Jump hops run as separate ssh processes, they read this too
 		cmd.Env = append(os.Environ(), "SSHR_BATCH=1")

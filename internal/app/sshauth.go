@@ -48,6 +48,18 @@ func attachPassword(cmd *exec.Cmd, h *Host) (func(), error) {
 	if h.Key != "" || !h.PasswordFromSshr() {
 		return noop, nil
 	}
+	// the ssh that will ask: the command itself, or for mosh and others the
+	// ssh they start, an ssh before 8.4 ignores SSH_ASKPASS_REQUIRE and asks
+	// on the terminal for a password the user did not type into sshr
+	ssh := cmd.Path
+	if b := strings.ToLower(filepath.Base(ssh)); b != "ssh" && b != "ssh.exe" {
+		ssh, _ = SSHPath()
+	}
+	if ssh != "" {
+		if err := askpassSupported(ssh); err != nil {
+			return noop, err
+		}
+	}
 	if err := Unlock(h); err != nil {
 		// the password manager is missing or locked, ssh asks on the terminal instead,
 		// with no terminal there is nobody to ask

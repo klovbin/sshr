@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -142,7 +141,7 @@ func sshG(alias string, config string) (map[string][]string, error) {
 	if config != "" {
 		args = append(args, "-F", config)
 	}
-	cmd := exec.Command("ssh", append(args, "--", alias)...)
+	cmd := sshCommand(append(args, "--", alias)...)
 	cmd.Stdin = nil
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

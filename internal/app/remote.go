@@ -56,8 +56,8 @@ func remoteTimeoutScript(secs int) string {
 // is used, a host that asks for its password every time fails with
 // ErrAsksPassword, the command is stopped after timeout on the server too
 func (s *Store) RunRemote(h *Host, command string, stdin io.Reader, timeout time.Duration) (*RemoteResult, error) {
-	if _, err := exec.LookPath("ssh"); err != nil {
-		return nil, errors.New("ssh not found in PATH")
+	if _, err := SSHPath(); err != nil {
+		return nil, err
 	}
 	if h.PasswordMode == PasswordAsk {
 		return nil, ErrAsksPassword
