@@ -155,6 +155,26 @@ func TestHandPrimary(t *testing.T) {
 	must(t, err)
 }
 
+// TestPrimaryRefusesRepeatedDevice checks that a device list repeating an
+// ID does not slip past the rule: [a, b, c] to [a, b, b] removes c (#295)
+func TestPrimaryRefusesRepeatedDevice(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	w.join(c)
+	must(t, w.b.Pull())
+	n, b := forgeManifest(t, w.b, func(m *syncproto.Manifest) {
+		m.Devices = append(keepOnly(m.Devices, w.a.st.DeviceID), keepOnly(m.Devices, w.b.st.DeviceID)[0], keepOnly(m.Devices, w.b.st.DeviceID)[0])
+	})
+	if err := w.b.backend().PutManifest(n-1, b); err == nil || !strings.Contains(err.Error(), "403") {
+		t.Fatalf("the server took the list: %v", err)
+	}
+	must(t, os.WriteFile(filepath.Join(w.manifestDir(), strconv.FormatUint(n, 10)+".json"), b, 0o600))
+	if err := w.a.Pull(); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("a took the list: %v", err)
+	}
+}
+
 func keepOnly(ds []syncproto.Device, id string) []syncproto.Device {
 	var out []syncproto.Device
 	for _, d := range ds {

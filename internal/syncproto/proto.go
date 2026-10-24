@@ -119,9 +119,10 @@ func SignInput(body []byte) []byte {
 }
 
 // SameDevices tells whether two device lists hold the same devices with
-// the same keys, a new name alone changes nothing
+// the same keys, a new name alone changes nothing, a list that repeats an
+// ID is never the same as another one
 func SameDevices(a, b []Device) bool {
-	if len(a) != len(b) {
+	if len(a) != len(b) || RepeatedDevice(a) != "" || RepeatedDevice(b) != "" {
 		return false
 	}
 	keys := make(map[string]string, len(a))
@@ -134,6 +135,18 @@ func SameDevices(a, b []Device) bool {
 		}
 	}
 	return true
+}
+
+// RepeatedDevice is an ID listed twice in ds, empty when there is none
+func RepeatedDevice(ds []Device) string {
+	seen := make(map[string]bool, len(ds))
+	for _, d := range ds {
+		if seen[d.ID] {
+			return d.ID
+		}
+		seen[d.ID] = true
+	}
+	return ""
 }
 
 // CheckPrimary refuses a manifest m signed by signer that changes who is
@@ -149,6 +162,9 @@ func CheckPrimary(prev, m *Manifest, signer string) error {
 	}
 	if m.Version < 2 {
 		return nil
+	}
+	if id := RepeatedDevice(m.Devices); id != "" {
+		return fmt.Errorf("change %d lists device %s twice", m.Counter, short(id))
 	}
 	listed := false
 	for _, d := range m.Devices {
