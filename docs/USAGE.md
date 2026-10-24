@@ -121,6 +121,7 @@ sshr hwkey require web                   # web connects only with a key on a tok
 sshr hwkey require --all                 # every host
 sshr hwkey status                        # the hosts under it and whether each is ready
 sshr hwkey off web                       # web off the list, sshr hwkey off turns it all off
+sshr hwkey check web                     # the keys on web that are not on a token and the sshd_config lines to lock it
 ```
 
 - a host under the requirement is refused when it would log in with a password, a key kept in sshr, 1Password or Bitwarden, the default keys of ssh or a key file outside a token, the error says which and how to fix it, there is no way around it for one connect

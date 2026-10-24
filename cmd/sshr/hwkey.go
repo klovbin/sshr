@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"sshr.dev/internal/app"
 )
 
 const hwkeyUsage = `Usage: sshr hwkey status
        sshr hwkey require <host>... | --all
-       sshr hwkey off [<host>...]`
+       sshr hwkey off [<host>...]
+       sshr hwkey check <host>`
 
 // cmdHwkey sets which hosts connect only with a key on a FIDO token, the
 // list lives in settings.json and never syncs
@@ -26,6 +31,9 @@ func cmdHwkey(store *app.Store, args []string) {
 	switch {
 	case args[0] == "status" && len(args) == 1:
 		hwkeyStatus(store, st)
+		return
+	case args[0] == "check" && len(args) == 2:
+		hwkeyCheck(store, findHost(store, "hwkey check", args[1]))
 		return
 	case args[0] == "require" && len(args) == 2 && args[1] == "--all":
 		st.HardwareKey = app.HardwareKeyAll
@@ -84,4 +92,54 @@ func hwkeyStatus(store *app.Store, st app.Settings) {
 			}
 		}
 	}
+}
+
+// hwkeyCheck reads ~/.ssh/authorized_keys on the host, logging in the way
+// the host does, and lists the keys that are not on a token, with the
+// lines of sshd_config that make the server take nothing else, it only
+// reads, the server is left as it is
+func hwkeyCheck(store *app.Store, h *app.Host) {
+	res, err := store.RunRemote(h, "cat ~/.ssh/authorized_keys 2>/dev/null", nil, 30*time.Second)
+	if err != nil {
+		fatal(err)
+	}
+	if res.ExitCode == 255 {
+		fatal(fmt.Errorf("ssh to %s failed: %s", h.Name, strings.TrimSpace(string(res.Stderr))))
+	}
+	sk, other := authorizedKeyTypes(res.Stdout)
+	fmt.Printf("%s: %d key(s) on a hardware token, %d other key(s) in ~/.ssh/authorized_keys\n", h.Name, len(sk), len(other))
+	for _, k := range other {
+		fmt.Println("  not on a token: " + k)
+	}
+	if len(sk) == 0 {
+		fmt.Println("put a key on a token there first: sshr key new --sk, then sshr key install " + h.Name + " ~/.ssh/sshr_sk.pub --use")
+	} else if len(other) > 0 {
+		fmt.Println("remove the keys above from authorized_keys on the server, they log in without the token")
+	}
+	fmt.Println("with only keys on a token there, these lines in /etc/ssh/sshd_config make the server take nothing else:")
+	for _, l := range []string{"PasswordAuthentication no", "KbdInteractiveAuthentication no", "AuthenticationMethods publickey", "PubkeyAuthOptions verify-required    (also ask the PIN of the token)"} {
+		fmt.Println("  " + l)
+	}
+	fmt.Println("sshr changes nothing on the server, keep a second token or a console of the provider before you lock it down")
+}
+
+// authorizedKeyTypes sorts the lines of an authorized_keys file into keys
+// on a token and others, each as type, fingerprint and comment, options
+// before a key (from=, command=) are read past, lines that are no key are
+// left out
+func authorizedKeyTypes(data []byte) (sk, other []string) {
+	for len(data) > 0 {
+		pub, comment, _, rest, err := ssh.ParseAuthorizedKey(data)
+		if err != nil {
+			break
+		}
+		line := strings.TrimSpace(pub.Type() + " " + ssh.FingerprintSHA256(pub) + " " + comment)
+		if strings.HasPrefix(pub.Type(), "sk-") {
+			sk = append(sk, line)
+		} else {
+			other = append(other, line)
+		}
+		data = rest
+	}
+	return sk, other
 }
