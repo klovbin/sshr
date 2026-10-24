@@ -9,6 +9,12 @@ type Settings = settings.Settings
 // OPLinkedAccount is a 1Password account linked in the settings
 type OPLinkedAccount = settings.OPLinkedAccount
 
+// The modes of the hardware key requirement, see Settings.HardwareKey
+const (
+	HardwareKeyListed = settings.HardwareKeyListed
+	HardwareKeyAll    = settings.HardwareKeyAll
+)
+
 // LoadSettings reads settings.json, see settings.Load
 func LoadSettings() (Settings, error) { return settings.Load() }
 

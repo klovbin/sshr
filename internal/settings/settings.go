@@ -98,6 +98,16 @@ type Settings struct {
 	// to a hash of where it pointed then, settings never sync so another
 	// device cannot add a host here
 	CommandHosts map[string]string `json:"command_hosts,omitempty"`
+	// HardwareKey asks for a key on a FIDO token to connect: empty for
+	// none, "listed" for the hosts in HardwareKeyHosts, "all" for every
+	// host, a host under it that would log in with a password or a key
+	// outside a token is refused, it lives here and never syncs, a stolen
+	// sync device cannot turn it off
+	HardwareKey string `json:"hardware_key,omitempty"`
+	// HardwareKeyHosts are the host IDs sshr hwkey require listed, bound to
+	// the ID and not to the address, a host repointed elsewhere keeps the
+	// requirement
+	HardwareKeyHosts []string `json:"hardware_key_hosts,omitempty"`
 	// ConfirmCommands asks the user before every command from an assistant,
 	// through a question the MCP client shows, off by default: a client
 	// that cannot ask gets every command refused and the REST API refuses
@@ -212,6 +222,10 @@ func cloneSettings(s Settings) Settings {
 		for k, v := range s.HostCommands {
 			c.HostCommands[k] = v
 		}
+	}
+	if s.HardwareKeyHosts != nil {
+		c.HardwareKeyHosts = make([]string, len(s.HardwareKeyHosts))
+		copy(c.HardwareKeyHosts, s.HardwareKeyHosts)
 	}
 	return c
 }

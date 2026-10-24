@@ -97,9 +97,20 @@ func (e Env) connectArgs(h *Host, check bool) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	hwkey := hardwareKeyRequired(h)
+	if hwkey {
+		if err := CheckHardwareKey(h); err != nil {
+			return nil, err
+		}
+	}
 	args := append(SSHArgs(h), e.vaultKeyArgs(h)...)
 	args = append(args, e.agentArgs(h)...)
-	args = append(args, e.reuseArgs(h)...)
+	if hwkey {
+		// a shared master connection could have logged in another way
+		args = append(args, hardwareKeyArgs...)
+	} else {
+		args = append(args, e.reuseArgs(h)...)
+	}
 	return append(args, jump...), nil
 }
 
