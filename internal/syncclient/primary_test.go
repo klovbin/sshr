@@ -334,6 +334,11 @@ func TestPrimaryOfAnOlderAccount(t *testing.T) {
 	if err := c.checkPrimary(&syncproto.Signed{Signer: "x"}, m); err == nil {
 		t.Fatal("a primary outside the account")
 	}
+	// a kit whose wait would overflow is refused (#307)
+	_, err := syncproto.CheckPrimary(&syncproto.Manifest{Version: 2, Primary: "a", Devices: devs}, &syncproto.Manifest{Version: 2, Primary: "a", Devices: devs, Recovery: "b", RecoveryWait: 1 << 62}, "a")
+	if err == nil {
+		t.Fatal("a wait of 1<<62 seconds went through")
+	}
 	// the first primary must not remove a device or change the key in the
 	// same change (#297)
 	m = &syncproto.Manifest{Version: 2, Devices: devs[1:], Primary: "b"}

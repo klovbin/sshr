@@ -61,6 +61,9 @@ func (c *Client) CreateRecoveryKit(pass string, wait time.Duration) (out *Recove
 }
 
 func (c *Client) createRecoveryKit(pass string, wait time.Duration) (*RecoveryKit, error) {
+	if wait > syncproto.MaxRecoveryWait*time.Second {
+		return nil, errors.New("the wait of a recovery kit is at most a year")
+	}
 	if wait < syncproto.MinRecoveryWait*time.Second {
 		return nil, fmt.Errorf("the wait of a recovery kit is at least %s, the owner's devices need time to cancel a claim", time.Duration(syncproto.MinRecoveryWait)*time.Second)
 	}

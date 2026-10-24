@@ -84,6 +84,10 @@ type Manifest struct {
 // and the hand-over, the owner's devices must have a day to cancel
 const MinRecoveryWait = 24 * 60 * 60
 
+// MaxRecoveryWait is the longest wait, a larger number would overflow a
+// duration on the devices and the server and could turn into no wait
+const MaxRecoveryWait = 366 * 24 * 60 * 60
+
 // Step is what a manifest does as CheckPrimary sees it
 type Step int
 
@@ -194,8 +198,8 @@ func CheckPrimary(prev, m *Manifest, signer string) (Step, error) {
 	if !listed(m.Devices, m.Primary) {
 		return 0, fmt.Errorf("change %d names a primary device that is not in the account", m.Counter)
 	}
-	if m.Recovery != "" && (!listed(m.Devices, m.Recovery) || m.Recovery == m.Primary || m.RecoveryWait < MinRecoveryWait) {
-		return 0, fmt.Errorf("change %d names a recovery kit device that is not in the account, is the primary, or waits less than a day", m.Counter)
+	if m.Recovery != "" && (!listed(m.Devices, m.Recovery) || m.Recovery == m.Primary || m.RecoveryWait < MinRecoveryWait || m.RecoveryWait > MaxRecoveryWait) {
+		return 0, fmt.Errorf("change %d names a recovery kit device that is not in the account, is the primary, or waits less than a day or more than a year", m.Counter)
 	}
 	if prev.Primary == "" {
 		if m.Primary != signer {
