@@ -80,6 +80,9 @@ func TestSyncMergeKeepsPasswordWithItsAddress(t *testing.T) {
 	if n := conflictCopies(w.b); n != 1 {
 		t.Fatalf("%d conflict copies, want 1\n%s", n, w.log.String())
 	}
+	if !strings.Contains(w.log.String(), "the same part was changed") {
+		t.Errorf("the log does not say why the change was not merged (#286):\n%s", w.log.String())
+	}
 }
 
 // TestSyncMergeAfterKeyRotation checks that a key rotation by another
@@ -117,5 +120,8 @@ func TestSyncMergeWithoutBase(t *testing.T) {
 	must(t, w.b.Push())
 	if n := conflictCopies(w.b); n != 1 {
 		t.Fatalf("%d conflict copies, want 1\n%s", n, w.log.String())
+	}
+	if !strings.Contains(w.log.String(), "is not kept here") {
+		t.Errorf("the log does not say why the change was not merged (#286):\n%s", w.log.String())
 	}
 }

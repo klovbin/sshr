@@ -1198,20 +1198,24 @@ func (c *Client) mergeEdit(store *hosts.Store, id string, known entryState, e sy
 	}
 	base := c.basePayload(id, known.base())
 	if base == nil {
+		c.logf("%s changed here and on device %s, the version both started from is not kept here, both are kept", short(id, 8), short(e.Device, 8))
 		return false, nil
 	}
 	mine, err := parsePayload(id, plain)
 	if err != nil {
+		c.logf("%s changed here and on device %s, the host here does not read for a merge (%v), both are kept", short(id, 8), short(e.Device, 8), err)
 		return false, nil
 	}
 	b, l, r := base.Host, mine.Host, remote.Host
 	b.Password, l.Password, r.Password = base.Password, mine.Password, remote.Password
 	merged, ok := hosts.MergeThreeWay(b, l, r)
 	if !ok {
+		c.logf("%s: here and on device %s the same part was changed in different ways (or the address on one side and the password or key on the other), both are kept", l.Name, short(e.Device, 8))
 		return false, nil
 	}
 	h, err := store.Import(merged)
 	if err != nil {
+		c.logf("%s: the merge of the changes made here and on device %s is refused (%v), both are kept", l.Name, short(e.Device, 8), err)
 		return false, nil
 	}
 	next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Base: e.Hash}
