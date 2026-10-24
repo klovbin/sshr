@@ -1,0 +1,63 @@
+//go:build linux
+
+package sshcmd
+
+import (
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+// a child of this process passes the agent check, a process whose parent
+// left (reparented to init or a subreaper above this process) does not
+func TestFromOwnChild(t *testing.T) {
+	if sock := os.Getenv("SSHR_AGENTPEER_DIAL"); sock != "" {
+		if c, err := net.Dial("unix", sock); err == nil {
+			time.Sleep(2 * time.Second)
+			c.Close()
+		}
+		return
+	}
+	sock := filepath.Join(t.TempDir(), "ag")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accept := func() net.Conn {
+		t.Helper()
+		ln.(*net.UnixListener).SetDeadline(time.Now().Add(10 * time.Second))
+		c, err := ln.Accept()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	env := append(os.Environ(), "SSHR_AGENTPEER_DIAL="+sock)
+	child := exec.Command(os.Args[0], "-test.run=^TestFromOwnChild$", "-test.count=1")
+	child.Env = env
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer child.Wait()
+	c := accept()
+	if !fromOwnChild(c) {
+		t.Error("a child of sshr was refused")
+	}
+	c.Close()
+	// the shell starts the dialer in the background and leaves, the dialer
+	// is an orphan by the time it connects
+	orphan := exec.Command("sh", "-c", `(sleep 0.5; exec "$0" -test.run='^TestFromOwnChild$' -test.count=1) >/dev/null 2>&1 &`, os.Args[0])
+	orphan.Env = env
+	if err := orphan.Run(); err != nil {
+		t.Fatal(err)
+	}
+	c = accept()
+	if fromOwnChild(c) {
+		t.Error("a process that is not under sshr got the agent")
+	}
+	c.Close()
+}
