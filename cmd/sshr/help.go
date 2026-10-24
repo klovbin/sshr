@@ -91,7 +91,7 @@ sshr), a key already there is not added twice, the default is the first
 of ~/.ssh/sshr_ed25519.pub, id_ed25519.pub, id_ecdsa.pub, id_rsa.pub
 
 Options:
-  --no-passphrase   new: no passphrase on the key
+  --no-passphrase   new: no passphrase on the key or the handle of --sk
   --sk              new: the key lives on a FIDO token
   --resident        new --sk: keep the key on the token, ssh-keygen -K brings
                     it to a new machine

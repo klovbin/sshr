@@ -69,7 +69,7 @@ func cmdKeyNew(args []string) {
 	path := filepath.Join(home, ".ssh", name)
 	host, _ := os.Hostname()
 	if sk {
-		typ, err := makeSKKey(path, "sshr@"+host, resident, verify, runKeygen)
+		typ, err := makeSKKey(path, "sshr@"+host, resident, verify, noPass, runKeygen)
 		if err != nil {
 			fatal(err)
 		}
@@ -91,10 +91,10 @@ func cmdKeyNew(args []string) {
 // makeSKKey makes a key on a FIDO token at path, Ed25519 first, ECDSA
 // P-256 when the token does not make Ed25519 keys, run runs ssh-keygen with
 // the arguments and copies its error output to w, it returns the type made
-func makeSKKey(path, comment string, resident, verify bool, run func(args []string, w io.Writer) error) (string, error) {
+func makeSKKey(path, comment string, resident, verify, noPass bool, run func(args []string, w io.Writer) error) (string, error) {
 	var last error
 	for i, typ := range app.SKKeyTypes {
-		kargs, err := app.SKKeygenArgs(path, comment, typ, resident, verify)
+		kargs, err := app.SKKeygenArgs(path, comment, typ, resident, verify, noPass)
 		if err != nil {
 			return "", err
 		}

@@ -77,7 +77,7 @@ func TestInstallKeyScript(t *testing.T) {
 // ssh-keygen, the path is never overwritten
 func TestSKKeygenArgs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sk")
-	args, err := SKKeygenArgs(path, "c", "ed25519-sk", true, true)
+	args, err := SKKeygenArgs(path, "c", "ed25519-sk", true, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,11 +85,11 @@ func TestSKKeygenArgs(t *testing.T) {
 	if got := strings.Join(args, " "); got != want {
 		t.Errorf("args %q, want %q", got, want)
 	}
-	if args, _ := SKKeygenArgs(path, "c", "ecdsa-sk", false, false); strings.Contains(strings.Join(args, " "), "-O") {
+	if args, _ := SKKeygenArgs(path, "c", "ecdsa-sk", false, false, false); strings.Contains(strings.Join(args, " "), "-O") {
 		t.Errorf("options without asking: %q", args)
 	}
 	os.WriteFile(path, []byte("x"), 0o600)
-	if _, err := SKKeygenArgs(path, "c", "ed25519-sk", false, false); err == nil {
+	if _, err := SKKeygenArgs(path, "c", "ed25519-sk", false, false, false); err == nil {
 		t.Error("an existing handle would be overwritten")
 	}
 	if !SKUnsupported("Key enrollment failed: requested feature not supported\n") || SKUnsupported("Key enrollment failed: invalid PIN") {

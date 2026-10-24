@@ -40,8 +40,9 @@ var SKKeyTypes = []string{"ed25519-sk", "ecdsa-sk"}
 // handle that is useless without it, resident keeps the key on the token
 // so ssh-keygen -K brings it to a new machine, verify asks the PIN on
 // every login besides the touch, ssh-keygen asks for the touch, the PIN
-// and an optional passphrase of the handle itself
-func SKKeygenArgs(path, comment, typ string, resident, verify bool) ([]string, error) {
+// and an optional passphrase of the handle itself, noPassphrase leaves the
+// handle without one, the token is the secret
+func SKKeygenArgs(path, comment, typ string, resident, verify, noPassphrase bool) ([]string, error) {
 	if err := newKeyPath(path); err != nil {
 		return nil, err
 	}
@@ -51,6 +52,9 @@ func SKKeygenArgs(path, comment, typ string, resident, verify bool) ([]string, e
 	}
 	if verify {
 		args = append(args, "-O", "verify-required")
+	}
+	if noPassphrase {
+		args = append(args, "-N", "")
 	}
 	return args, nil
 }

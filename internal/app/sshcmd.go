@@ -53,8 +53,8 @@ func KeygenArgs(path, comment string, noPassphrase bool) ([]string, error) {
 
 var SKKeyTypes = sshcmd.SKKeyTypes
 
-func SKKeygenArgs(path, comment, typ string, resident, verify bool) ([]string, error) {
-	return sshcmd.SKKeygenArgs(path, comment, typ, resident, verify)
+func SKKeygenArgs(path, comment, typ string, resident, verify, noPassphrase bool) ([]string, error) {
+	return sshcmd.SKKeygenArgs(path, comment, typ, resident, verify, noPassphrase)
 }
 
 func SKUnsupported(stderr string) bool { return sshcmd.SKUnsupported(stderr) }
