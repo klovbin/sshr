@@ -276,3 +276,17 @@ func TestStoreRefusesRedirects(t *testing.T) {
 		t.Errorf("the redirect target was asked %d times", len(gotAuth))
 	}
 }
+
+// a name that could leave the account folder is refused before a request
+// goes out (#255)
+func TestStoreRefusesBadNames(t *testing.T) {
+	s, f := newDAV(t)
+	for _, name := range []string{"../x", "blobs/../../x", "blobs//x", "/x", "./x", "blobs/.."} {
+		if err := s.Put(name, []byte("1")); err == nil || !strings.Contains(err.Error(), "bad object name") {
+			t.Errorf("%q: %v", name, err)
+		}
+	}
+	if len(f.methods) != 0 {
+		t.Errorf("requests went out: %v", f.methods)
+	}
+}

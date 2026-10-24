@@ -69,11 +69,22 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 	return &Store{base: base, user: cfg.User, pass: secret, client: &c}, nil
 }
 
-// at is the address of name under the folder of the account
-func (s *Store) at(name string) string {
+// at is the address of name under the folder of the account, a name with
+// an empty, . or .. segment could reach outside it on a server that
+// cleans paths, a folder name ends with one slash
+func (s *Store) at(name string) (string, error) {
+	segs := strings.Split(strings.TrimSuffix(name, "/"), "/")
+	for _, seg := range segs {
+		if name == "" {
+			break
+		}
+		if seg == "" || seg == "." || seg == ".." {
+			return "", fmt.Errorf("WebDAV: bad object name %q", name)
+		}
+	}
 	u := *s.base
 	u.Path += name
-	return u.String()
+	return u.String(), nil
 }
 
 // do sends one request, the password goes in the header and never in an
@@ -84,7 +95,12 @@ func (s *Store) do(method, name string, body []byte, hdr map[string]string) (*ht
 	if body != nil {
 		r = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, s.at(name), r)
+	addr, err := s.at(name)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, addr, r)
 	if err != nil {
 		cancel()
 		return nil, nil, err
