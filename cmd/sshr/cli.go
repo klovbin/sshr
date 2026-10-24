@@ -1309,10 +1309,15 @@ func cmdVault(args []string) {
 		if first != again {
 			fatal(fmt.Errorf("the two passphrases differ, nothing is changed"))
 		}
-		if err := app.SetVaultPassphrase(first, names); err != nil {
+		err = app.SetVaultPassphrase(first, names)
+		if err != nil && !errors.Is(err, app.ErrKeychainCopyLeft) {
 			fatal(err)
 		}
 		fmt.Println("The vault key and the sync keys are now in ~/.sshr/vault under the passphrase, a forgotten passphrase loses the saved passwords and keys")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Warning:", err)
+			os.Exit(1)
+		}
 	case "keychain":
 		if err := app.UseKeychainVault(names); err != nil {
 			fatal(err)
