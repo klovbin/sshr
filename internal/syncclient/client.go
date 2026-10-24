@@ -1181,6 +1181,13 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// the anchor of a kit that was cancelled or replaced is gone from the
+	// manifest, a device that kept it would push it back
+	for id := range c.st.Skipped {
+		if _, ok := m.Entries[id]; !ok && isAnchor(id) {
+			delete(c.st.Skipped, id)
+		}
+	}
 	for _, id := range ids {
 		e := m.Entries[id]
 		if isAnchor(id) || c.kit {
@@ -1620,7 +1627,19 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 		skipped[id] = e
 	}
 	// the anchor of a recovery kit is carried like a skipped entry, no
-	// device imports it as a host or deletes it
+	// device imports it as a host or deletes it, only the anchor of the
+	// kit of the account is, one of an older kit goes
+	current := ""
+	if plan.recovery != nil {
+		current = anchorID(plan.recovery.device)
+	} else if c.st.Recovery != "" {
+		current = anchorID(c.st.Recovery)
+	}
+	for id := range skipped {
+		if isAnchor(id) && id != current && id != plan.anchorID {
+			plan.dropAnchors = append(plan.dropAnchors, id)
+		}
+	}
 	for _, id := range plan.dropAnchors {
 		delete(entries, id)
 		delete(skipped, id)

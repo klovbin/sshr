@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"sshr.dev/internal/hosts"
 	"sshr.dev/internal/syncserver"
 )
 
@@ -153,4 +154,34 @@ func TestRestoreCancelled(t *testing.T) {
 	if w.b.st.Primary != w.a.st.DeviceID {
 		t.Fatalf("primary moved to %q", w.b.st.Primary)
 	}
+}
+
+// TestCancelledKitAnchorGoes checks that the anchor of a cancelled kit
+// leaves every device: another device's change does not bring it back, a
+// device can still be removed and a second kit's claim is taken (#301)
+func TestCancelledKitAnchorGoes(t *testing.T) {
+	w := newWorld(t)
+	web, _ := w.pair()
+	_, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	must(t, w.b.Pull())
+	must(t, w.a.CancelRecovery())
+	must(t, w.b.Pull())
+	for id := range w.b.st.Skipped {
+		if isAnchor(id) {
+			t.Fatalf("b keeps the anchor %s of the cancelled kit", id)
+		}
+	}
+	editHost(t, w.b, web.ID, func(h *hosts.Host) { h.Port, h.Password = 2201, "" })
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	kit2, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	must(t, w.b.Pull())
+	n := w.client("n-")
+	_, err = n.RestoreClaim(w.srv.URL, w.a.st.Account, kit2.Secret, "new", noPass)
+	must(t, err)
+	must(t, w.b.Pull())
+	must(t, w.a.CancelRecovery())
+	must(t, w.b.Pull())
 }
