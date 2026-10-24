@@ -21,6 +21,14 @@ import (
 // SSHPath is the ssh binary sshr runs, looked up on every call, PATH may
 // change in a long running process and the lookup is cheap
 func SSHPath() (string, error) {
+	if own := os.Getenv("SSHR_SSH"); own != "" {
+		// the user names the ssh, the msys one of Git included (its agent,
+		// its config), nothing is picked instead
+		if !fileExists(own) {
+			return "", fmt.Errorf("SSHR_SSH names %s, there is no such file", own)
+		}
+		return own, nil
+	}
 	return pickSSH(runtime.GOOS, exec.LookPath, os.Getenv("SystemRoot"), fileExists)
 }
 
@@ -89,7 +97,7 @@ func pickSSH(goos string, look func(string) (string, error), systemRoot string, 
 		system = filepath.Join(systemRoot, "System32", "OpenSSH", "ssh.exe")
 	}
 	switch {
-	case err == nil && !isMsysSSH(found):
+	case err == nil && !isMsysSSH(found, exists):
 		return found, nil
 	case system != "" && exists(system):
 		return system, nil
@@ -99,11 +107,18 @@ func pickSSH(goos string, look func(string) (string, error), systemRoot string, 
 	return "", errors.New("ssh not found, install the OpenSSH client of Windows (Settings, Optional features)")
 }
 
-// isMsysSSH tells the ssh of Git for Windows or MSYS2 by its place, it sits
-// in a usr\bin folder of their tree
-func isMsysSSH(path string) bool {
-	p := strings.ToLower(strings.ReplaceAll(path, "/", `\`))
-	return strings.Contains(p, `\usr\bin\`) && (strings.Contains(p, `\git\`) || strings.Contains(p, `\msys`))
+// isMsysSSH tells the ssh of Git for Windows, MSYS2 or Cygwin by the
+// runtime next to it (msys-2.0.dll, cygwin1.dll), PortableGit and custom
+// folders included, a scoop or chocolatey shim is a separate small program
+// and is taken as it is, SSHR_SSH names the real one when that matters
+func isMsysSSH(path string, exists func(string) bool) bool {
+	// a Windows path, cut by hand so the test reads it on any system
+	i := strings.LastIndexAny(path, `\/`)
+	if i < 0 {
+		return false
+	}
+	dir := path[:i+1]
+	return exists(dir+"msys-2.0.dll") || exists(dir+"cygwin1.dll")
 }
 
 var sshVersionRe = regexp.MustCompile(`OpenSSH(?:_for_Windows)?_(\d+)\.(\d+)`)

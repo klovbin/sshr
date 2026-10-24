@@ -24,7 +24,18 @@ func TestPickSSH(t *testing.T) {
 			return p, nil
 		}
 	}
-	has := func(ok bool) func(string) bool { return func(string) bool { return ok } }
+	// the system ssh and the runtime of an msys or cygwin ssh exist, nothing else
+	has := func(ok bool) func(string) bool {
+		return func(p string) bool {
+			if strings.HasSuffix(p, "msys-2.0.dll") {
+				return strings.Contains(p, `Git`) || strings.Contains(p, `Portable`)
+			}
+			if dir, ok := strings.CutSuffix(p, "cygwin1.dll"); ok {
+				return strings.Contains(dir, "cygwin")
+			}
+			return ok
+		}
+	}
 	for _, c := range []struct {
 		name, goos, path string
 		system           bool
@@ -37,6 +48,8 @@ func TestPickSSH(t *testing.T) {
 		{"windows git ssh only", "windows", gitSSH, false, gitSSH, false},
 		{"windows other ssh first", "windows", scoop, true, scoop, false},
 		{"windows only system", "windows", "", true, system, false},
+		{"windows portable git", "windows", `D:\Portable\usr\bin\ssh.exe`, true, system, false},
+		{"windows cygwin", "windows", `C:\cygwin64\bin\ssh.exe`, true, system, false},
 		{"windows none", "windows", "", false, "", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -124,5 +137,19 @@ func TestChildSSH(t *testing.T) {
 	}
 	if got := childSSH("windows", spaced); got != "" {
 		t.Errorf("a path with spaces: %q", got)
+	}
+}
+
+// TestSSHROwnSSH checks that SSHR_SSH names the ssh to run (#314)
+func TestSSHROwnSSH(t *testing.T) {
+	own := filepath.Join(t.TempDir(), "my-ssh")
+	os.WriteFile(own, []byte("x"), 0o700)
+	t.Setenv("SSHR_SSH", own)
+	if p, err := SSHPath(); err != nil || p != own {
+		t.Fatalf("SSHR_SSH: %q %v", p, err)
+	}
+	t.Setenv("SSHR_SSH", own+"-missing")
+	if _, err := SSHPath(); err == nil {
+		t.Fatal("a missing SSHR_SSH went through")
 	}
 }
