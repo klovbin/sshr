@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"sshr.dev/internal/davstore"
 	"sshr.dev/internal/s3store"
 	"sshr.dev/internal/syncclient"
 )
@@ -63,7 +64,7 @@ func TestStoreFlags(t *testing.T) {
 		t.Errorf("without --backend: %q %v", s, err)
 	}
 	// S3 flags without --backend are not dropped in silence (#238)
-	if _, err := (&storeFlags{s3: s3store.Config{Bucket: "b"}, given: true}).setup(&syncclient.Client{}, "https://sync.example"); err == nil || !strings.Contains(err.Error(), "need --backend s3") {
+	if _, err := (&storeFlags{s3: s3store.Config{Bucket: "b"}, given: true, s3Given: true}).setup(&syncclient.Client{}, "https://sync.example"); err == nil || !strings.Contains(err.Error(), "need --backend s3") {
 		t.Errorf("S3 flags without --backend: %v", err)
 	}
 }
@@ -87,7 +88,7 @@ func TestJoinFlagsAndOpenStore(t *testing.T) {
 	if _, err := openStore(*ref, "secret"); err != nil {
 		t.Error(err)
 	}
-	if _, err := openStore(syncclient.BackendRef{Kind: "webdav"}, "x"); err == nil {
+	if _, err := openStore(syncclient.BackendRef{Kind: "ftp"}, "x"); err == nil {
 		t.Error("opened an unknown kind")
 	}
 	if _, err := openStore(*ref, ""); err == nil {
@@ -150,7 +151,7 @@ func TestStoreKeyMistakes(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"sync", "store-key"}, "sshr sync store-key --key-id <id>"},
+		{[]string{"sync", "store-key"}, "not set up"},
 		{[]string{"sync", "store-key", "--key-id", "K", "--bucket", "other"}, "takes only --key-id"},
 		{[]string{"sync", "store-key", "--key-id", "K"}, "not set up"},
 	} {
@@ -171,5 +172,56 @@ func noErr(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// the WebDAV flags land in their config, a mix with the S3 ones or a
+// missing one stops before a password is asked for, a later run opens the
+// folder from the state and invite prints the flags without the password
+// (#128)
+func TestWebDAVFlags(t *testing.T) {
+	args := []string{"--backend", "webdav", "--url", "https://cloud.example/dav/sshr", "--user", "u"}
+	var f storeFlags
+	for i := 0; i < len(args); i++ {
+		ok, err := f.take(args, &i)
+		if err != nil || !ok {
+			t.Fatalf("%s: %v %v", args[i], ok, err)
+		}
+	}
+	if f.backend != "webdav" || f.dav != (davstore.Config{URL: "https://cloud.example/dav/sshr", User: "u"}) || f.s3Given {
+		t.Fatalf("got %+v", f)
+	}
+	t.Setenv("SSHR_WEBDAV_PASSWORD", "pw")
+	for _, tc := range []struct {
+		f      storeFlags
+		server string
+		err    string
+	}{
+		{storeFlags{backend: "webdav", dav: f.dav, davGiven: true, s3: s3store.Config{Bucket: "b"}, s3Given: true}, "", "are for --backend s3"},
+		{storeFlags{backend: "s3", dav: f.dav, davGiven: true}, "", "are for --backend webdav"},
+		{storeFlags{dav: f.dav, given: true, davGiven: true}, "", "need --backend webdav"},
+		{storeFlags{backend: "webdav", dav: davstore.Config{URL: f.dav.URL}, davGiven: true}, "", "--user"},
+		{storeFlags{backend: "webdav", dav: f.dav, davGiven: true}, "https://sync.example", "--server is for sshr-sync"},
+		{storeFlags{backend: "webdav", dav: davstore.Config{URL: "http://cloud.example/dav", User: "u"}, davGiven: true}, "", "https://"},
+	} {
+		c := &syncclient.Client{}
+		if _, err := tc.f.setup(c, tc.server); err == nil || !strings.Contains(err.Error(), tc.err) {
+			t.Errorf("%+v: %v, want %q", tc.f, err, tc.err)
+		}
+		if c.Backend != nil || c.StoreSecret != "" {
+			t.Errorf("%+v: a refused setup changed the client", tc.f)
+		}
+	}
+	cfg, _ := json.Marshal(f.dav)
+	ref := &syncclient.BackendRef{Kind: "webdav", Config: cfg}
+	got, err := joinFlags("webdav "+f.dav.URL, ref)
+	if err != nil || got != "--backend webdav --url https://cloud.example/dav/sshr --user u" {
+		t.Errorf("join flags %q %v", got, err)
+	}
+	if _, err := openStore(*ref, "pw"); err != nil {
+		t.Error(err)
+	}
+	if _, err := openStore(*ref, ""); err == nil {
+		t.Error("opened a folder without a password")
 	}
 }

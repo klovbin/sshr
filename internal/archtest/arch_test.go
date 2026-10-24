@@ -45,7 +45,7 @@ var allowed = map[string][]string{
 	"internal/desktop":    {"assets", "internal/fileio"},
 	"internal/ui":         {"internal/app", "internal/clip", "internal/i18n", "assets"},
 	"cmd/sshr-sync":       {"internal/fileio", "internal/syncserver"},
-	"cmd/sshr": {"internal/app", "internal/audit", "internal/api", "internal/mcp", "internal/ext", "internal/syncclient", "internal/s3store", "internal/ui",
+	"cmd/sshr": {"internal/app", "internal/audit", "internal/api", "internal/mcp", "internal/ext", "internal/syncclient", "internal/s3store", "internal/davstore", "internal/ui",
 		"internal/desktop", "internal/clip", "assets"},
 }
 

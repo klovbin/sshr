@@ -208,6 +208,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the same encryption, signatures and chained manifests as with sshr-sync, the bucket stores only ciphertext
 - **Why this way:** the next manifest is written with `If-None-Match: *`, so of two devices one wins, a bucket that writes over an object it should refuse is turned down before the account goes there, the secret key stays in the keychain and never on the command line, off by default since every device shares one bucket key, `remove-device` asks for a new key and `sshr sync store-key` saves it on each device that stays
 
+### Sync through a WebDAV folder
+- **What:** `sshr sync init --backend webdav` keeps the encrypted account in a WebDAV folder, Nextcloud or ownCloud
+- **What for:** sync through a cloud folder you already have, without a server or a bucket
+- **Why it helps:** the same encryption, signatures and chained manifests as with sshr-sync, the folder holds only ciphertext
+- **Why this way:** the next manifest is a PUT with `If-None-Match: *`, setup refuses a server that writes over a taken name (OCIS, nginx, rclone, Caddy, dufs do), redirects are never followed, the password stays in the keychain, off by default since every device shares one password and no WebDAV server decides the create strictly atomically
+
 ### Safe saves from several sshr processes
 - **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
 - **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time

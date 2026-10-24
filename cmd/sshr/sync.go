@@ -21,7 +21,7 @@ const syncUsage = `Usage:
   sshr sync invite                       code for a new device to join with
   sshr sync join --server <url> [--name <device>] <code>
                                          ask to add this machine, shows its fingerprint,
-                                         an S3 account takes the flags of init instead of --server
+                                         an S3 or WebDAV account takes the flags of init instead of --server
   sshr sync pending                      devices waiting for approval
   sshr sync approve <id|fingerprint>     add a waiting device after comparing fingerprints
   sshr sync pull [--accept-reset]        only take changes from other devices
@@ -29,8 +29,12 @@ const syncUsage = `Usage:
   sshr sync status                       server, devices, state fingerprint
   sshr sync remove-device <id|fingerprint>
                                          take a device out, the vault key changes
+  sshr sync init --backend webdav --url <folder> --user <name> [--name <device>]
+                                         keep the account in a WebDAV folder (Nextcloud),
+                                         the password from SSHR_WEBDAV_PASSWORD or a prompt
   sshr sync store-key --key-id <id>      a new key of the S3 bucket of this account,
                                          the secret from SSHR_S3_SECRET or a prompt
+  sshr sync store-key [--user <name>]    a new password of the WebDAV folder
   sshr sync leave [--force]              stop syncing here, hosts stay`
 
 // cmdSync runs the sync subcommands
@@ -86,7 +90,7 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		if server == "" {
-			fatal(fmt.Errorf("sshr sync init needs --server <url> or --backend s3"))
+			fatal(fmt.Errorf("sshr sync init needs --server <url>, --backend s3 or --backend webdav"))
 		}
 		if err := c.Init(server, name); err != nil {
 			fatal(err)
@@ -116,7 +120,7 @@ func cmdSync(store *app.Store, args []string) {
 		fmt.Printf("On the new device run:\n  sshr sync join %s %s\n", flags, code)
 	case "join":
 		if (server == "" && sf.backend == "") || len(rest) != 1 {
-			fatal(fmt.Errorf("sshr sync join --server <url> <code>, or the --backend s3 flags of sshr sync invite"))
+			fatal(fmt.Errorf("sshr sync join --server <url> <code>, or the --backend flags sshr sync invite prints"))
 		}
 		if err := c.CheckFree(); err != nil {
 			fatal(err)
@@ -188,7 +192,9 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Removed %s, the vault key was changed, what it already downloaded it keeps\n", d.Name)
-		if ref, err := c.StoreRef(); err == nil && ref != nil {
+		if ref, err := c.StoreRef(); err == nil && ref != nil && ref.Kind == "webdav" {
+			fmt.Println("This account is in a WebDAV folder and the removed device still knows the password, it can delete files and stop the sync\nChange the password (in Nextcloud make a new app password and delete the old one), then run on every device that stays:\n  sshr sync store-key")
+		} else if err == nil && ref != nil {
 			fmt.Println("This account is in a bucket and the removed device still holds the bucket key, it can delete objects and stop the sync\nMake a new key for the bucket, delete the old one, then run on every device that stays:\n  sshr sync store-key --key-id <new key id>")
 		}
 	case "store-key":
