@@ -42,7 +42,7 @@ jobs:
           go-version-file: go.mod
 
       # the GUI package needs cgo and, on Linux, Wayland/X11 and Vulkan
-      # headers, it is built below where that is available
+      # headers, it is built below
       - name: tests
         env:
           CGO_ENABLED: "0"
@@ -53,8 +53,17 @@ jobs:
           CGO_ENABLED: "0"
         run: go build -tags nocgo -o cli/ ./cmd/sshr
 
+      # gio needs cgo and on Linux the Wayland, X11, EGL and Vulkan headers,
+      # the list of gio's own CI
+      - name: GUI libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev libffi-dev libvulkan-dev \
+            libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev >/dev/null
+
       - name: build the GUI
-        if: runner.os != 'Linux'
         run: go build -o gui/ ./cmd/sshr
 
       - name: CLI smoke test
