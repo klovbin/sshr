@@ -183,6 +183,8 @@ func TestPrepareFromGitRecordsTheCommitAndDropsTheHistory(t *testing.T) {
 		"GIT_ALLOW_PROTOCOL=https:ssh", "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes",
 		// the user's git config is not read (#264)
 		"GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_CONFIG_SYSTEM=" + os.DevNull, "core.attributesFile=" + os.DevNull,
+		// and an empty HOME for git older than 2.32 (#265)
+		"XDG_CONFIG_HOME=" + os.TempDir(),
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("git was run without %q:\n%s", want, got)

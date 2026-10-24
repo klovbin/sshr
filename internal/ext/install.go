@@ -125,11 +125,11 @@ var gitSafe = []string{
 }
 
 // runGit runs git with gitSafe and args under the clone timeout
-func runGit(what string, args ...string) error {
+func runGit(home, what string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cloneTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append(append([]string{}, gitSafe...), args...)...)
-	cmd.Env = gitEnv(os.Environ())
+	cmd.Env = gitEnv(os.Environ(), home)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		return fmt.Errorf("%s did not finish in %s", what, cloneTimeout)
@@ -146,24 +146,29 @@ func runGit(what string, args ...string) error {
 // and git runs no file of the clone, a commit that is not the newest is
 // fetched by its hash afterwards, which works with every git version
 func cloneGit(url, dest, commit string) (string, error) {
-	if err := runGit("git clone "+url, "clone", "--depth", "1", "--no-tags", "--single-branch", "--no-recurse-submodules",
+	// an empty home for git, beside the clone in the staging folder
+	home := filepath.Join(filepath.Dir(dest), "home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return "", err
+	}
+	if err := runGit(home, "git clone "+url, "clone", "--depth", "1", "--no-tags", "--single-branch", "--no-recurse-submodules",
 		"--filter=blob:limit=5m", "--template=", "--", url, dest); err != nil {
 		return "", err
 	}
-	head, err := revParse(dest)
+	head, err := revParse(dest, home)
 	if err != nil || commit == "" || head == commit {
 		return head, err
 	}
-	if err := runGit("git fetch of commit "+commit, "-C", dest, "fetch", "--depth", "1", "--no-tags",
+	if err := runGit(home, "git fetch of commit "+commit, "-C", dest, "fetch", "--depth", "1", "--no-tags",
 		"--filter=blob:limit=5m", "origin", commit); err != nil {
 		return "", err
 	}
 	// FETCH_HEAD is the object just fetched, a branch named like the hash
 	// would win over the hash itself
-	if err := runGit("git checkout of commit "+commit, "-C", dest, "checkout", "--quiet", "--detach", "FETCH_HEAD"); err != nil {
+	if err := runGit(home, "git checkout of commit "+commit, "-C", dest, "checkout", "--quiet", "--detach", "FETCH_HEAD"); err != nil {
 		return "", err
 	}
-	if head, err = revParse(dest); err != nil {
+	if head, err = revParse(dest, home); err != nil {
 		return "", err
 	}
 	if head != commit {
@@ -173,9 +178,9 @@ func cloneGit(url, dest, commit string) (string, error) {
 }
 
 // revParse is the commit checked out in dest
-func revParse(dest string) (string, error) {
+func revParse(dest, home string) (string, error) {
 	rev := exec.Command("git", "-C", dest, "rev-parse", "HEAD")
-	rev.Env = gitEnv(os.Environ())
+	rev.Env = gitEnv(os.Environ(), home)
 	commit, err := rev.Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse in the clone failed: %v", err)
@@ -184,13 +189,20 @@ func revParse(dest string) (string, error) {
 }
 
 // gitEnv is the environment of git: no secrets, no question on the terminal,
-// ssh in batch mode unless the user chose their own ssh command
-func gitEnv(parent []string) []string {
+// ssh in batch mode unless the user chose their own ssh command, home is an
+// empty folder git takes for HOME
+func gitEnv(parent []string, home string) []string {
 	// no global or system config: a smudge filter set there (git-crypt
-	// and the like) would run on a .gitattributes of the repository, a
-	// private https repository then needs ssh, which keeps its agent
+	// and the like) would run on a .gitattributes of the repository, git
+	// before 2.32 knows no GIT_CONFIG_GLOBAL, an empty HOME and
+	// XDG_CONFIG_HOME keep ~/.gitconfig away there too, ssh finds ~/.ssh
+	// through the passwd entry and not HOME, a private https repository
+	// then needs ssh, a proxy comes from HTTPS_PROXY
 	env := append(cleanEnv(parent), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh",
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	if home != "" {
+		env = append(env, "HOME="+home, "XDG_CONFIG_HOME="+home)
+	}
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "GIT_SSH_COMMAND=") {
 			return env
