@@ -100,6 +100,10 @@ func TestConnectArgsUnderTheRequirement(t *testing.T) {
 			t.Errorf("no %s in %s", want, line)
 		}
 	}
+	// an ssh built without GSSAPI warns at its option on every connect (#356)
+	if strings.Contains(line, "GSSAPI") {
+		t.Errorf("an option an ssh without GSSAPI warns about: %s", line)
+	}
 	// a key type newer than OpenSSH 8.2 would stop ssh there (#355)
 	if strings.Contains(line, "webauthn") {
 		t.Errorf("a key type older ssh refuses: %s", line)
