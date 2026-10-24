@@ -1,0 +1,7 @@
+What it is for: many terminals, copies and tunnels to the same server
+
+Why it helps: the second opens in about 0.1 s instead of 0.65 s with no
+new password prompt
+
+Why this way: off by default because one drop closes all of them and an
+open master lets your account in without a password
