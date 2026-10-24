@@ -121,6 +121,7 @@ var gitSafe = []string{
 	"-c", "core.hooksPath=" + os.DevNull,
 	"-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
 	"-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+	"-c", "core.attributesFile=" + os.DevNull,
 }
 
 // runGit runs git with gitSafe and args under the clone timeout
@@ -185,7 +186,11 @@ func revParse(dest string) (string, error) {
 // gitEnv is the environment of git: no secrets, no question on the terminal,
 // ssh in batch mode unless the user chose their own ssh command
 func gitEnv(parent []string) []string {
-	env := append(cleanEnv(parent), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh")
+	// no global or system config: a smudge filter set there (git-crypt
+	// and the like) would run on a .gitattributes of the repository, a
+	// private https repository then needs ssh, which keeps its agent
+	env := append(cleanEnv(parent), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL=https:ssh",
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "GIT_SSH_COMMAND=") {
 			return env

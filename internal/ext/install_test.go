@@ -181,6 +181,8 @@ func TestPrepareFromGitRecordsTheCommitAndDropsTheHistory(t *testing.T) {
 		"protocol.allow=never", "protocol.https.allow=always", "protocol.ssh.allow=always",
 		"core.hooksPath=" + os.DevNull, "filter.lfs.required=false",
 		"GIT_ALLOW_PROTOCOL=https:ssh", "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+		// the user's git config is not read (#264)
+		"GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_CONFIG_SYSTEM=" + os.DevNull, "core.attributesFile=" + os.DevNull,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("git was run without %q:\n%s", want, got)
