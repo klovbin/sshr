@@ -91,10 +91,10 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
 ### The vault key forgotten when idle
-- **What:** a running sshr zeroes and forgets the vault key 15 minutes after its last use, the next use reads it from the keychain again or asks the passphrase again, `"vault_idle_minutes"` sets the time, below 0 keeps it for the whole run
+- **What:** with the system keychain a running sshr zeroes and forgets its cached vault key 15 minutes after its last use, the next use reads it from the keychain again without asking, `"vault_idle_minutes"` sets the time, below 0 keeps it for the whole run, under a passphrase the key is kept for the whole run
 - **What for:** the window, `sshr serve` and `sshr mcp` run for hours, the key they read once stayed in memory all that time
-- **Why it helps:** most of the time a long running sshr holds no key that a memory dump, a crash or a reader of its memory could take
-- **Why this way:** a timer per process that the use of the key moves on, the bytes are zeroed before they are let go, a cipher made from the key keeps a copy of its own, so a seal in progress finishes, with the system keychain reading the key again is silent, under a passphrase it asks again, so the default stays at 15 minutes and not less
+- **Why it helps:** most of the time a long running sshr holds no cached key that a memory dump or a reader of its memory could take, copies inside ciphers made from it may still be on the heap until they are collected
+- **Why this way:** a timer per process that the use of the key moves on, the bytes are zeroed before they are let go, a cipher made from the key keeps a copy of its own, so a seal in progress finishes, with the system keychain reading the key again is silent, under a passphrase asking again would block sshr serve and sshr mcp with no one at the terminal, so that mode keeps the key
 
 ### Process memory closed to other programs
 - **What:** every sshr process (the CLI, the window, the askpass helper, `sshr mcp` and `sshr serve`) makes itself not dumpable on Linux and refuses debuggers on macOS at start, and sets no core files, `SSHR_ALLOW_DEBUG=1` skips it

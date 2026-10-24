@@ -61,10 +61,10 @@ sshr vault keychain      # back to the system keychain, the file is removed
 ```
 
 - the vault key that seals saved passwords and stored keys lives in the system keychain, on a server or a machine without one `passphrase` wraps it into `~/.sshr/vault/vault-key.json` with Argon2id, the key stays the same, so everything saved before still opens
-- off by default: the passphrase is asked once per run and again after the key was forgotten (see below), a forgotten one loses every saved secret, the file can be attacked offline with a weak passphrase (8 characters at least)
+- off by default: the passphrase is asked once per run, a forgotten one loses every saved secret, the file can be attacked offline with a weak passphrase (8 characters at least)
 - it is asked on the terminal, or from the program in `SSHR_ASKPASS`, `sshr mcp` never asks on its terminal, `SSHR_VAULT=keychain|passphrase` picks the mode for one run
 - the keys of the sync device move along into `~/.sshr/vault/secrets.json`, each sealed with the vault key, so a machine without a keychain syncs too, `keychain` moves them back
-- a running sshr (the window, `sshr serve`, `sshr mcp`) forgets the vault key 15 minutes after its last use and reads it from the keychain again, or asks the passphrase again, when it is needed, `"vault_idle_minutes"` in settings.json changes the time, a value below 0 keeps the key for the whole run
+- with the system keychain a running sshr (the window, `sshr serve`, `sshr mcp`) forgets the vault key 15 minutes after its last use and reads it from the keychain again without asking when it is needed, `"vault_idle_minutes"` in settings.json changes the time, a value below 0 keeps the key for the whole run, under a passphrase the key is kept for the whole run, asking again would stop `sshr serve` and `sshr mcp` with no one to answer
 
 ## Keys stored in sshr
 

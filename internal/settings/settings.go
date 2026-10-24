@@ -73,10 +73,10 @@ type Settings struct {
 	// keychain, "passphrase" for a file wrapped with a passphrase (#98), off
 	// by default, a forgotten passphrase loses every saved secret
 	Vault string `json:"vault,omitempty"`
-	// VaultIdleMinutes is how long a running sshr keeps the vault key
-	// after its last use, 0 means 15, below 0 keeps it for the whole run,
-	// the window, sshr serve and sshr mcp run for hours and would hold the
-	// key all that time
+	// VaultIdleMinutes is how long a running sshr keeps the vault key of
+	// the system keychain after its last use, 0 means 15, below 0 keeps it
+	// for the whole run, the window, sshr serve and sshr mcp run for hours
+	// and would hold the key all that time, a passphrase vault keeps it
 	VaultIdleMinutes int `json:"vault_idle_minutes,omitempty"`
 	// AuditLog keeps ~/.sshr/audit.jsonl, a record of every upload,
 	// command and host change made through sshr mcp and sshr serve, off by

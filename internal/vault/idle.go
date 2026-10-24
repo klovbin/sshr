@@ -10,7 +10,9 @@ import (
 // A running sshr forgets the vault key some time after its last use, the
 // window, sshr serve and sshr mcp run for hours, a key kept all that time
 // is there for anything that reads the memory, the next use reads it from
-// the keychain again or asks the passphrase again
+// the keychain again without a word, under a passphrase the key is kept
+// for the whole run, asking again would stop sshr serve and sshr mcp at
+// the next use with no one to answer, inside the lock of the key
 
 var (
 	// keyUsedAt and idleTimer are under vaultMu
@@ -24,12 +26,16 @@ var (
 )
 
 // keyIdle is how long the key is kept after its last use, 0 for the whole
-// run, read once per process
+// run, always 0 under a passphrase, read once per process
 func keyIdle() time.Duration {
 	if idleOverride != 0 {
 		return idleOverride
 	}
 	idleOnce.Do(func() {
+		if Mode() == ModePassphrase {
+			idleFor = 0
+			return
+		}
 		st, err := settings.Load()
 		if err != nil {
 			idleFor = settings.DefaultVaultIdle

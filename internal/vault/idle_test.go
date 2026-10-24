@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 	"time"
 )
@@ -49,5 +50,16 @@ func TestVaultKeyIdleDrop(t *testing.T) {
 	k2, err := Key()
 	if err != nil || !bytes.Equal(k2, want) {
 		t.Fatalf("the key read again differs: %v", err)
+	}
+}
+
+// under a passphrase the key is kept for the whole run, asking again
+// would block sshr serve and sshr mcp (#344)
+func TestPassphraseVaultKeepsTheKey(t *testing.T) {
+	t.Setenv("SSHR_VAULT", ModePassphrase)
+	idleOnce, idleFor = sync.Once{}, 0
+	t.Cleanup(func() { idleOnce, idleFor = sync.Once{}, 0 })
+	if d := keyIdle(); d != 0 {
+		t.Fatalf("a passphrase vault drops its key after %s", d)
 	}
 }
