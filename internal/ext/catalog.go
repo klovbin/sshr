@@ -81,6 +81,11 @@ func FetchCatalog(addr string, client *http.Client) ([]Entry, []string, error) {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
 		}
+		// plain http on this machine is for a catalog set by hand, a
+		// redirect must not reach a local service through it
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("the catalog redirects to %s, only https is followed", req.URL.Redacted())
+		}
 		return CheckCatalogURL(req.URL.String())
 	}
 	resp, err := c.Get(addr)

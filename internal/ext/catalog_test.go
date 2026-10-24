@@ -107,4 +107,12 @@ func TestFetchCatalog(t *testing.T) {
 	if _, _, err := FetchCatalog(plain.URL, nil); err != nil {
 		t.Errorf("a catalog on this machine over http: %v", err)
 	}
+	// a redirect to plain http on this machine is not followed (#263)
+	local := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/index.json", http.StatusFound)
+	}))
+	defer local.Close()
+	if _, _, err := FetchCatalog(local.URL, local.Client()); err == nil || !strings.Contains(err.Error(), "only https") {
+		t.Errorf("a redirect to http on this machine: %v", err)
+	}
 }
