@@ -553,7 +553,10 @@ func TestWinSCPImporter(t *testing.T) {
 	// a site takes what it does not set from Default Settings (#332)
 	defs := filepath.Join(t.TempDir(), "WinSCP.ini")
 	os.WriteFile(defs, []byte("[Sessions\\Default%20Settings]\r\nFSProtocol=5\r\nUserName=root\r\nPortNumber=2200\r\n\r\n"+
-		"[Sessions\\ftpsite]\r\nHostName=ftp.example\r\n\r\n[Sessions\\sshsite]\r\nHostName=ssh.example\r\nFSProtocol=2\r\n"), 0o600)
+		"[Sessions\\ftpsite]\r\nHostName=ftp.example\r\n\r\n[Sessions\\sshsite]\r\nHostName=ssh.example\r\nFSProtocol=2\r\n"+
+		// a workspace and a hidden session are no sites (#333)
+		"\r\n[Sessions\\work/0000]\r\nHostName=w.example\r\nFSProtocol=1\r\nIsWorkspace=1\r\n"+
+		"\r\n[Sessions\\_!_hidden]\r\nHostName=h.example\r\nFSProtocol=1\r\n"), 0o600)
 	if d, _ := runPwshImporter(t, "winscp", defs); len(d) != 1 || d[0].Host != "ssh.example" || d[0].User != "root" || d[0].Port != 2200 {
 		t.Errorf("defaults: %+v", d)
 	}

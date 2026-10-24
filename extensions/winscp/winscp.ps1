@@ -180,6 +180,9 @@ foreach ($name in $order) {
 	$v = @{}
 	foreach ($k in $defaults.Keys) { $v[$k] = $defaults[$k] }
 	foreach ($k in $sites[$name].Keys) { $v[$k] = $sites[$name][$k] }
+	# a saved workspace and a session hidden with the _!_ prefix are no
+	# sites, WinSCP shows neither in its list
+	if ((On "$($sites[$name]['IsWorkspace'])") -or (Unmunge $name).StartsWith('_!_')) { continue }
 	$proto = "$($v['FSProtocol'])".Trim()
 	if ($proto -ne '' -and $proto -ne '0' -and $proto -ne '1' -and $proto -ne '2') { continue }
 	$label = Clean (Unmunge $name)
