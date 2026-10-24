@@ -3,8 +3,6 @@ package app
 import (
 	"io"
 	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
 
 	"sshr.dev/internal/settings"
@@ -34,12 +32,7 @@ func LocalCommandsOf(st Settings, h *Host, force *bool) (cmd HostCommand, on boo
 // SSHR_HOST, SSHR_PORT and SSHR_USER, exit >= 0 is the exit code of the
 // session in SSHR_EXIT for a command after it
 func RunLocalCommand(command string, h *Host, exit int, stdin io.Reader, stdout, stderr io.Writer) error {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", command)
-	} else {
-		cmd = exec.Command("/bin/sh", "-c", command)
-	}
+	cmd := shellCommand(command)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.Env = append(os.Environ(),
 		"SSHR_HOST_ID="+h.ID,
