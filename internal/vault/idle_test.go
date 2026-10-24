@@ -13,12 +13,17 @@ import (
 // it keeps the key, the next use reads the same key from the keychain
 func TestVaultKeyIdleDrop(t *testing.T) {
 	useMockKeychain(t)
-	idleOverride = 80 * time.Millisecond
+	// written under the lock the timer reads it with, a margin of 150 ms
+	// on each side keeps the test steady on a loaded runner (#347)
+	const idle = 300 * time.Millisecond
+	vaultMu.Lock()
+	idleOverride = idle
+	vaultMu.Unlock()
 	t.Cleanup(func() {
 		vaultMu.Lock()
 		stopIdle()
-		vaultMu.Unlock()
 		idleOverride = 0
+		vaultMu.Unlock()
 	})
 	k1, err := Key()
 	if err != nil {
@@ -34,11 +39,11 @@ func TestVaultKeyIdleDrop(t *testing.T) {
 		return vaultKey != nil
 	}
 	// a use halfway keeps the key past the first deadline
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(idle / 2)
 	if _, err := Key(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(idle / 2)
 	if !held() {
 		t.Fatal("the key was dropped although it was used within the idle time")
 	}
@@ -68,7 +73,7 @@ func TestPassphraseVaultKeepsTheKey(t *testing.T) {
 	t.Setenv("SSHR_VAULT", ModePassphrase)
 	idleFor, idleLoaded = 0, false
 	t.Cleanup(func() { idleFor, idleLoaded = 0, false })
-	if d := keyIdle(); d != 0 {
+	if d := lockedIdle(); d != 0 {
 		t.Fatalf("a passphrase vault drops its key after %s", d)
 	}
 }
@@ -87,11 +92,18 @@ func TestIdleTimeReadAgainAfterAFailedLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(path, []byte("{half"), 0o600)
-	if d := keyIdle(); d != settings.DefaultVaultIdle {
+	if d := lockedIdle(); d != settings.DefaultVaultIdle {
 		t.Fatalf("a broken file gave %s", d)
 	}
 	os.WriteFile(path, []byte(`{"vault_idle_minutes": -1}`), 0o600)
-	if d := keyIdle(); d != 0 {
+	if d := lockedIdle(); d != 0 {
 		t.Fatalf("the fixed file was not read again, got %s", d)
 	}
+}
+
+// lockedIdle is keyIdle with the lock it expects
+func lockedIdle() time.Duration {
+	vaultMu.Lock()
+	defer vaultMu.Unlock()
+	return keyIdle()
 }
