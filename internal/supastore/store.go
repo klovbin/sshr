@@ -59,6 +59,13 @@ const (
 
 var keyRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// nameRe is the check of names in setup.sql, a listed name of another
+// shape is a project that does not run that SQL
+var nameRe = regexp.MustCompile(`^(account|devices/[0-9a-f]{32}|envelopes/[0-9a-f]{32}/[0-9]{10}|blobs/[0-9a-f]{64}|manifests/[0-9]{20}|probe/[0-9a-f]{16})$`)
+
+// listMax bounds the names one List takes, more than an account holds
+const listMax = 20000
+
 // ErrKeyRefused means the project does not know the sshr key of this
 // device, another device changed it
 var ErrKeyRefused = errors.New("the Supabase project refused the sshr key of this account, run sshr sync store-key with the key the other devices use")
@@ -267,11 +274,14 @@ func (s *Store) List(prefix string) ([]string, error) {
 			return nil, err
 		}
 		for _, p := range page {
-			if !strings.HasPrefix(p.Name, prefix) || p.Name <= after {
-				return nil, fmt.Errorf("Supabase list %s: the project answered names out of order", prefix)
+			if !strings.HasPrefix(p.Name, prefix) || p.Name <= after || !nameRe.MatchString(p.Name) {
+				return nil, fmt.Errorf("Supabase list %s: the project answered names out of order or of another shape", prefix)
 			}
 			out = append(out, p.Name)
 			after = p.Name
+		}
+		if len(out) > listMax {
+			return nil, fmt.Errorf("Supabase list %s: more than %d names, more than a sync account holds", prefix, listMax)
 		}
 		if len(page) < listPage {
 			return out, nil

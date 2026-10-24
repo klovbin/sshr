@@ -359,3 +359,32 @@ func TestAnswerSizeLimit(t *testing.T) {
 		t.Errorf("a long answer to a delete: %v", err)
 	}
 }
+
+// a project that answers pages for ever or names of another shape stops
+// List (#271)
+func TestListBound(t *testing.T) {
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var page []map[string]string
+		for i := 0; i < listPage; i++ {
+			page = append(page, map[string]string{"name": fmt.Sprintf("manifests/%020d", n)})
+			n++
+		}
+		json.NewEncoder(w).Encode(page)
+	}))
+	defer srv.Close()
+	s, err := New(Config{URL: srv.URL, Key: pubKey}, testKey, nil)
+	must(t, err)
+	if _, err := s.List("manifests/"); err == nil || !strings.Contains(err.Error(), "more than") {
+		t.Errorf("endless pages: %v", err)
+	}
+	odd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"name":"manifests/../x"}]`))
+	}))
+	defer odd.Close()
+	s, err = New(Config{URL: odd.URL, Key: pubKey}, testKey, nil)
+	must(t, err)
+	if _, err := s.List("manifests/"); err == nil {
+		t.Error("a name of another shape was listed")
+	}
+}
