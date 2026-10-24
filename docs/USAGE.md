@@ -112,6 +112,22 @@ sshr add web -u deploy --bw-key <item id>        # an SSH Key item
 - no session: ssh asks for a password, a key host stops with the error, items are created in Bitwarden itself
 - 1Password and Bitwarden references stay on the device where they were set and never sync
 
+## Hosts that need a hardware key
+
+```sh
+sshr key new --sk                        # a key on a YubiKey or other FIDO token
+sshr key install web ~/.ssh/sshr_sk.pub --use
+sshr hwkey require web                   # web connects only with a key on a token from now on
+sshr hwkey require --all                 # every host
+sshr hwkey status                        # the hosts under it and whether each is ready
+sshr hwkey off web                       # web off the list, sshr hwkey off turns it all off
+```
+
+- a host under the requirement is refused when it would log in with a password, a key kept in sshr, 1Password or Bitwarden, the default keys of ssh or a key file outside a token, the error says which and how to fix it, there is no way around it for one connect
+- ssh then gets only sk key types, no password, no keyboard-interactive login and no connection shared through ControlMaster, so it cannot fall back to another key from ssh_config or the agent
+- `"hardware_key": "listed"|"all"` and `"hardware_key_hosts"` in settings.json, never synced, a stolen sync device cannot turn it off, a host keeps the requirement when it is changed or repointed elsewhere
+- sshr can only keep itself from logging in another way, a server that still takes a password or another key lets anyone in who has them
+
 ## Jump hosts
 
 ```sh

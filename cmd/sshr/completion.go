@@ -52,6 +52,10 @@ func complete(store *app.Store, words []string, cur string) []string {
 		return filter([]string{"list", "only", "all", "allow", "deny"}, cur)
 	case c.name == "commands" && len(words) == 2 && (words[1] == "allow" || words[1] == "deny"):
 		return filter(savedNames(store), cur)
+	case c.name == "hwkey" && len(words) == 1:
+		return filter([]string{"status", "require", "off"}, cur)
+	case c.name == "hwkey" && len(words) >= 2 && (words[1] == "require" || words[1] == "off"):
+		return filter(savedNames(store), cur)
 	case c.name == "hooks" && len(words) == 1:
 		return filter([]string{"list", "on", "off", "set", "unset"}, cur)
 	case c.name == "hooks" && len(words) == 2 && (words[1] == "set" || words[1] == "unset"):

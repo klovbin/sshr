@@ -61,7 +61,7 @@ Later
 9. Sync: automatic background sync, pairing by QR code
 12. Sync through a store you already have, Supabase, a 1Password vault or a folder Syncthing or Dropbox syncs, still end to end encrypted, the store sees only ciphertext ([#128](https://github.com/klovbin/sshr/issues/128))
 10. Sync without a server: device to device over the local network or the user's own WireGuard tunnel, TLS 1.3 with device keys pinned at pairing
-11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required: `sshr key new --sk` makes one and the handle is a key file, next a setting that refuses hosts without one
+11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required: `sshr key new --sk` makes one and the handle is a key file, `sshr hwkey require` refuses hosts that would log in without one
 
 ## Not planned
 

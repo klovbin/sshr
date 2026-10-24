@@ -121,6 +121,8 @@ func runCLI(args []string) {
 		cmdVault(args[1:])
 	case "commands":
 		cmdCommands(store, args[1:])
+	case "hwkey":
+		cmdHwkey(store, args[1:])
 	case "hooks":
 		cmdHooks(store, args[1:])
 	case "ext":

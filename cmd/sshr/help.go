@@ -253,6 +253,18 @@ setting, --listed-hosts-only and --all-hosts for one run). allow lists a
 host for where it points now, a host that points elsewhere later, for
 example changed on another device, is refused until it is allowed again.
 The list is in settings.json and never syncs`},
+	{name: "hwkey", usage: `sshr hwkey status
+sshr hwkey require <host>... | --all
+sshr hwkey off [<host>...]`, short: "hosts that connect only with a key on a hardware token",
+		details: `require lists hosts that connect only with a key on a FIDO token (a
+handle from sshr key new --sk as the key file, or an sk key of the agent),
+--all asks it of every host. Such a host is refused when it would log in
+with a password or a key outside a token, ssh gets only sk key types, no
+password and no shared connection, there is no way around it for one
+connect. off takes hosts off the list, without hosts it turns the
+requirement off. The list is in settings.json and never syncs, a stolen
+sync device cannot turn it off. The server decides in the end, sshr only
+keeps itself from logging in another way`},
 	{name: "hooks", usage: `sshr hooks list
 sshr hooks on|off
 sshr hooks set <host> before|after <command>

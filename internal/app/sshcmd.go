@@ -29,6 +29,12 @@ const (
 
 var ErrAsksPassword = sshcmd.ErrAsksPassword
 
+var ErrHardwareKeyRequired = sshcmd.ErrHardwareKeyRequired
+
+// CheckHardwareKey tells why h would be refused under the hardware key
+// requirement, nil when its login is a key on a token
+func CheckHardwareKey(h *Host) error { return sshcmd.CheckHardwareKey(h) }
+
 func AgentKeys(name string) ([]*agent.Key, error)       { return sshcmd.AgentKeys(name) }
 func AskTerminal(prompt string) (string, error)         { return sshcmd.AskTerminal(prompt) }
 func AttachAuth(cmd *exec.Cmd, h *Host) (func(), error) { return sshcmd.AttachAuth(cmd, h) }
