@@ -30,7 +30,7 @@ import (
 // programs are not on PATH (nix shell nixpkgs#postgresql_17 nixpkgs#postgrest),
 // url is a proxy that takes /rest/v1 off as the gateway of Supabase does,
 // rest is PostgREST itself
-func realREST(t *testing.T) (url, rest, jwtSecret string) {
+func realREST(t *testing.T) (url, rest, jwtSecret string, runSQL func(string)) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("starts PostgreSQL")
@@ -108,7 +108,13 @@ func realREST(t *testing.T) (url, rest, jwtSecret string) {
 		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(gateway.Close)
-	return gateway.URL, rest, jwtSecret
+	runSQL = func(sql string) {
+		t.Helper()
+		f := filepath.Join(dir, "run.sql")
+		os.WriteFile(f, []byte(sql), 0o600)
+		run("psql", "-h", sock, "-p", fmt.Sprint(pgPort), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-f", f)
+	}
+	return gateway.URL, rest, jwtSecret, runSQL
 }
 
 func freePort(t *testing.T) int {
@@ -133,7 +139,7 @@ func hs256(secret, claims string) string {
 // the SQL of setup.sql on a real PostgreSQL behind PostgREST does what the
 // adapter needs and nothing more (#128)
 func TestRealPostgres(t *testing.T) {
-	url, rest, secret := realREST(t)
+	url, rest, secret, _ := realREST(t)
 	s, err := New(Config{URL: url, Key: pubKey}, testKey, nil)
 	must(t, err)
 
@@ -262,7 +268,7 @@ func TestRealPostgres(t *testing.T) {
 
 // two devices pair and sync through the real functions (#128)
 func TestRealPostgresSync(t *testing.T) {
-	url, _, _ := realREST(t)
+	url, _, _, _ := realREST(t)
 	s, err := New(Config{URL: url, Key: pubKey}, testKey, nil)
 	must(t, err)
 	vault.SetKeychain(&memKeychain{m: map[string]string{}})
@@ -296,5 +302,24 @@ func TestRealPostgresSync(t *testing.T) {
 	h := list[0]
 	if err := hosts.UnlockSaved(&h); err != nil || h.Password != "pw" {
 		t.Errorf("password on b %q %v", h.Password, err)
+	}
+}
+
+// a key change keeps the old key working until the new one is in and
+// then leaves only the new one (#274)
+func TestRealPostgresReplaceKey(t *testing.T) {
+	url, _, _, runSQL := realREST(t)
+	old, err := New(Config{URL: url, Key: pubKey}, testKey, nil)
+	must(t, err)
+	must(t, old.Put("account", []byte("a")))
+	newKey := strings.Repeat("ef", 32)
+	runSQL(SetupSQL(newKey, true))
+	fresh, err := New(Config{URL: url, Key: pubKey}, newKey, nil)
+	must(t, err)
+	if b, err := fresh.Get("account", 10); err != nil || string(b) != "a" {
+		t.Errorf("the new key: %q %v", b, err)
+	}
+	if _, err := old.Get("account", 10); !errors.Is(err, ErrKeyRefused) {
+		t.Errorf("the old key after a change: %v", err)
 	}
 }

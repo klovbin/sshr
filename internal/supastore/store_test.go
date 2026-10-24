@@ -269,8 +269,9 @@ func TestSetupSQL(t *testing.T) {
 	if strings.Contains(sql, testKey) || !strings.Contains(sql, `'\x`+hex.EncodeToString(sum[:])+`'`) || strings.Contains(sql, "{{") {
 		t.Errorf("setup SQL does not carry the hash alone")
 	}
-	if r := SetupSQL(testKey, true); !strings.Contains(r, "delete from sshr.keys;\ninsert into sshr.keys") || strings.Contains(sql, "delete from sshr.keys") {
-		t.Error("only the replace SQL drops the old keys")
+	r := SetupSQL(testKey, true)
+	if i, j := strings.Index(r, "insert into sshr.keys"), strings.Index(r, "delete from sshr.keys where hash <>"); i < 0 || j < i || !strings.Contains(r, "begin;") || strings.Contains(sql, "delete from sshr.keys") {
+		t.Error("only the replace SQL drops the old keys, after the new one is in")
 	}
 	k, err := NewKey()
 	if err != nil || !keyRe.MatchString(k) {
