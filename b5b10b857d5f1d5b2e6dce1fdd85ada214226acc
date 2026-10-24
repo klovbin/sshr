@@ -1,0 +1,9 @@
+What it is for: a screenshot pasted into a remote session is a path on
+your disk the server cannot open
+
+Why it helps: remote AI tools, editors and scripts get a file they can
+read
+
+Why this way: the server needs only `sh`, the clipboard is read with
+tools the OS already has (wl-paste, xclip, osascript, PowerShell), so
+the binary needs no cgo
