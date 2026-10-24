@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -315,5 +317,25 @@ JSON
 	}
 	if _, errOut, code := run("ext", "import", "missing"); code != 1 || !strings.Contains(errOut, "no extension") {
 		t.Errorf("an extension that is not installed: %d %q", code, errOut)
+	}
+}
+
+// sshr ext search reads the catalog the settings name, an install by a name
+// the catalog does not have says so, a folder of that name still wins (#170)
+func TestExtSearchAndInstallByName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"version":1,"extensions":[{"name":"hello","url":"https://example.com/h.git","commit":"0123456789abcdef0123456789abcdef01234567","description":"says hi","author":"Ann","kinds":["command"]}]}`))
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".sshr"), 0o700)
+	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte(`{"ext_catalog":"`+srv.URL+`"}`), 0o600)
+	out, errOut, code := sshrIn(t, home, "ext", "search", "hi")
+	if code != 0 || !strings.Contains(out, "hello") || !strings.Contains(out, "Ann") || !strings.Contains(out, "nobody reviews") {
+		t.Errorf("search: %d %q %q", code, out, errOut)
+	}
+	_, errOut, code = sshrIn(t, home, "ext", "install", "nope")
+	if code == 0 || !strings.Contains(errOut, `no extension "nope" in the catalog`) {
+		t.Errorf("install of a name the catalog lacks: %d %q", code, errOut)
 	}
 }

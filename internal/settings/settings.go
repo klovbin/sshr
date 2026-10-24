@@ -98,6 +98,10 @@ type Settings struct {
 	// that cannot ask gets every command refused and the REST API refuses
 	// commands, it has nobody to ask
 	ConfirmCommands bool `json:"confirm_commands,omitempty"`
+	// ExtCatalog is the address of the catalog of extensions sshr ext
+	// search and an install by name read, empty is the community catalog,
+	// it is read only when one of those runs
+	ExtCatalog string `json:"ext_catalog,omitempty"`
 
 	// base is the file as Load read it, Save writes only
 	// the fields that differ from it, copies of the value share it
