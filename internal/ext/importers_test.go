@@ -315,6 +315,11 @@ func TestPuttyWindowsImporter(t *testing.T) {
 		}
 		files = append(files, file)
 	}
+	// a link is skipped, not followed (#323)
+	link := filepath.Join(tmp, "link.reg")
+	if err := os.Symlink(files[0], link); err == nil {
+		files = append(files, link)
+	}
 	dir := filepath.Join(extensionsDir, "putty")
 	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "putty.ps1")}, files...)
 	cmd := exec.Command(pwsh, args...)
@@ -344,7 +349,8 @@ func TestPuttyWindowsImporter(t *testing.T) {
 	if db.Name != "база" || db.Port != 3333 || db.User != "u" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" {
 		t.Errorf("db: %+v", db)
 	}
-	if n := notes.String(); !strings.Contains(n, "puttygen") || !strings.Contains(n, "ProxyMethod 2") {
+	if n := notes.String(); !strings.Contains(n, "puttygen") || !strings.Contains(n, "ProxyMethod 2") ||
+		strings.HasSuffix(files[len(files)-1], "link.reg") && !strings.Contains(n, "is a link") {
 		t.Errorf("notes: %s", n)
 	}
 	for _, h := range hosts {

@@ -95,7 +95,14 @@ if ($Files) {
 			$stderr.WriteLine("putty: $(Clean $f) is not a file")
 			exit 1
 		}
-		if ((Get-Item -LiteralPath $f).Length -gt 4MB) {
+		$item = Get-Item -LiteralPath $f
+		# a link in a synced folder can point at any file, putty.sh skips
+		# them too
+		if ($item.LinkType) {
+			$stderr.WriteLine("putty: $(Clean $f) is a link, it is skipped")
+			continue
+		}
+		if ($item.Length -gt 4MB) {
 			$stderr.WriteLine("putty: $(Clean $f) is over 4 MiB, it is skipped")
 			continue
 		}
