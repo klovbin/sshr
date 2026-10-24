@@ -138,6 +138,11 @@ const authorizedKeysCommand = "test -e ~/.ssh/authorized_keys || exit 3; cat ~/.
 func authorizedKeysOf(name string, res *app.RemoteResult) ([]byte, error) {
 	switch res.ExitCode {
 	case 0:
+		// the keys past the cut would be missing from the list the user
+		// locks the server down by
+		if res.Truncated {
+			return nil, fmt.Errorf("~/.ssh/authorized_keys on %s is longer than sshr reads, the list would miss keys", name)
+		}
 		if res.Stdout == nil {
 			return []byte{}, nil
 		}

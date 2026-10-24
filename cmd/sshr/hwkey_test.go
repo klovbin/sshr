@@ -18,6 +18,8 @@ func TestAuthorizedKeysOf(t *testing.T) {
 		{app.RemoteResult{Stdout: []byte("ssh-ed25519 AAAA x\n")}, false, false},
 		{app.RemoteResult{}, false, false},
 		{app.RemoteResult{ExitCode: 3}, true, false},
+		// a cut file would hide keys (#360)
+		{app.RemoteResult{Stdout: []byte("ssh-ed25519 AAAA x\n"), Truncated: true}, false, true},
 		{app.RemoteResult{ExitCode: 1, Stderr: []byte("cat: Permission denied")}, false, true},
 		{app.RemoteResult{ExitCode: 127}, false, true},
 		{app.RemoteResult{ExitCode: 255, Stderr: []byte("Connection refused")}, false, true},
