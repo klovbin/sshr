@@ -573,3 +573,24 @@ func TestPassphraseVaultKeepsCopyItCannotRemove(t *testing.T) {
 		t.Error("another vault key was removed")
 	}
 }
+
+// a keychain that is there and fails gives no new vault key, it may hold
+// the real one (#368)
+func TestPassphraseVaultMakesNoKeyOnKeychainError(t *testing.T) {
+	keyring.MockInitWithError(errors.New("org.freedesktop.DBus.Error.AccessDenied"))
+	resetVault(t)
+	t.Cleanup(keyring.MockInit)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetPassphrase(pass, nil); err == nil {
+		t.Fatal("a vault key was made while the keychain failed")
+	}
+	if path, _ := passphraseFilePath(); fileExists(path) {
+		t.Error("a vault key file was written")
+	}
+	if Mode() != ModeKeychain {
+		t.Errorf("mode %s", Mode())
+	}
+}
