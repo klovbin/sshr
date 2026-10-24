@@ -549,4 +549,12 @@ func TestWinSCPImporter(t *testing.T) {
 			t.Errorf("%s reached the output", secret)
 		}
 	}
+
+	// a site takes what it does not set from Default Settings (#332)
+	defs := filepath.Join(t.TempDir(), "WinSCP.ini")
+	os.WriteFile(defs, []byte("[Sessions\\Default%20Settings]\r\nFSProtocol=5\r\nUserName=root\r\nPortNumber=2200\r\n\r\n"+
+		"[Sessions\\ftpsite]\r\nHostName=ftp.example\r\n\r\n[Sessions\\sshsite]\r\nHostName=ssh.example\r\nFSProtocol=2\r\n"), 0o600)
+	if d, _ := runPwshImporter(t, "winscp", defs); len(d) != 1 || d[0].Host != "ssh.example" || d[0].User != "root" || d[0].Port != 2200 {
+		t.Errorf("defaults: %+v", d)
+	}
 }

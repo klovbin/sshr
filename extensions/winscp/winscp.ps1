@@ -169,10 +169,17 @@ foreach ($f in $Files) {
 	}
 }
 
+# WinSCP loads a site over a copy of Default Settings and saves only the
+# values that differ from it, a site without FSProtocol has the protocol
+# of Default Settings
+$defaults = if ($sites.ContainsKey('Default%20Settings')) { $sites['Default%20Settings'] } else { @{} }
+
 $hosts = New-Object System.Collections.ArrayList
 foreach ($name in $order) {
 	if ($name -eq 'Default%20Settings') { continue }
-	$v = $sites[$name]
+	$v = @{}
+	foreach ($k in $defaults.Keys) { $v[$k] = $defaults[$k] }
+	foreach ($k in $sites[$name].Keys) { $v[$k] = $sites[$name][$k] }
 	$proto = "$($v['FSProtocol'])".Trim()
 	if ($proto -ne '' -and $proto -ne '0' -and $proto -ne '1' -and $proto -ne '2') { continue }
 	$label = Clean (Unmunge $name)
