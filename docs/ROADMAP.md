@@ -27,7 +27,7 @@ Moving hosts in and out
 
 - import from `~/.ssh/config` through `ssh -G`
 - export to `~/.ssh/config` with an `Include` line, kept up to date, off by default
-- sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), changes to different fields of one host on two devices merge into one host ([#152](https://github.com/klovbin/sshr/issues/152)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
+- sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), changes to different fields of one host on two devices merge into one host ([#152](https://github.com/klovbin/sshr/issues/152)), only the primary device adds and removes devices ([#292](https://github.com/klovbin/sshr/issues/292)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
 
 For other programs
 

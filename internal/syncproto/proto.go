@@ -10,8 +10,11 @@ import (
 
 // FormatVersion is the version of Manifest, a new optional field keeps
 // it, a client reads its own version and older ones and tells the user to
-// update on a newer one
-const FormatVersion = 1
+// update on a newer one, format 2 adds Primary and raises it although the
+// field is optional: an older client would take a device removal from any
+// device and drop the field on its next push, with format 2 it stops and
+// asks for an update instead
+const FormatVersion = 2
 
 // Limits the server enforces
 const (
@@ -63,6 +66,10 @@ type Manifest struct {
 	// accepts signatures from, the server cannot add one
 	Devices []Device         `json:"devices"`
 	Entries map[string]Entry `json:"entries"`
+	// Primary is the device that alone may add or remove devices, change
+	// the vault key and hand this role on, format 2, set by init, the first
+	// format 2 manifest of an older account names the device that wrote it
+	Primary string `json:"primary,omitempty"`
 }
 
 // Signed is a manifest as stored on the server

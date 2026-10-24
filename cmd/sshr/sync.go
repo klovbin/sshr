@@ -190,7 +190,11 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Println("devices")
 		for _, d := range st.Devices {
-			fmt.Printf("  %s  %s  %s\n", d.ID[:8], syncclient.Fingerprint(d.SignPub), d.Name)
+			role := ""
+			if d.ID == st.Primary {
+				role = "  (primary, adds and removes devices)"
+			}
+			fmt.Printf("  %s  %s  %s%s\n", d.ID[:8], syncclient.Fingerprint(d.SignPub), d.Name, role)
 		}
 	case "remove-device":
 		if len(rest) != 1 {

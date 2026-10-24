@@ -255,15 +255,16 @@ sshr export --uninstall
 ```sh
 sshr sync init --server https://sync.example.com --name laptop   # first device
 sshr sync join --server https://sync.example.com <code>          # new device, shows its fingerprint
-sshr sync approve <id>                                           # on a device already in, after comparing fingerprints
+sshr sync approve <id>                                           # on the primary device, after comparing fingerprints
 sshr sync                                                        # pull, then push
 sshr sync status                                                 # devices and a state fingerprint
-sshr sync remove-device <id>                                     # rotates the vault key
+sshr sync remove-device <id>                                     # on the primary device, rotates the vault key
 sshr sync leave                                                  # stop syncing here, the hosts stay
 ```
 
 - end to end encrypted: per-device keys in the keychain (Ed25519, ML-KEM-768 + X25519), hosts encrypted with a shared vault key, signed and chained manifests, the server stores only ciphertext and cannot add a device or forge history
 - saved passwords sync inside the encryption, keys kept in sshr and password manager references do not, key file paths sync, the files do not
+- the device that made the account is its primary device (`sshr sync status` marks it), only it approves and removes devices, every device refuses a change that adds or removes a device or changes the vault key unless the primary device wrote it, so a stolen laptop cannot throw the others out, in an account made with an older sshr the first device that syncs with this version becomes primary and the others say so, an older sshr stops on such an account and asks for an update
 - a host changed on two devices is merged when they changed different things (a rename here, a tag there), the log says "merged the changes", a host where both changed the same thing, or one the address and the other the password or key, keeps both, the other one as `<name> (conflict <device> <date>)`, a host removed on one device and changed on another comes back with the change, the log says so
 - a host whose saved password does not open here, or one this sshr cannot read, is left out and named, the other hosts still sync, `sshr sync` then ends with "N hosts left out" and exit code 1
 - `leave` first delivers a vault key this device changed and has not handed to the others yet, `--force` leaves without it, then the others pair again

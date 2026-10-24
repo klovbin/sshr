@@ -208,6 +208,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** add a host once and it appears everywhere, a host changed on two devices keeps both versions
 - **Why this way:** the server stores only ciphertext and cannot read hosts, add a device or rewrite history, devices are approved by comparing fingerprints, keys stored in sshr stay on their device
 
+### Primary device of a sync account
+- **What:** the device that made the account is its primary device, only it approves and removes devices, `sshr sync status` marks it
+- **What for:** a stolen or hostile device must not be able to throw the owner's devices out of the account
+- **Why it helps:** every device refuses a manifest that adds or removes a device or changes the vault key unless the primary device signed it, the owner's devices keep their hosts instead of taking such a change
+- **Why this way:** the primary is a plaintext field of the signed manifest, so a device that was offline through key changes can still check every step, the manifest format goes to 2 so an older sshr stops with "update sshr" instead of taking a removal from any device, an account made before gets the first device that syncs with this version as primary
+
 ### Merging changes made on two devices
 - **What:** a host changed on two devices before they synced is merged field by field, a rename on one and a new tag on the other give one host with both
 - **What for:** editing on a laptop and a desktop without ending up with `(conflict …)` copies to clean up

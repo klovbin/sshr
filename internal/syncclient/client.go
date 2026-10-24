@@ -68,8 +68,13 @@ type state struct {
 	Trusted []syncproto.Device `json:"trusted,omitempty"`
 	// Approver is the fingerprint of the inviting device, a joined device
 	// trusts only it until it has verified its first manifest
-	Approver string                `json:"approver,omitempty"`
-	Entries  map[string]entryState `json:"entries"`
+	Approver string `json:"approver,omitempty"`
+	// Primary is the primary device of the last verified manifest, Format
+	// the highest manifest format seen, a format 1 manifest after a format
+	// 2 one is refused, it would drop the primary
+	Primary string                `json:"primary,omitempty"`
+	Format  int                   `json:"format,omitempty"`
+	Entries map[string]entryState `json:"entries"`
 	// Skipped are remote entries this device could not import (a mode of a
 	// newer sshr, a host that fails validation), a push carries them on
 	// unchanged and every pull tries them again
@@ -675,6 +680,9 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
+	if err := c.errNotPrimary("approves devices"); err != nil {
+		return nil, err
+	}
 	// the list is taken from the state each attempt pulled, a device
 	// another one removed meanwhile is not written back
 	plan := func() (pushPlan, error) {
@@ -865,6 +873,9 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		if err := verifySignature(sm, c.st.Trusted); err != nil {
 			return nil, err
 		}
+		if err := c.checkPrimary(sm, &m); err != nil {
+			return nil, err
+		}
 	} else {
 		// a joined device trusts only the device that invited it
 		var signer *syncproto.Device
@@ -878,6 +889,11 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		}
 		if err := verifySignature(sm, []syncproto.Device{*signer}); err != nil {
 			return nil, err
+		}
+		// only the primary device adds devices, a stolen one that invites
+		// would keep a way back in after it is removed
+		if m.Version >= 2 && sm.Signer != m.Primary {
+			return nil, errors.New("this device was added by a device that is not the primary device of the account, approve it on the primary device")
 		}
 	}
 	if m.Epoch < c.st.Epoch {
@@ -920,9 +936,76 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 	if !inside {
 		return nil, errors.New("this device was removed from the account, run sshr sync leave")
 	}
+	if m.Version >= 2 && c.st.Primary == "" && c.st.Counter > 0 {
+		c.logf("device %s is now the primary device of the account, only it adds and removes devices (sshr sync status)", short(m.Primary, 8))
+	}
 	c.st.Trusted, c.st.Head, c.st.Counter, c.st.Epoch = m.Devices, syncproto.BodyHash(sm.Body), m.Counter, m.Epoch
 	c.st.Approver = ""
+	if m.Version >= 2 {
+		c.st.Primary = m.Primary
+	}
+	c.st.Format = max(c.st.Format, m.Version)
 	return &m, nil
+}
+
+// checkPrimary refuses a manifest that changes who is in the account
+// without the primary device: adding or removing a device, a new vault key
+// or a new primary must be signed by the primary of the manifest before,
+// the first format 2 manifest of an older account names its own signer, a
+// device refusing a change keeps its hosts and stops syncing, the account
+// is not taken from the owner
+func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error {
+	if m.Version < c.st.Format {
+		return fmt.Errorf("change %d is of format %d after format %d, an older sshr cannot write here, it would drop the primary device", m.Counter, m.Version, c.st.Format)
+	}
+	if m.Version < 2 {
+		return nil
+	}
+	listed := false
+	for _, d := range m.Devices {
+		listed = listed || d.ID == m.Primary
+	}
+	if !listed {
+		return fmt.Errorf("change %d names a primary device that is not in the account", m.Counter)
+	}
+	if c.st.Primary == "" {
+		if m.Primary != sm.Signer {
+			return fmt.Errorf("change %d makes device %s primary but was written by device %s, the first primary is the device that writes the first change of this format", m.Counter, short(m.Primary, 8), short(sm.Signer, 8))
+		}
+		return nil
+	}
+	privileged := m.Primary != c.st.Primary || m.Epoch > c.st.Epoch || !sameDevices(c.st.Trusted, m.Devices)
+	if privileged && sm.Signer != c.st.Primary {
+		return fmt.Errorf("change %d adds or removes a device, changes the vault key or the primary device, but it was written by device %s and not by the primary device %s, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here", m.Counter, short(sm.Signer, 8), short(c.st.Primary, 8))
+	}
+	return nil
+}
+
+// sameDevices tells whether two device lists hold the same devices with
+// the same keys, a new name alone changes nothing
+func sameDevices(a, b []syncproto.Device) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	keys := make(map[string]string, len(a))
+	for _, d := range a {
+		keys[d.ID] = string(d.SignPub) + "\x00" + string(d.KEMPub)
+	}
+	for _, d := range b {
+		if k, ok := keys[d.ID]; !ok || k != string(d.SignPub)+"\x00"+string(d.KEMPub) {
+			return false
+		}
+	}
+	return true
+}
+
+// errNotPrimary refuses what only the primary device may do, before
+// anything is sent
+func (c *Client) errNotPrimary(what string) error {
+	if c.st.Primary == "" || c.st.Primary == c.st.DeviceID {
+		return nil
+	}
+	return fmt.Errorf("only the primary device of the account %s (device %s, sshr sync status shows it), run this there", what, short(c.st.Primary, 8))
 }
 
 // checkFormat takes a manifest of this format or an older one, a field
@@ -1493,9 +1576,16 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	if devices == nil {
 		devices = c.st.Trusted
 	}
+	// the first manifest of format 2 in an older account makes this device
+	// the primary one
+	primary := c.st.Primary
+	if primary == "" {
+		primary = c.st.DeviceID
+	}
 	m := &syncproto.Manifest{
 		Version: syncproto.FormatVersion, Account: c.st.Account, Epoch: epoch,
 		Counter: c.st.Counter + 1, Prev: c.st.Head, Devices: devices, Entries: entries,
+		Primary: primary,
 	}
 	b, sm, err := c.keys.signManifest(m, key, c.st.DeviceID)
 	if err != nil {
@@ -1510,6 +1600,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	}
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
 	c.st.Epoch, c.st.Skipped = epoch, skipped
+	c.st.Primary, c.st.Format = primary, syncproto.FormatVersion
 	if plan.rotation != nil {
 		c.st.Rotation = plan.rotation
 	}
@@ -1546,6 +1637,11 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 		return nil, fmt.Errorf("no other device matches %q", prefix)
 	}
 	removed := *target
+	// before the token: other devices would refuse the manifest, a revoked
+	// token could not be given back
+	if err := c.errNotPrimary("removes devices"); err != nil {
+		return nil, err
+	}
 	// the token goes first, a removed device that can still push could
 	// block the others with manifests no one trusts, a rerun after a lost
 	// race finds the device still listed and gets 404 here
@@ -1666,6 +1762,9 @@ type Status struct {
 	LastSync time.Time
 	// Backend is the store of an account that is not sshr-sync
 	Backend *BackendRef
+	// Primary is the ID of the primary device, empty in an account no sshr
+	// with primary devices wrote to yet
+	Primary string
 }
 
 func (c *Client) Status() (*Status, error) {
@@ -1676,6 +1775,7 @@ func (c *Client) Status() (*Status, error) {
 		Server: c.st.Server, Account: c.st.Account, Device: c.st.DeviceID, Name: c.st.Name,
 		Fingerprint: Fingerprint(c.self().SignPub), Counter: c.st.Counter,
 		Waiting: c.st.Approver != "", LastSync: c.st.LastSync, Backend: c.st.Backend,
+		Primary: c.st.Primary,
 	}
 	for _, d := range c.st.Trusted {
 		d.Name = CleanName(d.Name)
