@@ -11,19 +11,30 @@ import (
 )
 
 // TestHarden runs Harden in a child, the test process keeps its own
-// state: the child is not dumpable and has no core limit, with
-// SSHR_ALLOW_DEBUG it stays as it was
+// state: the child is not dumpable and its soft core limit is 0 while the
+// hard one stays, with SSHR_ALLOW_DEBUG it stays as it was
 func TestHarden(t *testing.T) {
 	if os.Getenv("SSHR_HARDEN_CHILD") == "1" {
+		var before, after unix.Rlimit
+		unix.Getrlimit(unix.RLIMIT_CORE, &before)
 		if err := Harden(); err != nil {
 			t.Fatal(err)
 		}
 		dumpable, err := unix.PrctlRetInt(unix.PR_GET_DUMPABLE, 0, 0, 0, 0)
-		var lim unix.Rlimit
-		unix.Getrlimit(unix.RLIMIT_CORE, &lim)
-		want := os.Getenv("SSHR_ALLOW_DEBUG") != "1"
-		if err != nil || (dumpable == 0) != want || (lim.Cur == 0 && lim.Max == 0) != want {
-			t.Fatalf("dumpable %d %v, core limit %+v, hardened wanted %v", dumpable, err, lim, want)
+		unix.Getrlimit(unix.RLIMIT_CORE, &after)
+		want := before
+		if os.Getenv("SSHR_ALLOW_DEBUG") != "1" {
+			// only the soft limit goes to 0, the hard one is left for the
+			// programs sshr starts (#342), compared with the limit the child
+			// started with, a limit of 0 already is no proof (#343)
+			want.Cur = 0
+			if err != nil || dumpable != 0 || after != want {
+				t.Fatalf("dumpable %d %v, core limit %+v, want %+v", dumpable, err, after, want)
+			}
+			return
+		}
+		if err != nil || dumpable != 1 || after != want {
+			t.Fatalf("with SSHR_ALLOW_DEBUG: dumpable %d %v, core limit %+v, want %+v", dumpable, err, after, want)
 		}
 		return
 	}
