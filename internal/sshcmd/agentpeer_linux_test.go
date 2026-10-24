@@ -23,6 +23,11 @@ func TestFromOwnChild(t *testing.T) {
 		}
 		return
 	}
+	// as PID 1 (a container started with the test binary) the orphan is
+	// reparented to this process and would pass (#351)
+	if os.Getpid() == 1 {
+		t.Skip("the test binary is PID 1, an orphan would be its child")
+	}
 	sock := filepath.Join(t.TempDir(), "ag")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
