@@ -1,0 +1,7 @@
+What it is for: two hosts called "web" must never mean "connect to
+whichever came first"
+
+Why it helps: `rm` or `run` never hits the wrong server by accident
+
+Why this way: asking for the ID costs one retry, guessing can cost a
+production server
