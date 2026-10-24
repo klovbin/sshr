@@ -660,7 +660,7 @@ func (c *Client) join(server, code, name string) (string, error) {
 		return "", fmt.Errorf("the sync store holds account %s, the invite is for %s, check the server or store", short(tr.Account, 8), short(account, 8))
 	}
 	c.st.Token, c.st.DeviceID = tr.Token, self.ID
-	return Fingerprint(self.SignPub), c.saveNew()
+	return DeviceFingerprint(self), c.saveNew()
 }
 
 // Pending lists devices that joined and wait for approval
@@ -703,7 +703,7 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	}
 	var found []syncproto.DeviceRecord
 	for _, d := range pending {
-		if strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", "")) {
+		if strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(DeviceFingerprint(d.Device), "-", ""), strings.ReplaceAll(prefix, "-", "")) {
 			found = append(found, d)
 		}
 	}
@@ -941,6 +941,24 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 			return nil, errors.New("this device was added by a device that is not the primary device of the account, approve it on the primary device")
 		}
 	}
+	inside := false
+	self := c.self()
+	for _, d := range m.Devices {
+		if syncproto.DeviceID(d.SignPub) != d.ID {
+			return nil, errors.New("manifest lists a device whose id does not match its key")
+		}
+		if d.ID == c.st.DeviceID {
+			// the vault key is sealed to the encryption key the account
+			// lists, a swapped one sent it to someone else
+			if !bytes.Equal(d.KEMPub, self.KEMPub) {
+				return nil, errors.New("the account lists this device with another encryption key, the server or the approving device changed it and the vault key may have gone to someone else, do not use this account, compare fingerprints again")
+			}
+			inside = true
+		}
+	}
+	if !inside {
+		return nil, errors.New("this device was removed from the account, run sshr sync leave")
+	}
 	if m.Epoch < c.st.Epoch {
 		return nil, errors.New("manifest of an old vault key epoch")
 	}
@@ -970,16 +988,6 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 			}
 		}
 		c.markKey(m.Epoch)
-	}
-	inside := false
-	for _, d := range m.Devices {
-		if syncproto.DeviceID(d.SignPub) != d.ID {
-			return nil, errors.New("manifest lists a device whose id does not match its key")
-		}
-		inside = inside || d.ID == c.st.DeviceID
-	}
-	if !inside {
-		return nil, errors.New("this device was removed from the account, run sshr sync leave")
 	}
 	if m.Version >= 2 && c.st.Primary == "" && c.st.Counter > 0 {
 		c.logf("device %s is now the primary device of the account, only it adds and removes devices (sshr sync status)", short(m.Primary, 8))
@@ -1839,7 +1847,7 @@ func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Devi
 	var target *syncproto.Device
 	var keep []syncproto.Device
 	for i, d := range c.st.Trusted {
-		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
+		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(DeviceFingerprint(d), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
 			if target != nil {
 				return nil, nil, fmt.Errorf("%q matches several devices", prefix)
 			}
@@ -1879,7 +1887,7 @@ func (c *Client) handPrimary(prefix string, confirm func(name, fingerprint strin
 	if target == nil {
 		return nil, fmt.Errorf("no other device matches %q", prefix)
 	}
-	if !confirm(CleanName(target.Name), Fingerprint(target.SignPub)) {
+	if !confirm(CleanName(target.Name), DeviceFingerprint(*target)) {
 		return nil, errors.New("not handed on")
 	}
 	if err := c.claimPrimary(); err != nil {
@@ -1963,7 +1971,7 @@ func (c *Client) Status() (*Status, error) {
 	}
 	st := &Status{
 		Server: c.st.Server, Account: c.st.Account, Device: c.st.DeviceID, Name: c.st.Name,
-		Fingerprint: Fingerprint(c.self().SignPub), Counter: c.st.Counter,
+		Fingerprint: DeviceFingerprint(c.self()), Counter: c.st.Counter,
 		Waiting: c.st.Approver != "", LastSync: c.st.LastSync, Backend: c.st.Backend,
 		Primary: c.st.Primary,
 	}

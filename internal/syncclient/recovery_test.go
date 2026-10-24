@@ -1,6 +1,8 @@
 package syncclient
 
 import (
+	"crypto/rand"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/syncproto"
 	"sshr.dev/internal/syncserver"
 )
 
@@ -184,4 +187,86 @@ func TestCancelledKitAnchorGoes(t *testing.T) {
 	must(t, w.b.Pull())
 	must(t, w.a.CancelRecovery())
 	must(t, w.b.Pull())
+}
+
+// swapKEM replaces the encryption key of device id in the server's device
+// list, as a hostile server could
+func swapKEM(t *testing.T, w *world, id string) *deviceKeys {
+	t.Helper()
+	seed := make([]byte, 32)
+	rand.Read(seed)
+	atk, err := newDeviceKeys(seed)
+	must(t, err)
+	p := filepath.Join(w.data, "accounts", w.a.st.Account, "devices.json")
+	b, err := os.ReadFile(p)
+	must(t, err)
+	var ds []map[string]any
+	must(t, json.Unmarshal(b, &ds))
+	for _, d := range ds {
+		if d["id"] == id {
+			d["kem_pub"] = atk.kem.PublicKey().Bytes()
+		}
+	}
+	b, _ = json.Marshal(ds)
+	must(t, os.WriteFile(p, b, 0o600))
+	return atk
+}
+
+// TestRestoreIgnoresSwappedKEM checks that a server that swaps the
+// encryption key of the new machine does not get the vault key: the kit
+// device seals it to the keys of this machine, not to what the server
+// lists (#302)
+func TestRestoreIgnoresSwappedKEM(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	w.srv.Config.Handler.(*syncserver.Server).Now = now
+	kit, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	n := w.client("n-")
+	n.Now = now
+	_, err = n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass)
+	must(t, err)
+	must(t, n.load())
+	me := n.st.DeviceID
+	n.st = nil
+	atk := swapKEM(t, w, me)
+	clock = clock.Add(DefaultRecoveryWait + time.Hour)
+	_ = n.RestoreFinish()
+	eb, err := os.ReadFile(filepath.Join(w.data, "accounts", w.a.st.Account, "envelopes", me+".json"))
+	if err != nil {
+		return
+	}
+	var env syncproto.Envelope
+	must(t, json.Unmarshal(eb, &env))
+	if _, err := atk.openEnvelope(env, w.a.st.Account); err == nil {
+		t.Fatal("the server's key opens the vault key")
+	}
+}
+
+// TestApproveShowsSwappedKEM checks that a swapped encryption key of a
+// waiting device changes the fingerprint the approving device shows, and
+// that the joined device refuses an account listing it with another key
+func TestApproveShowsSwappedKEM(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	c := w.client("c-")
+	code, err := w.a.Invite()
+	must(t, err)
+	fp, err := c.Join(w.srv.URL, code, "c")
+	must(t, err)
+	must(t, c.load())
+	swapKEM(t, w, c.st.DeviceID)
+	c.st = nil
+	pending, err := w.a.Pending()
+	must(t, err)
+	if DeviceFingerprint(pending[0].Device) == fp {
+		t.Fatal("the approving device shows the fingerprint the joiner printed though the key was swapped")
+	}
+	_, err = w.a.Approve(pending[0].ID)
+	must(t, err)
+	if err := c.Pull(); err == nil || !strings.Contains(err.Error(), "another encryption key") {
+		t.Fatalf("c took an account that lists it with another key: %v", err)
+	}
 }

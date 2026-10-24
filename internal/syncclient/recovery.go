@@ -141,7 +141,7 @@ func (c *Client) kitHeader(dev syncproto.Device, pass bool) string {
 	} else {
 		fmt.Fprintf(&b, "server    %s\n", c.st.Server)
 	}
-	fmt.Fprintf(&b, "device    %s\n", Fingerprint(dev.SignPub))
+	fmt.Fprintf(&b, "device    %s\n", DeviceFingerprint(dev))
 	if pass {
 		b.WriteString("passphrase needed, it is not on this paper\n")
 	}
@@ -332,7 +332,10 @@ func (c *Client) RestoreFinish() error {
 	if err := c.load(); err != nil {
 		return err
 	}
-	me := c.st.DeviceID
+	// the keys of this machine, not the record the server lists for it, a
+	// server that swapped the encryption key would get the vault key
+	self := c.self()
+	me := self.ID
 	c.st = nil
 	err := rc.run(func() error {
 		if err := rc.pull(); err != nil {
@@ -349,15 +352,14 @@ func (c *Client) RestoreFinish() error {
 		if err := json.Unmarshal(b, &recs); err != nil {
 			return err
 		}
-		var dev *syncproto.Device
+		listed := false
 		for i := range recs {
-			if recs[i].ID == me {
-				dev = &recs[i].Device
-			}
+			listed = listed || recs[i].ID == me
 		}
-		if dev == nil {
+		if !listed {
 			return errors.New("the join request of this machine is gone from the account, start again")
 		}
+		dev := &self
 		if err := rc.push(func() (pushPlan, error) {
 			if rc.st.Primary == me {
 				return pushPlan{}, nil

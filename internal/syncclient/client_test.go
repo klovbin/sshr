@@ -119,7 +119,7 @@ func (w *world) pair() (web, db *hosts.Host) {
 	}
 	pending, err := w.a.Pending()
 	must(t, err)
-	if len(pending) != 1 || Fingerprint(pending[0].SignPub) != fp {
+	if len(pending) != 1 || DeviceFingerprint(pending[0].Device) != fp {
 		t.Fatalf("pending = %+v, fingerprint on b %s", pending, fp)
 	}
 	_, err = w.a.Approve(pending[0].ID[:6])

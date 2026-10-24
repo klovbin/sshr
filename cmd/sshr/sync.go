@@ -167,7 +167,7 @@ func cmdSync(store *app.Store, args []string) {
 			fmt.Println("No devices are waiting")
 		}
 		for _, d := range ds {
-			fmt.Printf("%s  %s  %s\n", d.ID[:8], syncclient.Fingerprint(d.SignPub), d.Name)
+			fmt.Printf("%s  %s  %s\n", d.ID[:8], syncclient.DeviceFingerprint(d.Device), d.Name)
 		}
 	case "approve":
 		if len(rest) != 1 {
@@ -177,7 +177,7 @@ func cmdSync(store *app.Store, args []string) {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Printf("Added %s (%s)\n", d.Name, syncclient.Fingerprint(d.SignPub))
+		fmt.Printf("Added %s (%s)\n", d.Name, syncclient.DeviceFingerprint(d.Device))
 	case "primary":
 		if len(rest) < 1 || len(rest) > 2 || len(rest) == 2 && rest[1] != "--yes" {
 			fatal(fmt.Errorf("sshr sync primary <id|fingerprint> [--yes], see sshr sync status"))
@@ -225,7 +225,7 @@ func cmdSync(store *app.Store, args []string) {
 			if d.ID == st.Primary {
 				role = "  (primary, adds and removes devices)"
 			}
-			fmt.Printf("  %s  %s  %s%s\n", d.ID[:8], syncclient.Fingerprint(d.SignPub), d.Name, role)
+			fmt.Printf("  %s  %s  %s%s\n", d.ID[:8], syncclient.DeviceFingerprint(d), d.Name, role)
 		}
 	case "remove-device":
 		if len(rest) != 1 {
