@@ -51,6 +51,13 @@ func hardwareKeyRequired(h *Host) bool {
 	return rerr == nil && bytes.Contains(raw, []byte(`"hardware_key`))
 }
 
+// hardwareKeyEverywhere tells whether every host needs a token key, a
+// host that is not saved included, the jump hops of an unsaved spec then
+// go through sshr so the rule applies to them
+func hardwareKeyEverywhere() bool {
+	return hardwareKeyRequired(&Host{})
+}
+
 // CheckHardwareKey refuses a host under the requirement whose login is
 // not a key on a token: a password of any kind, a key kept in sshr,
 // 1Password or Bitwarden, the default keys of ssh, a key file or an agent
