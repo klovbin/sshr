@@ -1,0 +1,8 @@
+What it is for: keys that should never be a file, in a password manager
+or on a hardware token
+
+Why it helps: approval per use, nothing to steal from disk, and no "Too
+many authentication failures" from agents holding many keys
+
+Why this way: sshr never holds the key, it tells ssh which agent and
+which public key to offer
