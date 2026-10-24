@@ -88,3 +88,25 @@ func TestAskpassSupported(t *testing.T) {
 		t.Errorf("unknown ssh: %v", err)
 	}
 }
+
+// TestNoBareSSH checks that no code of the package or the CLI starts "ssh"
+// by name, every call takes the ssh of SSHPath (#312)
+func TestNoBareSSH(t *testing.T) {
+	for _, dir := range []string{".", "../../cmd/sshr"} {
+		files, _ := filepath.Glob(filepath.Join(dir, "*.go"))
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, bad := range []string{`exec.Command("ssh"`, `exec.CommandContext(ctx, "ssh"`, `LookPath("ssh")`} {
+				if strings.Contains(string(b), bad) && !strings.HasSuffix(f, "sshbin.go") {
+					t.Errorf("%s starts ssh by name (%s), use sshCommand or SSHPath", f, bad)
+				}
+			}
+		}
+	}
+}

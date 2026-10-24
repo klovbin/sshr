@@ -56,7 +56,8 @@ func remoteTimeoutScript(secs int) string {
 // is used, a host that asks for its password every time fails with
 // ErrAsksPassword, the command is stopped after timeout on the server too
 func (s *Store) RunRemote(h *Host, command string, stdin io.Reader, timeout time.Duration) (*RemoteResult, error) {
-	if _, err := SSHPath(); err != nil {
+	sshPath, err := SSHPath()
+	if err != nil {
 		return nil, err
 	}
 	if h.PasswordMode == PasswordAsk {
@@ -79,7 +80,7 @@ func (s *Store) RunRemote(h *Host, command string, stdin io.Reader, timeout time
 	// the server stops the command first, this side waits a little longer
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", args...)
+	cmd := exec.CommandContext(ctx, sshPath, args...)
 	// jump hops run as separate ssh processes, they read this too
 	cmd.Env = append(os.Environ(), "SSHR_BATCH=1")
 	if stdin == nil {
