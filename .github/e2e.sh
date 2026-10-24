@@ -56,13 +56,15 @@ esac
 case "$os" in
 MINGW* | MSYS*)
 	# Git for Windows brings an sshd that runs as the runner user, it logs
-	# in only that user, which is all the key and jump checks need
-	"$(command -v sshd || echo /usr/bin/sshd)" -f "$w/sshd_config" -E "$w/sshd.log"
+	# in only that user, which is all the key and jump checks need, named by
+	# its path, PATH finds the sshd of Windows first now and that one only
+	# runs as a service, the trap is set first so a failed start shows its log
 	trap 'kill "$(cat "$w/sshd.pid")" || true; cat "$w/sshd.log" || true' EXIT
+	/usr/bin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
 	;;
 *)
-	sudo /usr/sbin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
 	trap 'sudo kill "$(cat "$w/sshd.pid")" || true; sudo cat "$w/sshd.log" || true' EXIT
+	sudo /usr/sbin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
 	;;
 esac
 for _ in 1 2 3 4 5 6 7 8 9 10; do
