@@ -696,6 +696,11 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 				return pushPlan{}, nil
 			}
 		}
+		// a retry after a lost race plans from the pulled state, the role
+		// may have moved meanwhile
+		if err := c.errNotPrimary("approves devices"); err != nil {
+			return pushPlan{}, err
+		}
 		return pushPlan{devices: append(append([]syncproto.Device(nil), c.st.Trusted...), d.Device)}, nil
 	}
 	if err := c.push(plan); err != nil {
@@ -1644,6 +1649,9 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	}
 	gone := false
 	plan := func() (pushPlan, error) {
+		if err := c.errNotPrimary("removes devices"); err != nil {
+			return pushPlan{}, err
+		}
 		target, keep, err := c.matchDevice(removed.ID)
 		if err != nil {
 			return pushPlan{}, err
