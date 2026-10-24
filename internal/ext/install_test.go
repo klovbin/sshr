@@ -427,7 +427,7 @@ func TestPrepareAtPinsTheCommit(t *testing.T) {
 		t.Errorf("a repository without the commit: %v", err)
 	}
 	b, _ = os.ReadFile(log)
-	for _, want := range []string{"fetch --depth 1 --no-tags --filter=blob:limit=5m origin " + other, "checkout --quiet --detach " + other, "core.hooksPath=" + os.DevNull} {
+	for _, want := range []string{"fetch --depth 1 --no-tags --filter=blob:limit=5m origin " + other, "checkout --quiet --detach FETCH_HEAD", "core.hooksPath=" + os.DevNull} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("git was run without %q:\n%s", want, b)
 		}

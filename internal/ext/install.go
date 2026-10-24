@@ -157,7 +157,9 @@ func cloneGit(url, dest, commit string) (string, error) {
 		"--filter=blob:limit=5m", "origin", commit); err != nil {
 		return "", err
 	}
-	if err := runGit("git checkout of commit "+commit, "-C", dest, "checkout", "--quiet", "--detach", commit); err != nil {
+	// FETCH_HEAD is the object just fetched, a branch named like the hash
+	// would win over the hash itself
+	if err := runGit("git checkout of commit "+commit, "-C", dest, "checkout", "--quiet", "--detach", "FETCH_HEAD"); err != nil {
 		return "", err
 	}
 	if head, err = revParse(dest); err != nil {
