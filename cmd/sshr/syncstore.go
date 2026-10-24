@@ -205,7 +205,7 @@ func (f *storeFlags) setupDAV(c *syncclient.Client) (string, error) {
 // SSHR_SUPABASE_KEY or asked on the terminal, sshr sync supabase-sql makes
 // it, it never goes on the command line
 func supabaseKey() (string, error) {
-	if s := os.Getenv("SSHR_SUPABASE_KEY"); s != "" {
+	if s := strings.TrimSpace(os.Getenv("SSHR_SUPABASE_KEY")); s != "" {
 		return s, nil
 	}
 	s, err := app.AskTerminal("sshr key of the Supabase account (from sshr sync supabase-sql): ")

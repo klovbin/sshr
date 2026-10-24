@@ -209,7 +209,12 @@ func cmdSync(store *app.Store, args []string) {
 			fmt.Println("This account is in a bucket and the removed device still holds the bucket key, it can delete objects and stop the sync\nMake a new key for the bucket, delete the old one, then run on every device that stays:\n  sshr sync store-key --key-id <new key id>")
 		}
 	case "supabase-sql":
-		key := os.Getenv("SSHR_SUPABASE_KEY")
+		key := strings.TrimSpace(os.Getenv("SSHR_SUPABASE_KEY"))
+		if key != "" && !replaceKey {
+			if err := supastore.CheckSSHRKey(key); err != nil {
+				fatal(fmt.Errorf("SSHR_SUPABASE_KEY: %v", err))
+			}
+		}
 		if key == "" || replaceKey {
 			if key, err = supastore.NewKey(); err != nil {
 				fatal(err)

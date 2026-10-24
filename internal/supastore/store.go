@@ -70,6 +70,15 @@ const listMax = 20000
 // device, another device changed it
 var ErrKeyRefused = errors.New("the Supabase project refused the sshr key of this account, run sshr sync store-key with the key the other devices use")
 
+// CheckSSHRKey takes a key sshr made, 64 hex characters, a passphrase put in
+// its place could be guessed from the sha256 the project keeps
+func CheckSSHRKey(key string) error {
+	if !keyRe.MatchString(key) {
+		return errors.New("the sshr key of a Supabase account is 64 hex characters, sshr sync supabase-sql makes one")
+	}
+	return nil
+}
+
 // NewKey makes the sshr key of a new account
 func NewKey() (string, error) {
 	var b [32]byte
@@ -136,8 +145,8 @@ func New(cfg Config, key string, client *http.Client) (*Store, error) {
 	if err := CheckKey(cfg.Key); err != nil {
 		return nil, err
 	}
-	if !keyRe.MatchString(key) {
-		return nil, errors.New("the sshr key of a Supabase account is 64 hex characters")
+	if err := CheckSSHRKey(key); err != nil {
+		return nil, err
 	}
 	// a redirect is never followed, the key header must not go elsewhere
 	c := http.Client{}

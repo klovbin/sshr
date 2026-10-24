@@ -302,6 +302,16 @@ func TestSupabaseSQLCommand(t *testing.T) {
 	if strings.Contains(errOut, "sshr key of the account") || strings.Contains(out, key) {
 		t.Errorf("supabase-sql with a key given: %q %q", out, errOut)
 	}
+	// a passphrase in the variable is refused, a trailing newline is not (#276)
+	t.Setenv("SSHR_SUPABASE_KEY", "my secret phrase")
+	if _, errOut, code := sshrIn(t, home, "sync", "supabase-sql"); code == 0 || !strings.Contains(errOut, "64 hex characters") {
+		t.Errorf("supabase-sql with a passphrase: %d %q", code, errOut)
+	}
+	t.Setenv("SSHR_SUPABASE_KEY", key+"\n")
+	if _, errOut, code := sshrIn(t, home, "sync", "supabase-sql"); code != 0 {
+		t.Errorf("supabase-sql with a trailing newline: %d %q", code, errOut)
+	}
+	t.Setenv("SSHR_SUPABASE_KEY", key)
 	out, errOut, _ = sshrIn(t, home, "sync", "supabase-sql", "--replace")
 	if !strings.Contains(out, "delete from sshr.keys") || !strings.Contains(errOut, "sshr key of the account") {
 		t.Errorf("supabase-sql --replace: %q %q", out, errOut)
