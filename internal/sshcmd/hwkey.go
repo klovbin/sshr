@@ -20,10 +20,11 @@ var ErrHardwareKeyRequired = errors.New("this host needs a key on a hardware tok
 // hardwareKeyArgs keep ssh to keys on a token: only sk key types, no
 // password, no keyboard-interactive, no Kerberos, no host-based login, no
 // connection of another run shared through ControlMaster, the command line
-// wins over ssh_config, ssh uses the first value it gets
+// wins over ssh_config, ssh uses the first value it gets, every name is
+// known to OpenSSH 8.2, ssh stops at a key type it does not know
 var hardwareKeyArgs = []string{
 	"-o", "IdentitiesOnly=yes",
-	"-o", "PubkeyAcceptedKeyTypes=sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,webauthn-sk-ecdsa-sha2-nistp256@openssh.com",
+	"-o", "PubkeyAcceptedKeyTypes=sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com",
 	"-o", "PreferredAuthentications=publickey",
 	"-o", "PasswordAuthentication=no",
 	"-o", "KbdInteractiveAuthentication=no",
