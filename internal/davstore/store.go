@@ -58,10 +58,15 @@ func New(cfg Config, secret string, client *http.Client) (*Store, error) {
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/"
 	base.RawPath = ""
-	if client == nil {
-		client = &http.Client{}
+	// a redirect is never followed: net/http turns a PUT into a GET whose
+	// 200 would read as written, and keeps the password on a redirect to
+	// the same host over plain http, a 3xx is an error
+	c := http.Client{}
+	if client != nil {
+		c = *client
 	}
-	return &Store{base: base, user: cfg.User, pass: secret, client: client}, nil
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Store{base: base, user: cfg.User, pass: secret, client: &c}, nil
 }
 
 // at is the address of name under the folder of the account
@@ -100,6 +105,9 @@ func (s *Store) do(method, name string, body []byte, hdr map[string]string) (*ht
 func statusError(method, name string, code int) error {
 	if code == http.StatusUnauthorized || code == http.StatusForbidden {
 		return fmt.Errorf("WebDAV %s %s: the server refused the user or password (%d)", method, name, code)
+	}
+	if code >= 300 && code < 400 {
+		return fmt.Errorf("WebDAV %s %s: the server redirects (%d), give the address it redirects to", method, name, code)
 	}
 	return fmt.Errorf("WebDAV %s %s: the server answered %d", method, name, code)
 }

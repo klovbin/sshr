@@ -241,3 +241,38 @@ func TestSyncThroughWebDAV(t *testing.T) {
 		t.Fatalf("hosts on b %+v", got)
 	}
 }
+
+// a redirect is an error, not a write that never happened, and the
+// password does not follow it (#253)
+func TestStoreRefusesRedirects(t *testing.T) {
+	var gotAuth []string
+	var mu sync.Mutex
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Write([]byte("<html>login</html>"))
+	}))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer redirect.Close()
+	s, err := New(Config{URL: redirect.URL + "/dav/sshr", User: "u"}, "pw", nil)
+	must(t, err)
+	if err := s.Put("blobs/x", []byte("1")); err == nil || !strings.Contains(err.Error(), "redirects") {
+		t.Errorf("put through a redirect: %v", err)
+	}
+	if err := s.Create("manifests/1", []byte("1")); err == nil {
+		t.Error("create through a redirect")
+	}
+	if err := s.Delete("blobs/x"); err == nil {
+		t.Error("delete through a redirect")
+	}
+	if _, err := s.Get("blobs/x", 0); err == nil {
+		t.Error("get through a redirect")
+	}
+	if len(gotAuth) != 0 {
+		t.Errorf("the redirect target was asked %d times", len(gotAuth))
+	}
+}
