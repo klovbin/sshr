@@ -7,12 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 // a child of this process passes the agent check, a process whose parent
-// left (reparented to init or a subreaper above this process) does not
+// left (reparented to init or a subreaper above this process) does not,
+// the refusal says why (#349)
 func TestFromOwnChild(t *testing.T) {
 	if sock := os.Getenv("SSHR_AGENTPEER_DIAL"); sock != "" {
 		if c, err := net.Dial("unix", sock); err == nil {
@@ -44,8 +46,8 @@ func TestFromOwnChild(t *testing.T) {
 	}
 	defer child.Wait()
 	c := accept()
-	if !fromOwnChild(c) {
-		t.Error("a child of sshr was refused")
+	if err := checkAgentPeer(c); err != nil {
+		t.Errorf("a child of sshr was refused: %v", err)
 	}
 	c.Close()
 	// the shell starts the dialer in the background and leaves, the dialer
@@ -56,8 +58,10 @@ func TestFromOwnChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	c = accept()
-	if fromOwnChild(c) {
+	if err := checkAgentPeer(c); err == nil {
 		t.Error("a process that is not under sshr got the agent")
+	} else if !strings.Contains(err.Error(), "was not started by sshr") {
+		t.Errorf("the refusal does not say why: %v", err)
 	}
 	c.Close()
 }

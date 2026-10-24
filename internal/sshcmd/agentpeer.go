@@ -1,6 +1,7 @@
 package sshcmd
 
 import (
+	"fmt"
 	"net"
 	"os"
 )
@@ -9,20 +10,24 @@ import (
 // mosh under sshr is three steps, a loop in a broken process table ends
 const maxPeerDepth = 32
 
-// fromOwnChild tells whether the process at the other end of an agent
-// connection is sshr itself or one it started, ssh, the ssh of a jump
-// host or mosh, any other program of the same user is refused, it could
-// log in elsewhere with the key while a session runs, where the system
-// gives no peer process (Windows pipes) every peer of the user is let in
-func fromOwnChild(c net.Conn) bool {
+// checkAgentPeer lets in the process at the other end of an agent
+// connection when it is sshr itself or one it started, ssh, the ssh of a
+// jump host or mosh, any other program of the same user is refused, it
+// could log in elsewhere with the key while a session runs, the error
+// says why, where the system gives no peer process (Windows pipes) every
+// peer of the user is let in
+func checkAgentPeer(c net.Conn) error {
 	pid, ok, err := peerPID(c)
 	if err != nil {
-		return false
+		return fmt.Errorf("the process on the other end is unknown: %v", err)
 	}
 	if !ok {
-		return true
+		return nil
 	}
-	return descendantOf(pid, os.Getpid(), parentPID)
+	if !descendantOf(pid, os.Getpid(), parentPID) {
+		return fmt.Errorf("process %d was not started by sshr, or its parents cannot be read (/proc with hidepid, another PID namespace)", pid)
+	}
+	return nil
 }
 
 // descendantOf tells whether pid is root or under it, parent gives the
