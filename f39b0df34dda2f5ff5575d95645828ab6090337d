@@ -1,0 +1,9 @@
+What it is for: stop keeping server addresses, users, ports and keys in
+your head, notes or shell history
+
+Why it helps: `sshr connect web` replaces a long ssh line, the same list
+feeds the app, the CLI, sync, MCP and the API
+
+Why this way: plain files on your machine work offline, survive any
+crash of sshr and can be backed up or read without it, one file per host
+keeps a broken file from taking the others with it
