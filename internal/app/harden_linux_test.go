@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"testing"
@@ -17,7 +18,7 @@ func TestHarden(t *testing.T) {
 	if os.Getenv("SSHR_HARDEN_CHILD") == "1" {
 		var before, after unix.Rlimit
 		unix.Getrlimit(unix.RLIMIT_CORE, &before)
-		if err := Harden(); err != nil {
+		if err := Harden(); err != nil && !(os.Getenv("SSHR_ALLOW_DEBUG") == "1" && errors.Is(err, ErrHardenSkipped)) {
 			t.Fatal(err)
 		}
 		dumpable, err := unix.PrctlRetInt(unix.PR_GET_DUMPABLE, 0, 0, 0, 0)
