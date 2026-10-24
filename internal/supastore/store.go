@@ -89,7 +89,7 @@ func SetupSQL(key string, replace bool) string {
 		// the new key in first, the others out after it, in one
 		// transaction, a failure leaves the old key working
 		h := hex.EncodeToString(sum[:])
-		sql = strings.Replace(sql, "insert into sshr.keys (hash) values ('\\x"+h+"') on conflict do nothing;",
+		sql = strings.Replace(sql, "insert into sshr.keys (hash) select '\\x"+h+"' where not exists (select 1 from sshr.keys);",
 			"begin;\ninsert into sshr.keys (hash) values ('\\x"+h+"') on conflict do nothing;\ndelete from sshr.keys where hash <> '\\x"+h+"';\ncommit;", 1)
 	}
 	return sql

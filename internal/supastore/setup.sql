@@ -1,5 +1,6 @@
--- sshr sync store in a Supabase project, run it once in the SQL editor,
--- running it again is safe, it only adds the key of this account.
+-- sshr sync store in a Supabase project, run it once in the SQL editor.
+-- It sets the key only in a project that has none, an old copy run again
+-- never brings back a key that sshr sync supabase-sql --replace took out.
 -- The objects live in schema sshr, which the Data API does not expose, the
 -- publishable key reaches them only through the sshr_* functions below,
 -- each checks the sshr key a device sends before it does anything.
@@ -94,7 +95,8 @@ revoke execute on function public.sshr_get(text, int), public.sshr_put(text, tex
 grant execute on function public.sshr_get(text, int), public.sshr_put(text, text), public.sshr_create(text, text),
   public.sshr_delete(text), public.sshr_list(text, text) to anon;
 
--- the key of this account, only its sha256 is stored
-insert into sshr.keys (hash) values ('\x{{KEY_HASH}}') on conflict do nothing;
+-- the key of this account, only its sha256 is stored, set only while the
+-- project has no key, a key change goes through --replace
+insert into sshr.keys (hash) select '\x{{KEY_HASH}}' where not exists (select 1 from sshr.keys);
 
 notify pgrst, 'reload schema';

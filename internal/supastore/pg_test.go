@@ -322,4 +322,12 @@ func TestRealPostgresReplaceKey(t *testing.T) {
 	if _, err := old.Get("account", 10); !errors.Is(err, ErrKeyRefused) {
 		t.Errorf("the old key after a change: %v", err)
 	}
+	// an old setup SQL run again does not bring the old key back (#275)
+	runSQL(SetupSQL(testKey, false))
+	if _, err := old.Get("account", 10); !errors.Is(err, ErrKeyRefused) {
+		t.Errorf("the old key after its setup SQL ran again: %v", err)
+	}
+	if _, err := fresh.Get("account", 10); err != nil {
+		t.Errorf("the new key after the old setup SQL: %v", err)
+	}
 }
