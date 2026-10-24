@@ -221,6 +221,12 @@ foreach ($name in $order) {
 			if ($t[1] -ne '') { $jump = $t[1] + '@' + $jump }
 			if ((OkPort $v['TunnelPortNumber']) -and [int]$v['TunnelPortNumber'] -ne 22) { $jump = $jump + ':' + [int]$v['TunnelPortNumber'] }
 			$h.jump = $jump
+			# a jump host takes no key of its own in sshr, ssh -J looks for
+			# it in ~/.ssh/config
+			$tunnelKey = Clean (Unmunge "$($v['TunnelPublicKeyFile'])")
+			if ($tunnelKey -ne '') {
+				$stderr.WriteLine("winscp: ${label}: the tunnel key $tunnelKey is not carried, set IdentityFile for $($t[0]) in ~/.ssh/config")
+			}
 		}
 	}
 	$proxy = Clean "$($v['ProxyMethod'])"
