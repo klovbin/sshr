@@ -339,3 +339,19 @@ func TestExtSearchAndInstallByName(t *testing.T) {
 		t.Errorf("install of a name the catalog lacks: %d %q", code, errOut)
 	}
 }
+
+// a folder here with a catalog-like name is named as a folder on the
+// install screen (#260)
+func TestLocalFolderNote(t *testing.T) {
+	t.Chdir(t.TempDir())
+	os.Mkdir("hello", 0o700)
+	os.WriteFile("plain", nil, 0o600)
+	if note := localFolderNote("hello"); !strings.Contains(note, "not the catalog entry") {
+		t.Errorf("folder hello: %q", note)
+	}
+	for _, s := range []string{"./hello", "plain", "missing"} {
+		if note := localFolderNote(s); note != "" {
+			t.Errorf("%s: %q", s, note)
+		}
+	}
+}

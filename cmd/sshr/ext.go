@@ -130,6 +130,9 @@ func extInstall(reg *ext.Registry, args []string) {
 		from += " at " + st.Lock.Commit
 	}
 	fmt.Printf("  from:   %s\n", from)
+	if note := localFolderNote(source); note != "" {
+		fmt.Printf("  note:   %s\n", note)
+	}
 	fmt.Printf("  files:  %d, hash %s\n", st.Files, st.Lock.Tree[:16])
 	if old, err := reg.Find(st.Name); err == nil {
 		fmt.Printf("  it replaces version %s, installed from %s\n", old.Version, ext.CleanText(old.Lock.Source, 300))
@@ -343,4 +346,17 @@ func extSearch(words []string) {
 	}
 	w.Flush()
 	fmt.Println("\nInstall one with sshr ext install <name>, nobody reviews the code of catalog extensions")
+}
+
+// localFolderNote says that a word which could be a catalog name was taken
+// as the folder of that name here, a folder planted in a downloaded tree
+// must not pass for the catalog entry
+func localFolderNote(source string) string {
+	if ext.CheckName(source) != nil {
+		return ""
+	}
+	if info, err := os.Stat(source); err != nil || !info.IsDir() {
+		return ""
+	}
+	return "this is the folder " + source + " in the current directory, not the catalog entry of that name, use ./" + source + " for a folder to make that plain"
 }

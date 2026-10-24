@@ -438,3 +438,17 @@ func TestPrepareAtPinsTheCommit(t *testing.T) {
 		}
 	}
 }
+
+// a folder install records the full path of the folder (#260)
+func TestPrepareRecordsTheFullFolderPath(t *testing.T) {
+	src := source(t, "hello", "#!/bin/sh\necho hi\n")
+	t.Chdir(filepath.Dir(src))
+	st, err := Prepare(filepath.Base(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Discard()
+	if !filepath.IsAbs(st.Lock.Source) || st.Lock.Source != src {
+		t.Errorf("source %q, want %q", st.Lock.Source, src)
+	}
+}

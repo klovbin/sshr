@@ -90,7 +90,9 @@ func prepare(source, commit string) (*Staged, error) {
 		if err != nil || !info.IsDir() {
 			return fail(fmt.Errorf("%q is neither a folder nor an https or ssh git address", source))
 		}
-		from = abs
+		// the full path, so the record and the install screen say which
+		// folder it was and not a bare word that reads like a catalog name
+		from, source = abs, abs
 	}
 	s.Lock.Source = source
 	if s.Files, err = copyTree(from, s.files); err != nil {
