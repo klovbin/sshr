@@ -104,6 +104,13 @@ func makeSKKey(path, comment string, resident, verify bool, run func(args []stri
 			return typ, nil
 		}
 		last = fmt.Errorf("ssh-keygen -t %s: %v", typ, err)
+		// ssh-keygen says "feature not supported" for a missing key type and
+		// for a token that cannot keep a resident key or check a PIN, with
+		// those asked the next type fails the same way
+		if app.SKUnsupported(errOut.String()) && (resident || verify) {
+			last = fmt.Errorf("%v, the token may not support --resident or --verify-required, try without them", last)
+			break
+		}
 		if i+1 < len(app.SKKeyTypes) && app.SKUnsupported(errOut.String()) {
 			fmt.Fprintf(os.Stderr, "The token makes no %s keys, trying %s\n", typ, app.SKKeyTypes[i+1])
 			continue
