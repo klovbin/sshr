@@ -403,6 +403,8 @@ func TestMobaXtermImporter(t *testing.T) {
 	ini := "[Bookmarks]\r\nSubRep=\r\nImgNum=42\r\n" +
 		"web \x80=#109#0%10.0.0.5%2222%deploy%%-1%-1%%gw1.example__PIPE__gw2.example%22__PIPE__2200%ops__PIPE__%0%0%0%_CurrentDrive_:\\keys\\web.ppk%%-1%0%0%2%socks.example%1080%%0%0%1%%0%%%%0%-1%-1%0#MobaFont%10%0%0%-1%15%236,236,236%30,30,30%180,180,192%0%-1%0%%xterm%-1%0%_Std_Colors_0_%80%24%0%0%-1%<none>%%0%0%-1%-1#0# #-1\r\n" +
 		"desk=#91#4%10.0.0.9%3389%%0%0%0%0%-1%0%0%-1#MobaFont#0# #-1\r\n" +
+		// an SFTP session keeps the proxy password in plain text at 14
+		"files=#140#7%sftp.example%22%u%-1%0%%0%0%%4%proxy.example%1080%pu%secretpass%%-1#MobaFont#0# #-1\r\n" +
 		"a=1= #109#0%a1.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"a=2=#109#0%a2.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"x=#109#0%lower.example%22%%%-1#MobaFont#0# #-1\r\n" +
@@ -439,6 +441,10 @@ func TestMobaXtermImporter(t *testing.T) {
 	}
 	if len(hosts) != 11 || got["u16"].Host != "u16.example" {
 		t.Fatalf("%+v", hosts)
+	}
+	// only SSH sessions are read, the password of an SFTP one never shows
+	if _, ok := got["files"]; ok || strings.Contains(fmt.Sprint(hosts), "secretpass") || strings.Contains(notes, "secretpass") {
+		t.Errorf("SFTP session: %+v %s", got["files"], notes)
 	}
 	// names that differ in case stay two hosts (#331)
 	if got["x"].Host != "lower.example" || got["X"].Host != "upper.example" {
