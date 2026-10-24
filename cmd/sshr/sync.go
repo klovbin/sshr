@@ -220,6 +220,9 @@ func cmdSync(store *app.Store, args []string) {
 				fatal(err)
 			}
 			fmt.Fprintf(os.Stderr, "sshr key of the account, keep it in a password manager, every device needs it for sshr sync init, join and store-key:\n  %s\n", key)
+			if replaceKey && os.Getenv("SSHR_SUPABASE_KEY") != "" {
+				fmt.Fprintln(os.Stderr, "SSHR_SUPABASE_KEY still holds the old key, change or unset it wherever it is set, sshr takes it before asking")
+			}
 		}
 		fmt.Print(supastore.SetupSQL(key, replaceKey))
 		fmt.Fprintln(os.Stderr, "Run the SQL above in the SQL editor of the Supabase project, then sshr sync init --backend supabase --url https://<ref>.supabase.co --key <publishable key>")

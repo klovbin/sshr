@@ -316,4 +316,8 @@ func TestSupabaseSQLCommand(t *testing.T) {
 	if !strings.Contains(out, "delete from sshr.keys") || !strings.Contains(errOut, "sshr key of the account") {
 		t.Errorf("supabase-sql --replace: %q %q", out, errOut)
 	}
+	// the old key in the variable is named after a change (#277)
+	if !strings.Contains(errOut, "SSHR_SUPABASE_KEY still holds the old key") {
+		t.Errorf("supabase-sql --replace with the variable set: %q", errOut)
+	}
 }
