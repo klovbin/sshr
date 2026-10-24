@@ -62,17 +62,31 @@ func childSSH(goos string, path func() (string, error), own string, mosh bool) s
 	return p
 }
 
-// SCPPath is the scp to run, on Windows the one next to the chosen ssh, so
-// both come from the same OpenSSH
+// SCPPath is the scp to run, the one next to the chosen ssh when sshr
+// tells scp which ssh to start, so both come from one OpenSSH
 func SCPPath() (string, error) {
-	if runtime.GOOS == "windows" {
-		if ssh, err := SSHPath(); err == nil {
-			if scp := filepath.Join(filepath.Dir(ssh), "scp.exe"); fileExists(scp) {
-				return scp, nil
+	return pickSCP(runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileExists, exec.LookPath)
+}
+
+// pickSCP chooses scp, on Windows (and with SSHR_SSH) scp gets -S with the
+// chosen ssh, an scp of another install would drive an ssh it was not
+// built with, so Windows refuses when none sits next to the chosen ssh
+func pickSCP(goos string, sshPath func() (string, error), own string, exists func(string) bool,
+	look func(string) (string, error)) (string, error) {
+	if goos == "windows" || own != "" {
+		if ssh, err := sshPath(); err == nil {
+			i := strings.LastIndexAny(ssh, `\/`)
+			for _, name := range []string{"scp.exe", "scp"} {
+				if scp := ssh[:i+1] + name; i >= 0 && exists(scp) {
+					return scp, nil
+				}
+			}
+			if goos == "windows" && own == "" {
+				return "", fmt.Errorf("no scp.exe next to %s, install the OpenSSH client of Windows or name an ssh with SSHR_SSH", ssh)
 			}
 		}
 	}
-	p, err := exec.LookPath("scp")
+	p, err := look("scp")
 	if err != nil {
 		return "", errors.New("scp not found in PATH, it comes with OpenSSH")
 	}

@@ -188,3 +188,24 @@ func TestSSHVersionTimeoutAndUpdate(t *testing.T) {
 		t.Fatalf("a hanging ssh -V: ok %v after %s", ok, time.Since(start))
 	}
 }
+
+// TestPickSCP checks that scp comes from the same install as the ssh it
+// is told to start (#317)
+func TestPickSCP(t *testing.T) {
+	sys := func() (string, error) { return `C:\Windows\System32\OpenSSH\ssh.exe`, nil }
+	look := func(string) (string, error) { return `C:\Program Files\Git\usr\bin\scp.exe`, nil }
+	next := func(p string) bool { return p == `C:\Windows\System32\OpenSSH\scp.exe` }
+	none := func(string) bool { return false }
+	if got, err := pickSCP("windows", sys, "", next, look); err != nil || got != `C:\Windows\System32\OpenSSH\scp.exe` {
+		t.Errorf("next to ssh: %q %v", got, err)
+	}
+	if _, err := pickSCP("windows", sys, "", none, look); err == nil || !strings.Contains(err.Error(), "no scp.exe next to") {
+		t.Errorf("another install: %v", err)
+	}
+	if got, err := pickSCP("linux", sys, "", none, func(string) (string, error) { return "/usr/bin/scp", nil }); err != nil || got != "/usr/bin/scp" {
+		t.Errorf("linux: %q %v", got, err)
+	}
+	if _, err := pickSCP("linux", sys, "", none, func(string) (string, error) { return "", errors.New("x") }); err == nil {
+		t.Error("no scp went through")
+	}
+}
