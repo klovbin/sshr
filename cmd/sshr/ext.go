@@ -325,7 +325,9 @@ func catalogEntry(source string) (ext.Entry, bool) {
 	if strings.HasPrefix(source, "-") || ext.CheckName(source) != nil {
 		return ext.Entry{}, false
 	}
-	if _, err := os.Stat(source); err == nil {
+	// only a folder of that name wins, a plain file there must not make
+	// the catalog entry impossible to install from here
+	if info, err := os.Stat(source); err == nil && info.IsDir() {
 		return ext.Entry{}, false
 	}
 	entry, ok := ext.Lookup(fetchCatalog(), source)

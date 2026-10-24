@@ -340,6 +340,26 @@ func TestExtSearchAndInstallByName(t *testing.T) {
 	}
 }
 
+// a plain file named like a catalog entry does not stop the catalog lookup
+// (#269)
+func TestCatalogEntryIgnoresAFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	os.WriteFile("nope", nil, 0o600)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"version":1,"extensions":[{"name":"nope","url":"https://example.com/n.git","commit":"0123456789abcdef0123456789abcdef01234567","kinds":["command"]}]}`))
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	os.MkdirAll(filepath.Join(home, ".sshr"), 0o700)
+	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte(`{"ext_catalog":"`+srv.URL+`"}`), 0o600)
+	entry, ok := catalogEntry("nope")
+	if !ok || entry.URL != "https://example.com/n.git" {
+		t.Errorf("entry %+v %v", entry, ok)
+	}
+}
+
 // a folder here with a catalog-like name is named as a folder on the
 // install screen (#260)
 func TestLocalFolderNote(t *testing.T) {
