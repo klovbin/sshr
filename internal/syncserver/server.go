@@ -419,10 +419,16 @@ func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request, dev ctxDev
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) putBlob(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) putBlob(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, h := r.PathValue("a"), r.PathValue("h")
 	if !hashPattern.MatchString(h) {
 		fail(w, http.StatusBadRequest, "bad hash")
+		return
+	}
+	// the recovery kit writes no hosts, a paper must not fill the account
+	// so that a cancel finds no room for the hosts sealed again
+	if m, _, err := s.head(a); err == nil && m != nil && m.Recovery != "" && dev.id == m.Recovery {
+		fail(w, http.StatusForbidden, "the recovery kit device uploads nothing")
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, syncproto.MaxBlob+1))
@@ -484,7 +490,7 @@ func (s *Server) getBlob(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
 	w.Write(data)
 }
 
-func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	if !idPattern.MatchString(id) {
 		fail(w, http.StatusBadRequest, "bad device id")
@@ -498,6 +504,25 @@ func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, _ ctxDevice
 	// a key of an older epoch never replaces a newer one, a device still
 	// delivering an old key change would lock the device out of the vault
 	defer s.lock(a)()
+	// keys go out from the primary device (approve, key changes), or from
+	// the recovery kit to the device it handed the account to, another
+	// device writing an envelope of a far epoch would lock the others out
+	// and break a cancel of the kit
+	m, _, err := s.head(a)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if m != nil && m.Version >= 2 && m.Primary != "" {
+		if dev.id != m.Primary && !(m.Recovery != "" && dev.id == m.Recovery && id == m.Primary) {
+			fail(w, http.StatusForbidden, "only the primary device of the account delivers vault keys")
+			return
+		}
+		if env.Epoch > m.Epoch {
+			fail(w, http.StatusConflict, "the envelope is for a vault key newer than the account")
+			return
+		}
+	}
 	path := filepath.Join(s.accountDir(a), "envelopes", id+".json")
 	var cur syncproto.Envelope
 	if old, err := os.ReadFile(path); err == nil && json.Unmarshal(old, &cur) == nil && cur.Epoch > env.Epoch {

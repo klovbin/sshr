@@ -270,3 +270,29 @@ func TestApproveShowsSwappedKEM(t *testing.T) {
 		t.Fatalf("c took an account that lists it with another key: %v", err)
 	}
 }
+
+// TestKitTokenWritesNothing checks that the token on the paper writes no
+// envelope of another device and no blob, a thief with it cannot break a
+// cancel of the kit (#303)
+func TestKitTokenWritesNothing(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	kit, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait)
+	must(t, err)
+	k, err := decodeKit(kit.Secret, noPass)
+	must(t, err)
+	keys, err := newDeviceKeys(k.Seed)
+	must(t, err)
+	r := w.client("r-")
+	r.keys = keys
+	r.st = &state{Server: w.srv.URL, Account: w.a.st.Account, DeviceID: keys.device("").ID, Token: k.Token}
+	env, _ := json.Marshal(syncproto.Envelope{Epoch: 99, Data: []byte("junk")})
+	if err := r.backend().PutEnvelope(w.b.st.DeviceID, env); err == nil {
+		t.Fatal("the kit token wrote an envelope of b")
+	}
+	if err := r.backend().PutBlob(strings.Repeat("ab", 32), []byte("junk")); err == nil {
+		t.Fatal("the kit token uploaded a blob")
+	}
+	must(t, w.a.CancelRecovery())
+	must(t, w.b.Pull())
+}
