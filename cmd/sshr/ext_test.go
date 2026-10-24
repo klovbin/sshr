@@ -329,7 +329,7 @@ func TestExtSearchAndInstallByName(t *testing.T) {
 	defer srv.Close()
 	home := t.TempDir()
 	os.MkdirAll(filepath.Join(home, ".sshr"), 0o700)
-	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte(`{"ext_catalog":"`+srv.URL+`"}`), 0o600)
+	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte(`{"ext_catalog":"`+srv.URL+`","ext_community":true}`), 0o600)
 	out, errOut, code := sshrIn(t, home, "ext", "search", "hi")
 	if code != 0 || !strings.Contains(out, "hello") || !strings.Contains(out, "Ann") || !strings.Contains(out, "nobody reviews") {
 		t.Errorf("search: %d %q %q", code, out, errOut)
@@ -353,7 +353,7 @@ func TestCatalogEntryIgnoresAFile(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	os.MkdirAll(filepath.Join(home, ".sshr"), 0o700)
-	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte(`{"ext_catalog":"`+srv.URL+`"}`), 0o600)
+	os.WriteFile(filepath.Join(home, ".sshr", "settings.json"), []byte(`{"ext_catalog":"`+srv.URL+`","ext_community":true}`), 0o600)
 	entry, ok := catalogEntry("nope")
 	if !ok || entry.URL != "https://example.com/n.git" {
 		t.Errorf("entry %+v %v", entry, ok)
@@ -390,5 +390,25 @@ func TestInstallOverABrokenCopy(t *testing.T) {
 	out, errOut, code := sshrIn(t, home, "ext", "install", src, "--yes")
 	if code != 0 || !strings.Contains(out, "replaces an installed copy that does not load") {
 		t.Errorf("install over a broken copy: %d %q %q", code, out, errOut)
+	}
+}
+
+// the catalog is off until sshr ext community on, which says nobody
+// reviews community extensions (#170)
+func TestExtCommunityMode(t *testing.T) {
+	home := t.TempDir()
+	if _, errOut, code := sshrIn(t, home, "ext", "search"); code == 0 || !strings.Contains(errOut, "community extensions are off") {
+		t.Errorf("search while off: %d %q", code, errOut)
+	}
+	out, _, code := sshrIn(t, home, "ext", "community", "on")
+	if code != 0 || !strings.Contains(out, "do not") || !strings.Contains(out, "take no responsibility") {
+		t.Errorf("community on: %d %q", code, out)
+	}
+	if out, _, _ := sshrIn(t, home, "ext", "community"); !strings.Contains(out, "are on") {
+		t.Errorf("community state: %q", out)
+	}
+	sshrIn(t, home, "ext", "community", "off")
+	if out, _, _ := sshrIn(t, home, "ext", "community"); !strings.Contains(out, "are off") {
+		t.Errorf("community after off: %q", out)
 	}
 }

@@ -102,6 +102,10 @@ type Settings struct {
 	// search and an install by name read, empty is the community catalog,
 	// it is read only when one of those runs
 	ExtCatalog string `json:"ext_catalog,omitempty"`
+	// ExtCommunity turns the catalog on, sshr ext search and an install by
+	// name refuse while it is off, off by default: nobody reviews the code
+	// of a catalog extension and it runs as the user
+	ExtCommunity bool `json:"ext_community,omitempty"`
 
 	// base is the file as Load read it, Save writes only
 	// the fields that differ from it, copies of the value share it

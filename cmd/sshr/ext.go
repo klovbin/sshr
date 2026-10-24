@@ -35,7 +35,7 @@ func isBuiltinCommand(name string) bool {
 // cmdExt installs, imports with, lists and removes extensions
 func cmdExt(store *app.Store, args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: sshr ext search [words] | sshr ext install <name, git url or folder> [--yes] | sshr ext import <name> [args...] | sshr ext list | sshr ext remove <name>")
+		fmt.Fprintln(os.Stderr, "Usage: sshr ext community [on|off] | sshr ext search [words] | sshr ext install <name, git url or folder> [--yes] | sshr ext import <name> [args...] | sshr ext list | sshr ext remove <name>")
 		os.Exit(1)
 	}
 	reg, err := ext.DefaultRegistry()
@@ -43,6 +43,8 @@ func cmdExt(store *app.Store, args []string) {
 		fatal(err)
 	}
 	switch args[0] {
+	case "community":
+		extCommunity(args[1:])
 	case "search":
 		extSearch(args[1:])
 	case "install":
@@ -68,7 +70,7 @@ func cmdExt(store *app.Store, args []string) {
 		}
 		fmt.Printf("Removed extension %s\n", args[1])
 	default:
-		fmt.Fprintf(os.Stderr, "sshr ext: unknown command %q, use search, install, import, list or remove\n", args[0])
+		fmt.Fprintf(os.Stderr, "sshr ext: unknown command %q, use community, search, install, import, list or remove\n", args[0])
 		os.Exit(1)
 	}
 }
@@ -306,8 +308,53 @@ func catalogURL() string {
 	return ext.DefaultCatalog
 }
 
-// fetchCatalog reads the catalog and prints the entries it left out
+// communityNotice is said when the catalog is turned on, as Obsidian does
+// before community plugins
+const communityNotice = `Community extensions are written by their authors. The sshr authors do not
+review their code and take no responsibility for what they do. An extension
+runs as you and can read your files, reach the network and start programs.
+The catalog only checks that an entry is well formed. Install only what you
+trust, and read its code first.`
+
+// extCommunity turns the catalog on or off, or says whether it is on
+func extCommunity(args []string) {
+	st, err := app.LoadSettings()
+	if err != nil {
+		fatal(err)
+	}
+	switch {
+	case len(args) == 0:
+		if st.ExtCommunity {
+			fmt.Printf("Community extensions are on, the catalog is %s\n", catalogURL())
+		} else {
+			fmt.Println("Community extensions are off, sshr ext community on turns them on")
+		}
+		return
+	case len(args) == 1 && args[0] == "on":
+		st.ExtCommunity = true
+	case len(args) == 1 && args[0] == "off":
+		st.ExtCommunity = false
+	default:
+		fmt.Fprintln(os.Stderr, "Usage: sshr ext community [on|off]")
+		os.Exit(1)
+	}
+	if err := app.SaveSettings(st); err != nil {
+		fatal(err)
+	}
+	if st.ExtCommunity {
+		fmt.Println(communityNotice)
+		fmt.Println("\nCommunity extensions are on, sshr ext search lists them")
+	} else {
+		fmt.Println("Community extensions are off, the installed ones stay and run, sshr ext remove takes one out")
+	}
+}
+
+// fetchCatalog reads the catalog and prints the entries it left out, the
+// catalog is off until sshr ext community on
 func fetchCatalog() []ext.Entry {
+	if st, err := app.LoadSettings(); err != nil || !st.ExtCommunity {
+		fatal(errors.New("community extensions are off, sshr ext community on turns them on after a notice, an extension from a git address or a folder installs without them"))
+	}
 	entries, warnings, err := ext.FetchCatalog(catalogURL(), nil)
 	if err != nil {
 		fatal(err)

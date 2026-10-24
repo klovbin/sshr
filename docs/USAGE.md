@@ -280,6 +280,7 @@ Backups: everything is in the data folder, `accounts/<id>/devices.json` (devices
 ## Extensions
 
 ```sh
+sshr ext community on                                        # turns the catalog on after a notice, off by default
 sshr ext search remmina                                      # lists the community catalog
 sshr ext install remmina                                     # from the catalog, at the commit it names
 sshr ext install https://github.com/someone/sshr-hello.git   # shows what it is and asks
@@ -290,7 +291,7 @@ sshr ext list
 sshr ext remove hello
 ```
 
-The catalog is a JSON file at `ext_catalog` in `~/.sshr/settings.json` (by default the community one at `https://raw.githubusercontent.com/klovbin/sshr-extensions/main/index.json`), each entry has a name, an https git address, a full commit hash, a description, an author and kinds, an entry of a wrong shape or a name listed twice is left out with a warning, a folder here with the same name as a catalog entry is installed as a folder. A company can serve its own file over HTTPS, the format is `{"version":1,"extensions":[{"name":"hello","url":"https://…/hello.git","commit":"<40 hex>","description":"…","author":"…","kinds":["command"]}]}`. Nobody reviews the code of catalog extensions, an entry is checked for its shape only.
+The catalog is off until `sshr ext community on` (`sshr ext community off` turns it off again, installed extensions stay). It is a JSON file at `ext_catalog` in `~/.sshr/settings.json`, by default the community one, `extensions/catalog.json` in the sshr repository (`https://raw.githubusercontent.com/klovbin/sshr/main/extensions/catalog.json`). To add your extension, open a pull request that adds an entry there, the test of the repository checks its shape, nobody reviews its code, each entry has a name, an https git address, a full commit hash, a description, an author and kinds, an entry of a wrong shape or a name listed twice is left out with a warning, a folder here with the same name as a catalog entry is installed as a folder. A company can serve its own file over HTTPS, the format is `{"version":1,"extensions":[{"name":"hello","url":"https://…/hello.git","commit":"<40 hex>","description":"…","author":"…","kinds":["command"]}]}`. Nobody reviews the code of catalog extensions, an entry is checked for its shape only.
 
 A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. `extensions/putty` reads the saved sessions of PuTTY on Linux and macOS where PuTTY keeps them (`~/.config/putty/sessions` or `~/.putty/sessions`, `$PUTTYSESSIONS` and `$PUTTYDIR` count), an SSH proxy of a session becomes a jump host, a `.ppk` key is left out with the `puttygen` command that converts it, PuTTY saves no passwords. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
 

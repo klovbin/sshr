@@ -3,6 +3,8 @@ package ext
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -114,5 +116,17 @@ func TestFetchCatalog(t *testing.T) {
 	defer local.Close()
 	if _, _, err := FetchCatalog(local.URL, local.Client()); err == nil || !strings.Contains(err.Error(), "only https") {
 		t.Errorf("a redirect to http on this machine: %v", err)
+	}
+}
+
+// the catalog of the repository keeps its shape, a pull request that adds
+// a bad entry fails here (#170)
+func TestRepositoryCatalog(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "extensions", "catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, warnings, err := parseCatalog(b); err != nil || len(warnings) != 0 {
+		t.Fatalf("extensions/catalog.json: %v %v", err, warnings)
 	}
 }

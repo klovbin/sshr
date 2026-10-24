@@ -14,9 +14,11 @@ import (
 	"unicode"
 )
 
-// DefaultCatalog is the community catalog of extensions, a setting points
-// sshr at another one, a company can run its own
-const DefaultCatalog = "https://raw.githubusercontent.com/klovbin/sshr-extensions/main/index.json"
+// DefaultCatalog is the community catalog of extensions, extensions/
+// catalog.json in the sshr repository, an author adds an entry with a pull
+// request, the code stays in the author's repository, a setting points
+// sshr at another catalog, a company can run its own
+const DefaultCatalog = "https://raw.githubusercontent.com/klovbin/sshr/main/extensions/catalog.json"
 
 // Entry is one extension of the catalog, the commit is the one the entry
 // was added with, an install takes that commit and nothing newer
