@@ -592,6 +592,9 @@ func cmdConnect(store *app.Store, args []string) {
 			fatal(err)
 		}
 	}
+	// before the plan: it checks whether a host with a gateway answers
+	// directly, a VPN the command brings up changes the answer
+	local := beforeConnect(settings, h, localCommands)
 	plan, err := store.PlanSession(h, app.LaunchOptions{Forwards: fwds, Mosh: useMosh, Plain: plain})
 	if err != nil {
 		fatal(err)
@@ -599,7 +602,6 @@ func cmdConnect(store *app.Store, args []string) {
 	for _, note := range plan.Notes {
 		fmt.Fprintln(os.Stderr, "sshr: "+note)
 	}
-	local := beforeConnect(settings, h, localCommands)
 	dest := h.Dest()
 	if plan.Tool == "mosh" {
 		if _, err := plan.ToolPath(); err != nil {

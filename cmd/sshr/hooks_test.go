@@ -1,11 +1,57 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestLocalCommandBeforeGatewayCheck checks that the command before runs
+// before connect decides whether a host with a gateway answers directly, a
+// VPN it brings up makes the host answer (#287)
+func TestLocalCommandBeforeGatewayCheck(t *testing.T) {
+	tools := fakeTools(t)
+	home := t.TempDir()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	marker := filepath.Join(t.TempDir(), "up")
+	// the "VPN": the host answers only once the command before ran
+	go func() {
+		for range 200 {
+			if _, err := os.Stat(marker); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+		if err != nil {
+			return
+		}
+		defer l.Close()
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			c.Write([]byte("SSH-2.0-test\r\n"))
+			c.Close()
+		}
+	}()
+	mustRun(t, home, "add", "127.0.0.1", "-p", strconv.Itoa(port), "-u", "app", "-n", "db", "--ask-password", "--gateway", "ops@gw")
+	mustRun(t, home, "hooks", "set", "db", "before", "touch "+marker+"; sleep 1")
+	_, errOut, code := sshrIn(t, home, "connect", "--local-commands", "db")
+	if got := argsOf(t, tools, "ssh"); code != 0 || strings.Contains(got, "-J ops@gw") {
+		t.Errorf("went through the gateway though the command before brought the host up: %d %q\nssh %q", code, errOut, got)
+	}
+}
 
 // TestLocalCommands checks the commands that run on this machine around
 // sshr connect (#29): off by default, on with the setting or the flag, a
