@@ -6,8 +6,38 @@ set -euxo pipefail
 
 sshr="$PWD/cli/sshr"
 w="${RUNNER_TEMP:-/tmp}/sshr-e2e"
-mkdir -p "$w"
 pw='Pw-1234-sshr'
+user="${USER:-$USERNAME}"
+authkeys=.ssh/authorized_keys
+# lines only the sshd of MSYS2 knows, the one of the Linux runner is older
+extra=""
+
+os="$(uname -s)"
+usepam="UsePAM yes"
+case "$os" in
+MINGW* | MSYS*)
+	# the sshd of MSYS2 has no PAM
+	usepam=""
+	# the ssh sshr runs is the one of Windows, the case #135 is about, its
+	# ssh-keygen also makes the keys: the OpenSSH of Windows refuses a
+	# private key whose ACL lets others read it, and a file the ssh-keygen
+	# of Git Bash writes gets the ACL of the folder
+	export PATH="/c/Windows/System32/OpenSSH:$PATH"
+	# one path both Git Bash and MSYS2 read
+	w="$(cygpath -u "$w")"
+	# the home of MSYS2 is not the one of Windows, sshd gets the file of
+	# the Windows user by its full path
+	authkeys="$(cygpath -u "$HOME/.ssh/authorized_keys")"
+	# Git Bash turns arguments that look like POSIX paths into Windows
+	# paths for sshr.exe, /tmp/... are paths on the server and stay
+	export MSYS2_ARG_CONV_EXCL=/tmp
+	# OpenSSH 10 penalises an address for connections that do not log in,
+	# the wait for the port and the banner check of sshr ping are such
+	# connections
+	extra="PerSourcePenalties no"
+	;;
+esac
+mkdir -p "$w"
 
 ssh-keygen -q -t ed25519 -N '' -f "$w/hostkey"
 ssh-keygen -q -t ed25519 -N '' -f "$w/userkey"
@@ -15,17 +45,6 @@ mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 cat "$w/userkey.pub" >>~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
-
-os="$(uname -s)"
-# the sshd of Git for Windows has no PAM
-usepam="UsePAM yes"
-case "$os" in
-MINGW* | MSYS*)
-	usepam=""
-	# the ssh sshr runs is the one of Windows, the case #135 is about
-	export PATH="/c/Windows/System32/OpenSSH:$PATH"
-	;;
-esac
 
 cat >"$w/sshd_config" <<EOF
 Port 2222
@@ -37,7 +56,8 @@ PubkeyAuthentication yes
 PasswordAuthentication yes
 KbdInteractiveAuthentication yes
 $usepam
-AuthorizedKeysFile .ssh/authorized_keys
+AuthorizedKeysFile $authkeys
+$extra
 Subsystem sftp internal-sftp
 EOF
 
@@ -55,12 +75,19 @@ Darwin)
 esac
 case "$os" in
 MINGW* | MSYS*)
-	# Git for Windows brings an sshd that runs as the runner user, it logs
-	# in only that user, which is all the key and jump checks need, named by
-	# its path, PATH finds the sshd of Windows first now and that one only
-	# runs as a service, the trap is set first so a failed start shows its log
-	trap 'kill "$(cat "$w/sshd.pid")" || true; cat "$w/sshd.log" || true' EXIT
-	/usr/bin/sshd -f "$w/sshd_config" -E "$w/sshd.log"
+	# the sshd of MSYS2 (on the runner at C:\msys64) runs as the runner
+	# user and logs in only that user, which is all the key and jump
+	# checks need, its shell is POSIX like the other runners, the sshd of
+	# Windows would run the commands through cmd.exe, it is started and
+	# stopped through the bash of MSYS2, the pid in sshd.pid is one of
+	# MSYS2, the trap is set first so a failed start shows its log, a
+	# daemon started from Git Bash keeps the call waiting, so sshd stays in
+	# the foreground (-D) in a background job of Git Bash
+	msys() { MSYSTEM=MSYS /c/msys64/usr/bin/bash -lc "$1"; }
+	msys 'pacman -Sy --noconfirm --needed openssh' >/dev/null
+	trap 'msys "kill \$(cat $w/sshd.pid)" || true; cat "$w/sshd.log" || true' EXIT
+	msys "/usr/bin/sshd -t -f $w/sshd_config"
+	msys "exec /usr/bin/sshd -D -f $w/sshd_config -E $w/sshd.log" &
 	;;
 *)
 	trap 'sudo kill "$(cat "$w/sshd.pid")" || true; sudo cat "$w/sshd.log" || true' EXIT
@@ -68,10 +95,12 @@ MINGW* | MSYS*)
 	;;
 esac
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-	ssh-keyscan -p 2222 127.0.0.1 >"$w/known" 2>/dev/null && [ -s "$w/known" ] && break
+	(exec 3<>/dev/tcp/127.0.0.1/2222) 2>/dev/null && break
 	sleep 1
 done
-cat "$w/known" >>~/.ssh/known_hosts
+# the host key is ours, its line goes to known_hosts as it is, ssh-keyscan
+# of Windows gets nothing from the sshd of MSYS2
+printf '[127.0.0.1]:2222 %s\n' "$(cut -d ' ' -f 1,2 "$w/hostkey.pub")" >>~/.ssh/known_hosts
 
 # run_command through the MCP server, the output of the command is in the
 # JSON answer
@@ -83,8 +112,8 @@ mcp() {
 		"$sshr" mcp --allow-commands
 }
 
-"$sshr" add 127.0.0.1 -u "$USER" -n key -p 2222 -k "$w/userkey"
-"$sshr" add 127.0.0.1 -u "$USER" -n inner -p 2222 -k "$w/userkey" -J key
+"$sshr" add 127.0.0.1 -u "$user" -n key -p 2222 -k "$w/userkey"
+"$sshr" add 127.0.0.1 -u "$user" -n inner -p 2222 -k "$w/userkey" -J key
 
 "$sshr" ping key
 # the arithmetic runs on the server, the answer proves the command ran there
