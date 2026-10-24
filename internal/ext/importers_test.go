@@ -224,6 +224,16 @@ func TestImportersDropControlCharacters(t *testing.T) {
 	if strings.ContainsAny(lastNotes, "\x1b\x7f") || strings.Contains(lastNotes, "\xc2\x9b") || !strings.Contains(lastNotes, "PuTTY key") {
 		t.Errorf("notes %q", lastNotes)
 	}
+	// a proxy user or host of control characters only gives no "@gw" and
+	// no empty jump (#324)
+	jdir := t.TempDir()
+	os.WriteFile(filepath.Join(jdir, "u"), []byte("HostName=u.example\nProxyMethod=6\nProxyHost=gw.example\nProxyUsername=\x1b\x7f\n"), 0o600)
+	os.WriteFile(filepath.Join(jdir, "h"), []byte("HostName=h.example\nProxyMethod=6\nProxyHost=\x1b\xc2\x9b\n"), 0o600)
+	for _, h := range runImporter(t, "putty", jdir) {
+		if want := map[string]string{"u": "gw.example", "h": ""}[h.Key]; h.Jump != want {
+			t.Errorf("%s: jump %q, want %q", h.Key, h.Jump, want)
+		}
+	}
 	rdir := t.TempDir()
 	os.WriteFile(filepath.Join(rdir, "r.remmina"), []byte("[remmina]\nname=we\x7fb\xc2\x9b\x1b[0m\nprotocol=SSH\nserver=r.example\n"), 0o600)
 	if hosts := runImporter(t, "remmina", rdir); len(hosts) != 1 || hosts[0].Name != "web[0m" {

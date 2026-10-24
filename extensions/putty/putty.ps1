@@ -159,9 +159,13 @@ foreach ($name in $sessions.Keys) {
 	} elseif ($keyFile -ne '') {
 		$h.key_file = $keyFile
 	}
-	if ("$($v['ProxyMethod'])" -eq '6' -and "$($v['ProxyHost'])" -ne '') {
-		$jump = Clean "$($v['ProxyHost'])"
-		if ("$($v['ProxyUsername'])" -ne '') { $jump = (Clean "$($v['ProxyUsername'])") + '@' + $jump }
+	# cleaned before the test, a host or user of control characters only
+	# would give an empty jump or "@gw"
+	$jumpHost = Clean "$($v['ProxyHost'])"
+	$jumpUser = Clean "$($v['ProxyUsername'])"
+	if ("$($v['ProxyMethod'])" -eq '6' -and $jumpHost -ne '') {
+		$jump = $jumpHost
+		if ($jumpUser -ne '') { $jump = $jumpUser + '@' + $jump }
 		if ((OkPort $v['ProxyPort']) -and [int]$v['ProxyPort'] -ne 22) { $jump = $jump + ':' + [int]$v['ProxyPort'] }
 		$h.jump = $jump
 	} elseif ("$($v['ProxyMethod'])" -ne '' -and "$($v['ProxyMethod'])" -ne '0') {

@@ -141,7 +141,7 @@ function jsonname(s,   n, b, i, c, a, h, out, cp, need, k) {
 	}
 	return out
 }
-function flush(   name, title, host, user, port, obj, at, jump, proto) {
+function flush(   name, title, host, user, port, obj, at, jump, jhost, juser, proto) {
 	# the file name as it is on disk is the key, two names that decode the
 	# same (A and %41) stay two hosts
 	name = file; sub(/^.*\//, "", name)
@@ -166,9 +166,12 @@ function flush(   name, title, host, user, port, obj, at, jump, proto) {
 	} else if (v["PublicKeyFile"] != "") {
 		obj = obj "," str("key_file", v["PublicKeyFile"])
 	}
-	if (v["ProxyMethod"] == "6" && v["ProxyHost"] != "") {
-		jump = v["ProxyHost"]
-		if (v["ProxyUsername"] != "") jump = v["ProxyUsername"] "@" jump
+	# cleaned before the test, a host or user of control characters only
+	# would give an empty jump or "@gw"
+	jhost = shown(v["ProxyHost"]); juser = shown(v["ProxyUsername"])
+	if (v["ProxyMethod"] == "6" && jhost != "") {
+		jump = jhost
+		if (juser != "") jump = juser "@" jump
 		if (okport(v["ProxyPort"]) && v["ProxyPort"] + 0 != 22) jump = jump ":" (v["ProxyPort"] + 0)
 		obj = obj "," str("jump", jump)
 	} else if (v["ProxyMethod"] != "" && v["ProxyMethod"] != "0") {
