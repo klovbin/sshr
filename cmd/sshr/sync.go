@@ -324,8 +324,10 @@ func cmdSyncRecovery(c *syncclient.Client, args []string, server, name string, s
 			case args[i] == "--wait" && i+1 < len(args):
 				i++
 				days, err := strconv.Atoi(args[i])
-				if err != nil || days < 1 {
-					fatal(fmt.Errorf("--wait takes whole days, at least 1"))
+				// checked before it turns into a duration, a huge count would
+				// wrap around into the allowed range
+				if err != nil || days < 1 || days > 366 {
+					fatal(fmt.Errorf("--wait takes whole days, from 1 to 366"))
 				}
 				wait = time.Duration(days) * 24 * time.Hour
 			default:
