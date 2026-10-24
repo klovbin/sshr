@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -183,6 +184,8 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Printf("%s is now the primary device\n", d.Name)
+	case "recovery":
+		cmdSyncRecovery(c, rest)
 	case "pull":
 		if err := c.Pull(); err != nil {
 			fatal(err)
@@ -291,4 +294,87 @@ func askYes(q string) bool {
 	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	a := strings.ToLower(strings.TrimSpace(line))
 	return a == "y" || a == "yes"
+}
+
+const recoveryUsage = `Usage: sshr sync recovery create [--passphrase] [--wait <days>]
+       sshr sync recovery cancel`
+
+// cmdSyncRecovery makes, replaces and cancels the recovery kit of the
+// account on the primary device
+func cmdSyncRecovery(c *syncclient.Client, args []string) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("%s", recoveryUsage))
+	}
+	switch args[0] {
+	case "create":
+		pass, wait := false, syncclient.DefaultRecoveryWait
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--passphrase":
+				pass = true
+			case args[i] == "--wait" && i+1 < len(args):
+				i++
+				days, err := strconv.Atoi(args[i])
+				if err != nil || days < 1 {
+					fatal(fmt.Errorf("--wait takes whole days, at least 1"))
+				}
+				wait = time.Duration(days) * 24 * time.Hour
+			default:
+				fatal(fmt.Errorf("%s", recoveryUsage))
+			}
+		}
+		pw := ""
+		if pass {
+			pw = readNewPassphrase()
+		}
+		kit, err := c.CreateRecoveryKit(pw, wait)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println("Write this down or print it and keep it where you keep your passport, it is shown once.")
+		fmt.Println("It brings the account back to a new machine when every device is lost: sshr sync recovery restore.")
+		fmt.Println("A restore first claims the account, your devices warn about it and the primary device can cancel it,")
+		fmt.Println("the new machine gets the account only after the wait. A kit made before is worth nothing now.")
+		fmt.Println()
+		fmt.Print(kit.Header)
+		fmt.Println()
+		fmt.Println(kit.Secret)
+	case "cancel":
+		if err := c.CancelRecovery(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The recovery kit is cancelled, its device is out of the account and the vault key changed, make a new one with sshr sync recovery create")
+	default:
+		fatal(fmt.Errorf("%s", recoveryUsage))
+	}
+}
+
+// readNewPassphrase asks a passphrase twice on the terminal
+func readNewPassphrase() string {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fatal(fmt.Errorf("the passphrase is asked on a terminal, there is none"))
+	}
+	for {
+		fmt.Fprint(os.Stderr, "Passphrase of the recovery kit (it is not on the paper, a forgotten one makes the kit useless): ")
+		a, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Fprint(os.Stderr, "Again: ")
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal(err)
+		}
+		if len(a) < 8 {
+			fmt.Fprintln(os.Stderr, "sshr: at least 8 characters")
+			continue
+		}
+		if string(a) != string(b) {
+			fmt.Fprintln(os.Stderr, "sshr: the two do not match")
+			continue
+		}
+		return string(a)
+	}
 }

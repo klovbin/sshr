@@ -123,6 +123,12 @@ type pushPlan struct {
 	primary string
 	// recovery replaces the recovery kit fields, nil keeps them
 	recovery *recoveryFields
+	// anchor adds the anchor entry of a recovery kit, its id and its
+	// plain payload, dropAnchors takes out the entries of kits with these
+	// ids (recovery.go)
+	anchorID    string
+	anchorPlain []byte
+	dropAnchors []string
 }
 
 // recoveryFields are the recovery kit fields of a manifest
@@ -1165,6 +1171,11 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := m.Entries[id]
+		if isAnchor(id) {
+			// the anchor of a recovery kit is no host, it is carried on
+			c.st.Skipped[id] = e
+			continue
+		}
 		if why, ok := broken[id]; ok {
 			c.logf("skipped %s, %s", short(id, 8), why)
 			c.leaveOut(id, why)
@@ -1595,6 +1606,23 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	for id, e := range c.st.Skipped {
 		skipped[id] = e
 	}
+	// the anchor of a recovery kit is carried like a skipped entry, no
+	// device imports it as a host or deletes it
+	for _, id := range plan.dropAnchors {
+		delete(entries, id)
+		delete(skipped, id)
+		changed = true
+	}
+	if plan.anchorID != "" {
+		h, err := c.putBlob(key, plan.anchorID, epoch, plan.anchorPlain)
+		if err != nil {
+			return false, err
+		}
+		e := syncproto.Entry{Hash: h, Lamport: 1, Device: c.st.DeviceID}
+		entries[plan.anchorID], skipped[plan.anchorID] = e, e
+		fresh[plan.anchorID] = true
+		changed = true
+	}
 	if reseal {
 		// an entry carried on without a host here to seal (skipped, or a
 		// file that does not load) is opened with the old key and sealed
@@ -1738,7 +1766,12 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 			return pushPlan{}, err
 		}
 		epoch := c.st.Epoch + 1
-		return pushPlan{devices: keep, epoch: epoch, key: key, rotation: &rotation{Epoch: epoch, Devices: keep}}, nil
+		plan := pushPlan{devices: keep, epoch: epoch, key: key, rotation: &rotation{Epoch: epoch, Devices: keep}}
+		if target.ID == c.st.Recovery {
+			// removing the kit device cancels a claim and drops its anchor
+			plan.recovery, plan.dropAnchors = &recoveryFields{}, []string{anchorID(target.ID)}
+		}
+		return plan, nil
 	}
 	if err := c.push(plan); err != nil {
 		if c.st.Rotation == nil {
