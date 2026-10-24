@@ -209,6 +209,32 @@ func TestPrimaryAfterAFailedPull(t *testing.T) {
 	}
 }
 
+// TestServerRefusesBrokenManifests checks that sshr-sync does not store a
+// manifest every client would refuse, as head it would stop the account
+// (#298)
+func TestServerRefusesBrokenManifests(t *testing.T) {
+	for name, edit := range map[string]func(*syncproto.Manifest){
+		"wrong prev":   func(m *syncproto.Manifest) { m.Prev = strings.Repeat("0", 64) },
+		"older epoch":  func(m *syncproto.Manifest) { m.Epoch-- },
+		"newer format": func(m *syncproto.Manifest) { m.Version = 99 },
+		"wrong id":     func(m *syncproto.Manifest) { m.Devices[1].Name, m.Devices[1].ID = "x", strings.Repeat("a", 32) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.pair()
+			// any key will do for the MAC, the server cannot check it
+			key := make([]byte, 32)
+			rand.Read(key)
+			must(t, vault.SecretSet(w.b.prefix()+"key-"+strconv.Itoa(w.b.st.Epoch-1), key))
+			n, b := forgeManifest(t, w.b, edit)
+			if err := w.b.backend().PutManifest(n-1, b); err == nil || !strings.Contains(err.Error(), "403") {
+				t.Fatalf("the server took it: %v", err)
+			}
+			must(t, w.a.Pull())
+		})
+	}
+}
+
 func keepOnly(ds []syncproto.Device, id string) []syncproto.Device {
 	var out []syncproto.Device
 	for _, d := range ds {

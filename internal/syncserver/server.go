@@ -680,9 +680,31 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 // signer, the server cannot check the MAC but it holds the signing keys of
 // the devices in the head, the clients check the same again
 func (s *Server) checkRoles(a string, sm *syncproto.Signed, m *syncproto.Manifest) error {
-	prev, _, err := s.head(a)
-	if err != nil || prev == nil {
+	prev, prevSigned, err := s.head(a)
+	if err != nil {
 		return err
+	}
+	// a manifest every client refuses would still become the head and stop
+	// the account, what the server can check without the vault key it does
+	if m.Version > syncproto.FormatVersion {
+		return fmt.Errorf("manifest of format %d, this server knows up to %d", m.Version, syncproto.FormatVersion)
+	}
+	for _, d := range m.Devices {
+		if syncproto.DeviceID(d.SignPub) != d.ID {
+			return errors.New("the manifest lists a device whose id does not match its key")
+		}
+	}
+	if id := syncproto.RepeatedDevice(m.Devices); id != "" {
+		return errors.New("the manifest lists a device twice")
+	}
+	if prev == nil {
+		return nil
+	}
+	if m.Prev != syncproto.BodyHash(prevSigned.Body) {
+		return errors.New("the manifest does not follow the current one")
+	}
+	if m.Epoch < prev.Epoch {
+		return errors.New("the manifest goes back to an older vault key")
 	}
 	if err := syncproto.CheckPrimary(prev, m, sm.Signer); err != nil {
 		return err
