@@ -296,7 +296,11 @@ func (c *Client) save() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	return fileio.WriteFile(c.statePath(), b, 0o600)
+	if err := fileio.WriteFile(c.statePath(), b, 0o600); err != nil {
+		return err
+	}
+	c.pruneBase()
+	return nil
 }
 
 // serverOf is the server of a new state: an sshr-sync address, or the
@@ -1068,6 +1072,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", short(id, 8), short(e.Device, 8))
 			}
 			if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
+				if merged, err := c.mergeEdit(store, id, known, e, p, plain); err != nil || merged {
+					return err
+				}
 				// neither side is lost, the later change keeps the host and
 				// the other one becomes a copy that syncs like any host
 				mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
@@ -1164,6 +1171,46 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	return nil
 }
 
+// mergeEdit merges a host changed here and on another device against the
+// version both started from, it returns false when there is no such
+// version or both changed the same part, the caller then keeps both as
+// before, after a merge the entry takes the remote stamp and the result is
+// pushed as a local change unless it equals the remote version
+func (c *Client) mergeEdit(store *hosts.Store, id string, known entryState, e syncproto.Entry, remote *payload, plain []byte) (bool, error) {
+	if e.Deleted || known.Deleted || remote == nil {
+		return false, nil
+	}
+	base := c.basePayload(id, known.Blob)
+	if base == nil {
+		return false, nil
+	}
+	mine, err := parsePayload(id, plain)
+	if err != nil {
+		return false, nil
+	}
+	b, l, r := base.Host, mine.Host, remote.Host
+	b.Password, l.Password, r.Password = base.Password, mine.Password, remote.Password
+	merged, ok := hosts.MergeThreeWay(b, l, r)
+	if !ok {
+		return false, nil
+	}
+	h, err := store.Import(merged)
+	if err != nil {
+		return false, nil
+	}
+	next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash}
+	if hosts.SameSynced(merged, r) {
+		written, err := payloadOf(*h)
+		if err != nil {
+			return false, err
+		}
+		next.Local = c.localHash(written)
+	}
+	c.st.Entries[id] = next
+	c.logf("merged the changes made here and on device %s into %s", short(e.Device, 8), h.Name)
+	return true, nil
+}
+
 // fetchBlob downloads the blob hash of entry id and opens it
 func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
 	blob, err := c.backend().GetBlob(hash)
@@ -1173,7 +1220,12 @@ func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, erro
 	if blobHash(blob) != hash {
 		return nil, fmt.Errorf("blob of %s does not match its hash", short(id, 8))
 	}
-	return openEntry(key, c.st.Account, id, epoch, blob)
+	plain, err := openEntry(key, c.st.Account, id, epoch, blob)
+	if err != nil {
+		return nil, err
+	}
+	c.keepBase(epoch, blob)
+	return plain, nil
 }
 
 // putBlob seals the plain payload of entry id and uploads it
@@ -1186,6 +1238,7 @@ func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string
 	if err := c.backend().PutBlob(h, blob); err != nil {
 		return "", err
 	}
+	c.keepBase(epoch, blob)
 	return h, nil
 }
 
@@ -1199,6 +1252,11 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 	if err != nil {
 		return nil, err
 	}
+	return parsePayload(id, plain)
+}
+
+// parsePayload reads the opened blob of entry id
+func parsePayload(id string, plain []byte) (*payload, error) {
 	var wire payloadJSON
 	if err := json.Unmarshal(plain, &wire); err != nil {
 		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)

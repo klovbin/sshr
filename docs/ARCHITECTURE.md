@@ -99,6 +99,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/ssh_config` | the export | `refreshSSHConfig` through `WriteFileAtomic` |
 | `~/.ssh/config` | the user's own file, sshr adds or removes one Include line, a link is left alone | `editUserConfig` through `WriteFileAtomic`, its mode kept |
 | `~/.sshr/sync/run.lock` | lock of a sync run, holds the pid of the holder | `syncclient.run` |
+| `~/.sshr/sync/base/<blob hash>` | the last synced version of each host, its blob as on the server with its epoch, the base of a three-way merge, removed when no entry points to it | `syncclient.keepBase`, `pruneBase` |
 | `~/.sshr/sync/state.json` | the sync state: chain head, trusted devices, entry states, skipped entries, a pending key rotation | `syncclient.save` through `WriteFileAtomic` |
 | keychain, service `sshr`, entries `sync-device`, `sync-key-<epoch>`, `sync-key-pending` | device seed, vault keys per epoch, a key not delivered yet | `syncclient` |
 | `~/.sshr/extensions/<name>/` | an installed extension: its files and `sshr-ext.json` by the author | `sshr ext install`, `ext.Registry.Install` |
@@ -149,7 +150,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | core boundary | concrete functions of `app`, one interface where the core calls out to secrets (`Keychain`, #98), tests use fake binaries on PATH instead of a process interface, the app still gets `app.Host` with its in-memory secret fields, API and MCP get `HostSummary` | a facade with interfaces for every front end |
 | packages | few packages, `app` split only once its seams are stable | many small packages early |
 | settings | JSON with a version and unknown keys kept (#97) | TOML: one format, a handful of fields, the version rules apply either way |
-| conflicts | keep both, the later change keeps the name, a three-way merge of changes to different fields is deferred (#152) | last writer wins per field: host, user and jump must never be picked silently |
+| conflicts | a three-way merge against the last synced version, the access group (address, port, user, jump, gateway, password, key) moves as one part, a change of the same part on both sides keeps both, the later change keeps the name (#152) | last writer wins per field: host, user and jump must never be picked silently |
 | extensions | executables with a fixed protocol, installed with a pinned hash (#105) | Go plugins or WASM |
 | updates | GitHub releases with a pinned signing key, planned (#146), today a build attestation | the sync server: anyone can run one |
 

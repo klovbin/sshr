@@ -202,6 +202,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** add a host once and it appears everywhere, a host changed on two devices keeps both versions
 - **Why this way:** the server stores only ciphertext and cannot read hosts, add a device or rewrite history, devices are approved by comparing fingerprints, keys stored in sshr stay on their device
 
+### Merging changes made on two devices
+- **What:** a host changed on two devices before they synced is merged field by field, a rename on one and a new tag on the other give one host with both
+- **What for:** editing on a laptop and a desktop without ending up with `(conflict …)` copies to clean up
+- **Why it helps:** a copy appears only when both devices changed the same thing differently, the merged host is pushed once and the next syncs send nothing
+- **Why this way:** address, port, user, jump, gateway, password and key move together from one side, so a password never meets an address the other device chose, name and session merge per field, tags as a set, forwards by name, the version both started from is kept in `~/.sshr/sync/base/` sealed as on the server, without it the old copy rule applies
+
 ### Sync through an S3 bucket
 - **What:** `sshr sync init --backend s3` keeps the encrypted account in an S3 bucket (AWS S3, Cloudflare R2) instead of on `sshr-sync`
 - **What for:** sync without running a server, in a bucket you already have
