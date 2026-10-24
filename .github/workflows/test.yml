@@ -71,6 +71,11 @@ jobs:
         if: runner.os != 'Windows'
         run: .github/e2e.sh
 
+      - name: connect to a local sshd through a jump host
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/e2e-windows.ps1
+
       - name: app bundle
         if: runner.os == 'macOS'
         run: |

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -63,12 +64,25 @@ func (s *Store) JumpArgs(h *Host) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// ssh expands %-tokens in ProxyCommand, so a literal % must be doubled
-	exe = strings.ReplaceAll(exe, "%", "%%")
 	// the hops are checked by hopRe, quoting them as well keeps the shell
 	// out even if that check is ever loosened
-	cmd := fmt.Sprintf("%q %s %s %%h %%p", exe, ProxyCommandName, shQuote(strings.Join(parts, ",")))
+	cmd := proxyCommand(runtime.GOOS, exe, strings.Join(parts, ","))
 	return []string{"-o", "ProxyCommand=" + cmd}, nil
+}
+
+// proxyCommand builds the ProxyCommand value that runs sshr as
+// "<exe> __proxy <chain> %h %p", spelled for the shell of goos: a POSIX
+// shell takes the exe Go-quoted and the chain in single quotes, windows
+// takes the exe in plain double quotes, its backslashes as written, and
+// the chain bare, hopRe keeps characters any of those shells would read
+// out of the chain
+func proxyCommand(goos, exe, chain string) string {
+	// ssh expands %-tokens in ProxyCommand, so a literal % must be doubled
+	exe = strings.ReplaceAll(exe, "%", "%%")
+	if goos == "windows" {
+		return `"` + exe + `" ` + ProxyCommandName + " " + chain + " %h %p"
+	}
+	return fmt.Sprintf("%q %s %s %%h %%p", exe, ProxyCommandName, shQuote(chain))
 }
 
 // ConnectArgs is SSHArgs plus the jump options for h, a host with a
