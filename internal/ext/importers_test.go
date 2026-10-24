@@ -254,3 +254,73 @@ func TestPuttyImporterKeysAndNames(t *testing.T) {
 		t.Error("two files share a host")
 	}
 }
+
+// TestPuttyWindowsImporter runs putty.ps1, the importer of Windows, on a
+// .reg file as regedit writes it (UTF-16 with a BOM), with pwsh where it
+// is installed, the same sessions give the same hosts as putty.sh
+func TestPuttyWindowsImporter(t *testing.T) {
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("no pwsh here")
+	}
+	reg := "Windows Registry Editor Version 5.00\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\Default%20Settings]` + "\r\n" +
+		`"HostName"="default.example"` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\web%20prod]` + "\r\n" +
+		`"HostName"="deploy@10.0.0.5"` + "\r\n" +
+		`"PortNumber"=dword:00000016` + "\r\n" +
+		`"Protocol"="ssh"` + "\r\n" +
+		`"PublicKeyFile"="C:\\keys\\web.ppk"` + "\r\n" +
+		`"ProxyMethod"=dword:00000006` + "\r\n" +
+		`"ProxyHost"="gw.example"` + "\r\n" +
+		`"ProxyUsername"="ops"` + "\r\n" +
+		`"ProxyPort"=dword:00000824` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\%D0%B1%D0%B0%D0%B7%D0%B0]` + "\r\n" +
+		`"HostName"="db.local"` + "\r\n" +
+		`"UserName"="u"` + "\r\n" +
+		`"PortNumber"=dword:00000d05` + "\r\n" +
+		`"PublicKeyFile"="C:\\keys\\id_ed25519"` + "\r\n" +
+		`"ProxyMethod"=dword:00000002` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\switch]` + "\r\n" +
+		`"HostName"="sw1"` + "\r\n" +
+		`"Protocol"="telnet"` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\Other]` + "\r\n" +
+		`"HostName"="other.example"` + "\r\n"
+	utf16 := []byte{0xff, 0xfe}
+	for _, r := range reg {
+		utf16 = append(utf16, byte(r), byte(r>>8))
+	}
+	file := filepath.Join(t.TempDir(), "putty.reg")
+	if err := os.WriteFile(file, utf16, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(extensionsDir, "putty")
+	cmd := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "putty.ps1"), file)
+	cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
+	var notes bytes.Buffer
+	cmd.Stderr = &notes
+	out, err := Collect(cmd)
+	if err != nil {
+		t.Fatalf("%v: %s", err, notes.String())
+	}
+	hosts, warnings, err := ParseImport(out)
+	if err != nil || len(warnings) > 0 || len(hosts) != 2 {
+		t.Fatalf("printed %s: %v %v", out, err, warnings)
+	}
+	web, db := hosts[0], hosts[1]
+	if web.Key != "web%20prod" || web.Name != "web prod" || web.Host != "10.0.0.5" || web.User != "deploy" ||
+		web.Port != 22 || web.KeyFile != "" || web.Jump != "ops@gw.example:2084" {
+		t.Errorf("web: %+v", web)
+	}
+	if db.Name != "база" || db.Port != 3333 || db.User != "u" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" {
+		t.Errorf("db: %+v", db)
+	}
+	if n := notes.String(); !strings.Contains(n, "puttygen") || !strings.Contains(n, "ProxyMethod 2") {
+		t.Errorf("notes: %s", n)
+	}
+	for _, h := range hosts {
+		if _, err := h.ToHost("putty"); err != nil {
+			t.Errorf("%s: %v", h.Name, err)
+		}
+	}
+}
