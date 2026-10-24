@@ -37,6 +37,11 @@ func (mockKeychain) State(err error) error {
 	if strings.Contains(err.Error(), "failed to unlock correct collection") {
 		return ErrKeychainLocked
 	}
+	// "no bus" stands for a session without the Secret Service, the system
+	// keychain sorts that as missing
+	if err.Error() == "no bus" {
+		return ErrKeychainMissing
+	}
 	return nil
 }
 
