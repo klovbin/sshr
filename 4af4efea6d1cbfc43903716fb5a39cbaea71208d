@@ -1,0 +1,8 @@
+What it is for: the same list on every machine without drift
+
+Why it helps: add a host once and it appears everywhere, a host changed
+on two devices keeps both versions
+
+Why this way: the server stores only ciphertext and cannot read hosts,
+add a device or rewrite history, devices are approved by comparing
+fingerprints, keys stored in sshr stay on their device
