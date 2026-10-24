@@ -34,13 +34,15 @@ language plpgsql security definer set search_path = '' set statement_timeout = '
 declare d bytea; s int;
 begin
   perform sshr.check_key();
-  select o.data, o.size into d, s from sshr.objects o where o.name = p_name;
+  -- the size first, a presence check with p_max 0 reads no data
+  select o.size into s from sshr.objects o where o.name = p_name;
   if not found then
     raise sqlstate 'PT404' using message = 'not found';
   end if;
-  if s > p_max then
+  if s > coalesce(p_max, 0) then
     raise sqlstate 'PT413' using message = 'too large';
   end if;
+  select o.data into d from sshr.objects o where o.name = p_name;
   return encode(d, 'base64');
 end $$;
 

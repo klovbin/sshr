@@ -213,6 +213,17 @@ func TestRealPostgres(t *testing.T) {
 	if b, _ := s.Get(name, 100); len(b) == 0 {
 		t.Error("the delete with a wrong key removed the object")
 	}
+	// no p_max is a limit of 0 and not none (#273)
+	nomax, _ := http.NewRequest("POST", url+"/rest/v1/rpc/sshr_get", strings.NewReader(`{"p_name":"`+name+`","p_max":null}`))
+	nomax.Header.Set("Content-Type", "application/json")
+	nomax.Header.Set("x-sshr-key", testKey)
+	nomaxResp, err := http.DefaultClient.Do(nomax)
+	must(t, err)
+	nomaxBody, _ := io.ReadAll(nomaxResp.Body)
+	nomaxResp.Body.Close()
+	if !strings.Contains(string(nomaxBody), "PT413") {
+		t.Errorf("get with a null p_max: %d %s", nomaxResp.StatusCode, nomaxBody)
+	}
 	// a caller without the key gets PT403 before any decoding (#272)
 	bad, _ := http.NewRequest("POST", url+"/rest/v1/rpc/sshr_create", strings.NewReader(`{"p_name":"account","p_data":"!!!not base64"}`))
 	bad.Header.Set("Content-Type", "application/json")
