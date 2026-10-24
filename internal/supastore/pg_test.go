@@ -213,6 +213,17 @@ func TestRealPostgres(t *testing.T) {
 	if b, _ := s.Get(name, 100); len(b) == 0 {
 		t.Error("the delete with a wrong key removed the object")
 	}
+	// a caller without the key gets PT403 before any decoding (#272)
+	bad, _ := http.NewRequest("POST", url+"/rest/v1/rpc/sshr_create", strings.NewReader(`{"p_name":"account","p_data":"!!!not base64"}`))
+	bad.Header.Set("Content-Type", "application/json")
+	bad.Header.Set("x-sshr-key", strings.Repeat("cd", 32))
+	badResp, err := http.DefaultClient.Do(bad)
+	must(t, err)
+	badBody, _ := io.ReadAll(badResp.Body)
+	badResp.Body.Close()
+	if !strings.Contains(string(badBody), "PT403") {
+		t.Errorf("create with a wrong key and bad data: %d %s", badResp.StatusCode, badBody)
+	}
 
 	// the table is not reachable directly, authenticated cannot call
 	for _, path := range []string{"/objects", "/keys"} {

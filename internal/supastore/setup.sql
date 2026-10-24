@@ -56,9 +56,11 @@ end $$;
 -- the device's own write as one of another device
 create or replace function public.sshr_create(p_name text, p_data text) returns void
 language plpgsql security definer set search_path = '' set statement_timeout = '30s' as $$
-declare d bytea := decode(p_data, 'base64');
+declare d bytea;
 begin
   perform sshr.check_key();
+  -- after the key check, a caller without the key gets no decoding work
+  d := decode(p_data, 'base64');
   insert into sshr.objects (name, data) values (p_name, d) on conflict (name) do nothing;
   if not found then
     if exists (select 1 from sshr.objects o where o.name = p_name and o.data = d) then
