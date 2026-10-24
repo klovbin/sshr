@@ -76,7 +76,8 @@ function Jumps([string]$hosts, [string]$ports, [string]$users) {
 		$j = Clean $hs[$i]
 		if ($j -eq '') { continue }
 		$u = if ($i -lt $us.Count) { (Clean $us[$i]) } else { '' }
-		if ($u -ne '') { $j = $u + '@' + $j }
+		# <default> is the login set in MobaXterm, ssh then takes its own
+		if ($u -ne '' -and $u -ne '<default>') { $j = $u + '@' + $j }
 		if ($i -lt $ps.Count -and (OkPort $ps[$i]) -and [int]$ps[$i] -ne 22) { $j = $j + ':' + [int]$ps[$i] }
 		$out += $j
 	}
