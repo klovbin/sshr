@@ -68,3 +68,26 @@ func TestEnvHostStoresKeepTheHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// a removed host leaves the hardware key list (#357)
+func TestDeleteReleasesTheHardwareKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	s := &Store{Dir: t.TempDir()}
+	h, err := s.Add(Host{Name: "web", Host: "10.0.0.1", User: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := LoadSettings()
+	st.RequireHardwareKey(h.ID)
+	st.RequireHardwareKey("other")
+	SaveSettings(st)
+	if err := s.Delete(h.ID); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = LoadSettings()
+	if st.HardwareKeyRequired(h.ID) || !st.HardwareKeyRequired("other") {
+		t.Fatalf("hardware_key_hosts after the delete: %v", st.HardwareKeyHosts)
+	}
+}
