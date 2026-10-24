@@ -113,6 +113,9 @@ func (c *Client) createRecoveryKit(pass string, wait time.Duration) (*RecoveryKi
 		}, nil
 	})
 	if err != nil {
+		// the kit device waits for approval on the server, it would take a
+		// place there and could be approved by mistake
+		c.backend().RemoveDevice(dev.ID)
 		return nil, err
 	}
 	key, err := c.vaultKey(c.st.Epoch)

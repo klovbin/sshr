@@ -355,3 +355,25 @@ func TestClaimTimeKeptFirst(t *testing.T) {
 	_, err = n.RestoreClaim(w.srv.URL, w.a.st.Account, kit.Secret, "new", noPass)
 	must(t, err)
 }
+
+// TestFailedKitLeavesNoPendingDevice checks that a kit whose push fails
+// leaves no device waiting for approval on the server (#307)
+func TestFailedKitLeavesNoPendingDevice(t *testing.T) {
+	w := newWorld(t)
+	w.pair()
+	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
+		if isManifestPut(r) {
+			return answer(http.StatusInternalServerError), nil
+		}
+		return nil, nil
+	}}}
+	if _, err := w.a.CreateRecoveryKit("", DefaultRecoveryWait); err == nil {
+		t.Fatal("the kit was made though the push failed")
+	}
+	w.a.HTTP = nil
+	pending, err := w.a.Pending()
+	must(t, err)
+	if len(pending) != 0 {
+		t.Fatalf("%d devices wait for approval after a failed kit", len(pending))
+	}
+}
