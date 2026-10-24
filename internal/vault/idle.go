@@ -1,7 +1,6 @@
 package vault
 
 import (
-	"sync"
 	"time"
 
 	"sshr.dev/internal/settings"
@@ -19,30 +18,35 @@ var (
 	keyUsedAt time.Time
 	idleTimer *time.Timer
 
-	idleOnce sync.Once
-	idleFor  time.Duration
-	// idleOverride replaces the setting in tests, 0 leaves the setting
+	// idleFor is the idle time read from the settings, idleLoaded tells
+	// that it was read, both under vaultMu
+	idleFor    time.Duration
+	idleLoaded bool
+	// idleOverride replaces the setting in tests, 0 leaves the setting,
+	// under vaultMu
 	idleOverride time.Duration
 )
 
 // keyIdle is how long the key is kept after its last use, 0 for the whole
-// run, always 0 under a passphrase, read once per process
+// run, always 0 under a passphrase, read once per process, a settings file
+// that does not read gives the default this time and is read again next
+// time, vaultMu is held
 func keyIdle() time.Duration {
 	if idleOverride != 0 {
 		return idleOverride
 	}
-	idleOnce.Do(func() {
-		if Mode() == ModePassphrase {
-			idleFor = 0
-			return
-		}
-		st, err := settings.Load()
-		if err != nil {
-			idleFor = settings.DefaultVaultIdle
-			return
-		}
-		idleFor = st.VaultIdle()
-	})
+	if idleLoaded {
+		return idleFor
+	}
+	if Mode() == ModePassphrase {
+		idleFor, idleLoaded = 0, true
+		return 0
+	}
+	st, err := settings.Load()
+	if err != nil {
+		return settings.DefaultVaultIdle
+	}
+	idleFor, idleLoaded = st.VaultIdle(), true
 	return idleFor
 }
 
