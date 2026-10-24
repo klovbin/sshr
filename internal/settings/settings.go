@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -421,8 +422,32 @@ func mergeChanged(dst *Settings, s, base Settings) {
 			d.Field(i).Set(reflect.ValueOf(mergeKeys(d.Field(i).Interface().(map[string]string), m, bv.Field(i).Interface().(map[string]string))))
 			continue
 		}
+		if sv.Type().Field(i).Name == "HardwareKeyHosts" {
+			// a set of host IDs changes ID by ID like a map, a host required by
+			// another process meanwhile is kept
+			d.Field(i).Set(reflect.ValueOf(mergeSet(d.Field(i).Interface().([]string), s.HardwareKeyHosts, base.HardwareKeyHosts)))
+			continue
+		}
 		d.Field(i).Set(sv.Field(i))
 	}
+}
+
+// mergeSet applies to cur the items that s added or removed against base
+func mergeSet(cur, s, base []string) []string {
+	var out []string
+	for _, v := range cur {
+		// kept unless this process removed it
+		if slices.Contains(s, v) || !slices.Contains(base, v) {
+			out = append(out, v)
+		}
+	}
+	for _, v := range s {
+		// added by this process
+		if !slices.Contains(base, v) && !slices.Contains(out, v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // mergeKeys applies to cur the keys that s added, changed or removed

@@ -213,6 +213,34 @@ func TestCommandHostsMergeByKey(t *testing.T) {
 	}
 }
 
+// two processes that require a hardware key for different hosts keep
+// both, a release saved meanwhile is not undone (#353)
+func TestHardwareKeyHostsMergeByItem(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	st, _ := Load()
+	st.RequireHardwareKey("x")
+	if err := Save(st); err != nil {
+		t.Fatal(err)
+	}
+	p1, _ := Load()
+	p2, _ := Load()
+	p2.ReleaseHardwareKey("x")
+	p2.RequireHardwareKey("z")
+	if err := Save(p2); err != nil {
+		t.Fatal(err)
+	}
+	p1.RequireHardwareKey("y")
+	if err := Save(p1); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load()
+	if got.HardwareKeyRequired("x") || !got.HardwareKeyRequired("y") || !got.HardwareKeyRequired("z") {
+		t.Fatalf("hardware_key_hosts %v", got.HardwareKeyHosts)
+	}
+}
+
 func TestHealthEvery(t *testing.T) {
 	for in, want := range map[int]time.Duration{0: 5 * time.Minute, 10: time.Minute, 600: 10 * time.Minute} {
 		if got := (Settings{HealthInterval: in}).HealthEvery(); got != want {
