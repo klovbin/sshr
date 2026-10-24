@@ -406,6 +406,7 @@ func TestMobaXtermImporter(t *testing.T) {
 		"a=1= #109#0%a1.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"a=2=#109#0%a2.example%22%%%-1#MobaFont#0# #-1\r\n" +
 		"gw=#109#0%gw.example%22%%%-1%-1%%j1.example__PIPE__j2.example%22__PIPE__22%<default>__PIPE__me%0#MobaFont#0# #-1\r\n" +
+		"x__DIEZE__1=#109#0%esc.example%22%u__PERCENT__1%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\k__DIEZE__1%%-1#MobaFont#0# #-1\r\n" +
 		"\r\n[Bookmarks_1]\r\nSubRep=Clients\\Acme\r\nImgNum=41\r\n" +
 		"db=#109#0%db.local%22%<default>%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\keys\\id_ed25519%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
 		"web \x80=#109#0%10.1.0.5%22%%%-1%-1%%%%%0%-1%0%%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
@@ -416,12 +417,14 @@ func TestMobaXtermImporter(t *testing.T) {
 	if os.WriteFile(file, []byte(ini), 0o600) != nil || os.WriteFile(moba, []byte("single=#109#0%single.example%22%root%%-1%-1#MobaFont#0# #-1\r\n"), 0o600) != nil {
 		t.Fatal("cannot write the files")
 	}
+	// _CurrentDrive_ of an export is the drive of Windows (#329)
+	t.Setenv("SystemDrive", "D:")
 	hosts, notes := runPwshImporter(t, "mobaxterm", file, moba)
 	got := map[string]ExtHost{}
 	for _, h := range hosts {
 		got[h.Key] = h
 	}
-	if len(hosts) != 7 {
+	if len(hosts) != 8 {
 		t.Fatalf("%+v", hosts)
 	}
 	// a name with = keeps it (#327)
@@ -432,13 +435,17 @@ func TestMobaXtermImporter(t *testing.T) {
 	if j := got["gw"].Jump; j != "j1.example,me@j2.example" {
 		t.Errorf("gateway users: %q", j)
 	}
+	// the escapes of MobaXterm are decoded (#329)
+	if e := got["x#1"]; e.User != "u%1" || e.KeyFile != `D:\k#1` {
+		t.Errorf("escapes: %+v", got)
+	}
 	web := got["web \u20ac"]
 	if web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" || web.KeyFile != "" ||
 		web.Jump != "ops@gw1.example,gw2.example:2200" || len(web.Tags) != 0 {
 		t.Errorf("web: %+v", web)
 	}
 	db := got[`Clients\Acme\db`]
-	if db.Host != "db.local" || db.User != "" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" ||
+	if db.Host != "db.local" || db.User != "" || db.KeyFile != `D:\keys\id_ed25519` || db.Jump != "" ||
 		strings.Join(db.Tags, ",") != "Clients,Acme" {
 		t.Errorf("db: %+v", db)
 	}
