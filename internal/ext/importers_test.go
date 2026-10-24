@@ -304,6 +304,17 @@ func TestPuttyWindowsImporter(t *testing.T) {
 		}
 		files = append(files, file)
 	}
+	// a REGEDIT4 file in Windows-1252 and a UTF-8 one without a BOM (#320)
+	for name, body := range map[string]string{
+		"ansi.reg": "REGEDIT4\r\n\r\n[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\ansi]\r\n\"HostName\"=\"ansi.example\"\r\n\"UserName\"=\"jos\xe9\"\r\n",
+		"utf8.reg": "Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\utf8]\n\"HostName\"=\"utf8.example\"\n\"UserName\"=\"jürgen\"\n",
+	} {
+		file := filepath.Join(tmp, name)
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, file)
+	}
 	dir := filepath.Join(extensionsDir, "putty")
 	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "putty.ps1")}, files...)
 	cmd := exec.Command(pwsh, args...)
@@ -315,8 +326,15 @@ func TestPuttyWindowsImporter(t *testing.T) {
 		t.Fatalf("%v: %s", err, notes.String())
 	}
 	hosts, warnings, err := ParseImport(out)
-	if err != nil || len(warnings) > 0 || len(hosts) != 3 || hosts[2].Host != "work.example" {
+	if err != nil || len(warnings) > 0 || len(hosts) != 5 || hosts[2].Host != "work.example" {
 		t.Fatalf("printed %s: %v %v", out, err, warnings)
+	}
+	users := map[string]string{}
+	for _, h := range hosts[3:] {
+		users[h.Host] = h.User
+	}
+	if users["ansi.example"] != "josé" || users["utf8.example"] != "jürgen" {
+		t.Errorf("charsets: %q", users)
 	}
 	web, db := hosts[0], hosts[1]
 	if web.Key != "web%20prod" || web.Name != "web prod" || web.Host != "10.0.0.5" || web.User != "deploy" ||

@@ -54,6 +54,27 @@ function Unescape([string]$s) {
 	}
 }
 
+# ReadReg decodes a .reg file: regedit and reg export write UTF-16 with a
+# BOM, a file without a BOM is UTF-8 when it decodes as UTF-8, else
+# Windows-1252 (REGEDIT4), Get-Content of PowerShell 5.1 would read a
+# UTF-8 file without a BOM as ANSI
+function ReadReg([string]$path) {
+	$b = [System.IO.File]::ReadAllBytes($path)
+	if ($b.Length -ge 2 -and $b[0] -eq 0xFF -and $b[1] -eq 0xFE) {
+		return [System.Text.Encoding]::Unicode.GetString($b, 2, $b.Length - 2)
+	}
+	if ($b.Length -ge 2 -and $b[0] -eq 0xFE -and $b[1] -eq 0xFF) {
+		return [System.Text.Encoding]::BigEndianUnicode.GetString($b, 2, $b.Length - 2)
+	}
+	$skip = 0
+	if ($b.Length -ge 3 -and $b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF) { $skip = 3 }
+	try {
+		(New-Object System.Text.UTF8Encoding($false, $true)).GetString($b, $skip, $b.Length - $skip)
+	} catch {
+		[System.Text.Encoding]::GetEncoding(1252).GetString($b)
+	}
+}
+
 function OkPort($p) {
 	$n = 0
 	"$p" -match '^[0-9]+$' -and [int]::TryParse("$p", [ref]$n) -and $n -ge 1 -and $n -le 65535
@@ -73,10 +94,7 @@ if ($Files) {
 			continue
 		}
 		$cur = $null
-		# a .reg file of regedit is UTF-16 with a BOM, of reg export too,
-		# Get-Content reads the BOM
-		foreach ($line in Get-Content -LiteralPath $f) {
-			$line = $line.TrimEnd("`r")
+		foreach ($line in (ReadReg $f) -split "`r?`n") {
 			if ($line -match '^\[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\(.+)\]$') {
 				$cur = $Matches[1]
 				$sessions[$cur] = @{}
