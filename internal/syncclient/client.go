@@ -957,8 +957,8 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error {
 	prev := &syncproto.Manifest{Version: c.st.Format, Primary: c.st.Primary, Epoch: c.st.Epoch, Devices: c.st.Trusted}
 	if err := syncproto.CheckPrimary(prev, m, sm.Signer); err != nil {
-		if prev.Primary != "" && m.Version >= 2 {
-			return fmt.Errorf("%w, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here", err)
+		if prev.Primary != "" {
+			return fmt.Errorf("%w, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here: sshr sync leave, then sshr sync init (on S3 or WebDAV a new --prefix or folder, on Supabase a new project)", err)
 		}
 		return err
 	}

@@ -110,6 +110,15 @@ func TestPrimaryRefusesForgedChanges(t *testing.T) {
 			if _, err := w.a.Store.Find(web.ID); err != nil {
 				t.Fatalf("a lost its hosts: %v", err)
 			}
+			if !strings.Contains(err.Error(), "sshr sync leave, then sshr sync init") {
+				t.Fatalf("the error names no way out: %v", err)
+			}
+			// the way out: a new account from the hosts here
+			must(t, w.a.Leave(false))
+			must(t, w.a.Init(w.srv.URL, "laptop"))
+			if _, err := w.a.Store.Find(web.ID); err != nil || w.a.st.Primary != w.a.st.DeviceID {
+				t.Fatalf("new account: %v, primary %q", err, w.a.st.Primary)
+			}
 		})
 	}
 }
