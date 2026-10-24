@@ -63,7 +63,7 @@ func TestExportSSHConfig(t *testing.T) {
 		t.Fatal("a host shadowing the user's alias was exported")
 	}
 	user, _ := os.ReadFile(cfg)
-	if !strings.HasPrefix(string(user), s.includeLine()+"\nHost taken\n") {
+	if !strings.HasPrefix(string(user), s.confEnv().includeLine()+"\nHost taken\n") {
 		t.Fatalf("user config:\n%s", user)
 	}
 
@@ -84,7 +84,7 @@ func TestExportSSHConfig(t *testing.T) {
 				}
 			}
 			t.Fatalf("ssh %s (%s) got hostname %v port %v for web-prod\ninclude line: %s\n%s",
-				sshPath, strings.TrimSpace(string(ver)), g["hostname"], g["port"], s.includeLine(), strings.Join(lines, "\n"))
+				sshPath, strings.TrimSpace(string(ver)), g["hostname"], g["port"], s.confEnv().includeLine(), strings.Join(lines, "\n"))
 		}
 	}
 
@@ -121,11 +121,11 @@ func TestExportRejectsInjection(t *testing.T) {
 	sshConfigFile = filepath.Join(t.TempDir(), "none")
 	defer func() { sshConfigFile = old }()
 	h := Host{ID: "x", Name: "evil", Host: "a\n  ProxyCommand touch /tmp/p", PasswordMode: PasswordAsk}
-	if _, _, err := s.exportBlock(&h, "evil", nil); err == nil {
+	if _, _, err := s.confEnv().exportBlock(&h, "evil", nil); err == nil {
 		t.Fatal("newline in the address was accepted")
 	}
 	h = Host{ID: "x", Name: "evil", Host: "a", Key: "/k\"\n  ProxyCommand x"}
-	if _, _, err := s.exportBlock(&h, "evil", nil); err == nil {
+	if _, _, err := s.confEnv().exportBlock(&h, "evil", nil); err == nil {
 		t.Fatal("quote in the key path was accepted")
 	}
 	var buf bytes.Buffer
@@ -171,7 +171,7 @@ func TestExportKeepsLongConfigLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(cfg)
-	if want := s.includeLine() + "\n" + orig; string(b) != want {
+	if want := s.confEnv().includeLine() + "\n" + orig; string(b) != want {
 		t.Fatalf("install changed the rest of the file, got %d bytes, want %d", len(b), len(want))
 	}
 	if err := s.UninstallSSHConfig(); err != nil {

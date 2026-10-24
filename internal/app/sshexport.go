@@ -55,15 +55,15 @@ func exportPath(p string) (string, error) {
 // file sshr writes, a saved host with one of those names stays out of the
 // export, ssh takes the first value it reads and the export would shadow
 // the user's own block
-func (s *Store) userAliases() map[string]bool {
+func (e confEnv) userAliases() map[string]bool {
 	out := map[string]bool{}
 	path, err := userSSHConfig()
 	if err != nil {
 		return out
 	}
 	open := map[string]bool{}
-	if s.SSHConfigOut != "" {
-		abs, _ := filepath.Abs(s.SSHConfigOut)
+	if e.Out != "" {
+		abs, _ := filepath.Abs(e.Out)
 		open[abs] = true
 	}
 	collectAliases(path, filepath.Dir(path), 0, open, func(a string) { out[strings.ToLower(a)] = true })
@@ -73,12 +73,12 @@ func (s *Store) userAliases() map[string]bool {
 // WriteSSHConfig writes every saved host as a Host block of ssh config, so
 // plain ssh, scp, rsync and editors reach them by name, a password or a key
 // kept inside sshr does not leave it, such hosts get the address only
-func (s *Store) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
-	hosts, err := s.List()
+func (e confEnv) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
+	hosts, err := e.Hosts.List()
 	if err != nil {
 		return nil, err
 	}
-	taken := s.userAliases()
+	taken := e.userAliases()
 	items := make([]ExportItem, len(hosts))
 	aliasOf := map[string]string{}
 	for i, h := range hosts {
@@ -103,7 +103,7 @@ func (s *Store) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
 		if it.Skipped != "" {
 			continue
 		}
-		block, note, err := s.exportBlock(h, it.Alias, aliasOf)
+		block, note, err := e.exportBlock(h, it.Alias, aliasOf)
 		if err != nil {
 			it.Skipped = err.Error()
 			delete(aliasOf, h.ID)
@@ -117,7 +117,7 @@ func (s *Store) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
 }
 
 // exportBlock is the Host block of one host
-func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (block, note string, err error) {
+func (e confEnv) exportBlock(h *Host, alias string, aliasOf map[string]string) (block, note string, err error) {
 	if !exportHostRe.MatchString(h.Host) {
 		return "", "", fmt.Errorf("address %q cannot be written to ssh config", h.Host)
 	}
@@ -151,8 +151,8 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 			line("IdentityAgent", p)
 		}
 		if h.KeyPub != "" {
-			s.writePub(h)
-			p, err := exportPath(s.pubPath(h))
+			e.Hosts.WritePub(h)
+			p, err := exportPath(e.Hosts.PubPath(h))
 			if err != nil {
 				return "", "", err
 			}
@@ -167,7 +167,7 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 	if parts := SplitJump(h.Jump); len(parts) > 0 {
 		var hops []string
 		for _, p := range parts {
-			hop, saved, err := s.env().ResolveHop(p)
+			hop, saved, err := e.Env.ResolveHop(p)
 			if err != nil {
 				return "", "", err
 			}
@@ -194,8 +194,8 @@ func (s *Store) exportBlock(h *Host, alias string, aliasOf map[string]string) (b
 }
 
 // includeLine is the line of ~/.ssh/config that reads the export
-func (s *Store) includeLine() string {
-	p := s.SSHConfigOut
+func (e confEnv) includeLine() string {
+	p := e.Out
 	// "~/" is read the same by Windows OpenSSH and by the msys ssh of Git
 	// for Windows, which takes C:/... as relative to ~/.ssh, both paths
 	// are resolved first, Windows may give one of them as a short 8.3
@@ -231,11 +231,11 @@ var ErrSSHConfigLink = errors.New("ssh_config_link")
 
 // SSHConfigExported tells whether the export is installed, then every
 // change of the hosts rewrites it
-func (s *Store) SSHConfigExported() bool {
-	if s.SSHConfigOut == "" {
+func (e confEnv) SSHConfigExported() bool {
+	if e.Out == "" {
 		return false
 	}
-	b, err := ReadFileShared(s.SSHConfigOut)
+	b, err := ReadFileShared(e.Out)
 	return err == nil && bytes.HasPrefix(b, []byte(exportHeader))
 }
 
@@ -243,71 +243,71 @@ func (s *Store) SSHConfigExported() bool {
 // of ~/.ssh/config, at the top because a Host line before it would make
 // ssh read the Include as part of that block, the hosts are rewritten on
 // every change from then on
-func (s *Store) InstallSSHConfig() (items []ExportItem, err error) {
-	err = s.locked(func(tx *Store) error {
+func (e confEnv) InstallSSHConfig() (items []ExportItem, err error) {
+	err = e.locked(func(tx confEnv) error {
 		items, err = tx.installSSHConfig()
 		return err
 	})
 	return items, err
 }
 
-func (s *Store) installSSHConfig() ([]ExportItem, error) {
-	if s.SSHConfigOut == "" {
+func (e confEnv) installSSHConfig() ([]ExportItem, error) {
+	if e.Out == "" {
 		return nil, errors.New("this store has no ssh config export path")
 	}
-	items, err := s.refreshSSHConfig(true)
+	items, err := e.refreshSSHConfig(true)
 	if err != nil {
 		return items, err
 	}
-	return items, s.editUserConfig(true)
+	return items, e.editUserConfig(true)
 }
 
 // UninstallSSHConfig removes the Include line and the export file
-func (s *Store) UninstallSSHConfig() error {
-	return s.locked(func(tx *Store) error { return tx.uninstallSSHConfig() })
+func (e confEnv) UninstallSSHConfig() error {
+	return e.locked(func(tx confEnv) error { return tx.uninstallSSHConfig() })
 }
 
-func (s *Store) uninstallSSHConfig() error {
-	if err := s.editUserConfig(false); err != nil && !errors.Is(err, ErrSSHConfigLink) {
+func (e confEnv) uninstallSSHConfig() error {
+	if err := e.editUserConfig(false); err != nil && !errors.Is(err, ErrSSHConfigLink) {
 		return err
 	}
-	if s.SSHConfigExported() {
-		return os.Remove(s.SSHConfigOut)
+	if e.SSHConfigExported() {
+		return os.Remove(e.Out)
 	}
 	return nil
 }
 
 // refreshSSHConfig rewrites the export file, unless force it does so only
 // when the export is installed
-func (s *Store) refreshSSHConfig(force bool) ([]ExportItem, error) {
-	if s.SSHConfigOut == "" || (!force && !s.SSHConfigExported()) {
+func (e confEnv) refreshSSHConfig(force bool) ([]ExportItem, error) {
+	if e.Out == "" || (!force && !e.SSHConfigExported()) {
 		return nil, nil
 	}
-	if b, err := ReadFileShared(s.SSHConfigOut); err == nil && !bytes.HasPrefix(b, []byte(exportHeader)) {
-		return nil, fmt.Errorf("%s was not written by sshr, it is left as it is", s.SSHConfigOut)
+	if b, err := ReadFileShared(e.Out); err == nil && !bytes.HasPrefix(b, []byte(exportHeader)) {
+		return nil, fmt.Errorf("%s was not written by sshr, it is left as it is", e.Out)
 	}
 	var buf bytes.Buffer
-	items, err := s.WriteSSHConfig(&buf)
+	items, err := e.WriteSSHConfig(&buf)
 	if err != nil {
 		return items, err
 	}
-	return items, WriteFileAtomic(s.SSHConfigOut, buf.Bytes(), 0o600)
+	return items, WriteFileAtomic(e.Out, buf.Bytes(), 0o600)
 }
 
 // editUserConfig adds or removes the Include line of the export
-func (s *Store) editUserConfig(add bool) error {
+func (e confEnv) editUserConfig(add bool) error {
 	path, err := userSSHConfig()
 	if err != nil {
 		return err
 	}
 	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: %s is a link, add this line at its top yourself: %s", ErrSSHConfigLink, path, s.includeLine())
+		return fmt.Errorf("%w: %s is a link, add this line at its top yourself: %s", ErrSSHConfigLink, path, e.includeLine())
 	}
 	old, err := ReadFileShared(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	want := s.includeLine()
+	want := e.includeLine()
 	var kept []string
 	found := false
 	// split by hand, bufio.Scanner stops at a line over 64 KiB and the

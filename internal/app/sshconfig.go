@@ -292,7 +292,7 @@ type ImportItem struct {
 // ImportSSHConfig adds the hosts of the user's ssh config that sshr does
 // not have yet, a host whose name or address, user and port are saved
 // already is skipped, dryRun only reports
-func (s *Store) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
+func (e confEnv) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
 	aliases, err := SSHConfigAliases()
 	if err != nil {
 		return nil, err
@@ -301,7 +301,7 @@ func (s *Store) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	existing, err := s.List()
+	existing, err := e.Hosts.List()
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func (s *Store) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
 		if item.Skipped == "" {
 			if dryRun {
 				item.Host = &h
-			} else if saved, err := s.Add(h); err != nil {
+			} else if saved, err := e.Hosts.Add(h); err != nil {
 				item.Skipped = err.Error()
 			} else {
 				item.Host = saved

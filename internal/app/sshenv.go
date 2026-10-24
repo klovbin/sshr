@@ -43,3 +43,36 @@ func (s *Store) PlanSession(h *Host, o LaunchOptions) (*SessionPlan, error) {
 }
 
 func (s *Store) InstallKeyArgs(h *Host) ([]string, error) { return s.env().InstallKeyArgs(h) }
+
+// confEnv is what the ssh config import and export need: the ssh
+// environment and the path of the export file, empty turns it off
+type confEnv struct {
+	sshcmd.Env
+	Out string
+}
+
+// confEnv is the ssh config environment of s, built on every call like env
+func (s *Store) confEnv() confEnv { return confEnv{Env: s.env(), Out: s.SSHConfigOut} }
+
+// locked runs fn under the lock of the host folder with the held store
+func (e confEnv) locked(fn func(tx confEnv) error) error {
+	return e.Hosts.Locked(func(held *hostStore) error {
+		c := e
+		c.Hosts = held
+		return fn(c)
+	})
+}
+
+func (s *Store) ImportSSHConfig(dryRun bool) ([]ImportItem, error) {
+	return s.confEnv().ImportSSHConfig(dryRun)
+}
+
+func (s *Store) WriteSSHConfig(w io.Writer) ([]ExportItem, error) {
+	return s.confEnv().WriteSSHConfig(w)
+}
+
+func (s *Store) SSHConfigExported() bool { return s.confEnv().SSHConfigExported() }
+
+func (s *Store) InstallSSHConfig() ([]ExportItem, error) { return s.confEnv().InstallSSHConfig() }
+
+func (s *Store) UninstallSSHConfig() error { return s.confEnv().UninstallSSHConfig() }
