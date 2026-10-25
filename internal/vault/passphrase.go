@@ -47,6 +47,10 @@ var argonParams = struct {
 	Threads         uint8
 }{3, 64 * 1024, 4}
 
+// passphraseDistinct is the fewest different characters a passphrase has,
+// a long passphrase of one repeated key is guessed at once
+const passphraseDistinct = 6
+
 // limits a file may ask for, a crafted file must not make sshr spend
 // gigabytes or minutes before the passphrase is even checked
 const (
@@ -249,6 +253,13 @@ func SetPassphrase(pass string, secretNames []string) error {
 	defer unlock()
 	if len(pass) < passphraseMin {
 		return fmt.Errorf("the passphrase is shorter than %d characters, the file it guards can be attacked offline", passphraseMin)
+	}
+	distinct := map[rune]bool{}
+	for _, r := range pass {
+		distinct[r] = true
+	}
+	if len(distinct) < passphraseDistinct {
+		return fmt.Errorf("the passphrase has fewer than %d different characters, the file it guards can be attacked offline", passphraseDistinct)
 	}
 	key, err := Key()
 	// only a keychain the system reports missing starts with a new key,
