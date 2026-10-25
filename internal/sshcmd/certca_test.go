@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -86,5 +88,42 @@ func TestSoftwareCAKeyMustMatch(t *testing.T) {
 	ca.Pub = authorizedLine(otherPub, "sshr-ca")
 	if _, err := ca.SignUserCert(otherPub, "x", []string{"u"}, 10, time.Now()); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Errorf("a changed authority file: %v", err)
+	}
+}
+
+// an authority on a token signs through ssh-keygen -s, here with a plain
+// key in place of the handle, ssh-keygen signs with it the same way, the
+// result is checked like the one from a token
+func TestTokenCASignsThroughKeygen(t *testing.T) {
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen")
+	}
+	certHome(t)
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	dir := t.TempDir()
+	handle := filepath.Join(dir, "ca")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "sshr-ca", "-f", handle).CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v %s", err, out)
+	}
+	pubLine, _ := os.ReadFile(handle + ".pub")
+	ca := &CertCA{Type: CAToken, Pub: strings.TrimSpace(string(pubLine)), Handle: handle}
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userPub, _ := ssh.NewPublicKey(pub)
+	cert, err := ca.SignUserCert(userPub, "sshr laptop web", []string{"deploy", "ops"}, 10, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cert.KeyId != "sshr laptop web" || len(cert.ValidPrincipals) != 2 {
+		t.Errorf("certificate %q %v", cert.KeyId, cert.ValidPrincipals)
+	}
+	if _, ok := cert.Permissions.Extensions["permit-agent-forwarding"]; ok {
+		t.Error("ssh-keygen kept agent forwarding")
+	}
+	// a plain key is no authority on a token
+	if _, err := InitTokenCA(handle, false); err == nil || !strings.Contains(err.Error(), "not one on a token") {
+		t.Errorf("a plain key as a token authority: %v", err)
 	}
 }
