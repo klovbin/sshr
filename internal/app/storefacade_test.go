@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/sshconf"
 )
 
 // the host store the sync client gets carries the hooks of Store, a host
@@ -35,8 +36,7 @@ func TestHostsKeepsTheExportHook(t *testing.T) {
 // the host store inside the ssh and ssh config environments carries the
 // hooks of Store too, ImportSSHConfig adds its hosts through it, so an
 // imported host refreshes an installed export (#222), ImportSSHConfig
-// itself is tested in sshconf where its config file can be pointed away
-// from the user's own
+// through Store is tested below with the config of the test
 func TestEnvHostStoresKeepTheHooks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -89,5 +89,30 @@ func TestDeleteReleasesTheHardwareKey(t *testing.T) {
 	st, _ = LoadSettings()
 	if st.HardwareKeyRequired(h.ID) || !st.HardwareKeyRequired("other") {
 		t.Fatalf("hardware_key_hosts after the delete: %v", st.HardwareKeyHosts)
+	}
+}
+
+// a host of an ssh config comes into the store through Store with its
+// address, user and port, the config is the one of the test, never the
+// user's own
+func TestImportSSHConfigThroughStore(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	conf := filepath.Join(home, "ssh_config")
+	os.WriteFile(conf, []byte("Host web-import\n  HostName 10.0.0.9\n  User deploy\n  Port 2222\n"), 0o600)
+	old := sshconf.SetConfigFileForTest(conf)
+	t.Cleanup(func() { sshconf.SetConfigFileForTest(old) })
+	s := &Store{Dir: t.TempDir()}
+	items, err := s.ImportSSHConfig(false)
+	if err != nil {
+		t.Skipf("ssh -G is not usable here: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("imported %+v", items)
+	}
+	h, err := s.Find("web-import")
+	if err != nil || h.Host != "10.0.0.9" || h.User != "deploy" || h.Port != 2222 {
+		t.Fatalf("host %+v %v", h, err)
 	}
 }

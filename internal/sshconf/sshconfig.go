@@ -18,6 +18,13 @@ import (
 // own, never at a config the user did not write: Match exec runs commands
 var sshConfigFile = ""
 
+// SetConfigFileForTest points the import at path, for tests of packages
+// that reach the import through a front, it gives back the old path
+func SetConfigFileForTest(path string) (old string) {
+	old, sshConfigFile = sshConfigFile, path
+	return old
+}
+
 // userSSHConfig is the path of the user's ssh config
 func userSSHConfig() (string, error) {
 	if sshConfigFile != "" {
