@@ -2,7 +2,7 @@
 
 How to put the sshr CLI into AUR, Homebrew, Scoop and nixpkgs (#17). The GUI is not packaged yet, every package below installs the one `sshr` binary built with `-tags nocgo`.
 
-Everything here starts from a release: a tag `vX.Y.Z` runs `.github/workflows/release.yml`, which uploads `sshr_<os>_<arch>` for linux, darwin and windows on amd64 and arm64 (`.exe` on Windows) and `sha256sums.txt`, plus a build provenance attestation. No package can be written before the first tag, the URLs and hashes below come from it.
+Everything here starts from a release: a tag `vX.Y.Z` runs `.github/workflows/release.yml`, which uploads `sshr_<os>_<arch>` for linux, darwin and windows on amd64 and arm64 (`.exe` on Windows) and `sha256sums.txt` with its signature `sha256sums.txt.sig` (`ssh-keygen -Y verify -n sshr-release` with the `RELEASE_KEY` of install.sh), plus a build provenance attestation. No package can be written before the first tag, the URLs and hashes below come from it.
 
 Sources: the research on release automation of 17.10.2026 and the docs of each project, named at each rule.
 

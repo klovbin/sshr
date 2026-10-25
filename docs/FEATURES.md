@@ -397,16 +397,16 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 ## Installing
 
 ### install.sh
-- **What:** one line installs sshr on Linux and macOS into `~/.local/bin`, a release binary checked against `sha256sums.txt` or a build from source, a PATH line, `--uninstall`
+- **What:** one line installs sshr on Linux and macOS into `~/.local/bin`, a release binary checked against `sha256sums.txt` whose signature, together with the tag of the release, checks with the release key pinned in the script, or a build from source, a PATH line, `--uninstall`
 - **What for:** installing without root or a package manager
 - **Why it helps:** one command, and `--uninstall` removes everything it added
-- **Why this way:** an unchecked binary is never installed, the GUI falls back to the CLI when build tools are missing, packages are planned in #17
+- **Why this way:** an unchecked binary is never installed, a checksum from the same place as the binary only proves the download is whole, the signature with a key pinned in the script proves the list came from the release key, it is checked with `ssh-keygen -Y verify` that every machine with ssh has, a list without a signature, with another one or an ssh-keygen older than 8.1 means a build from source, the GUI falls back to the CLI when build tools are missing, packages are planned in #17
 
 ### Release files
-- **What:** a tag like `v1.2.3` builds the CLI for linux, darwin and windows on amd64 and arm64 in GitHub Actions, publishes `sshr_<os>_<arch>` (`.exe` on Windows) with `sha256sums.txt` and signs them with a build attestation, `scripts/release.sh v1.2.3` makes the same files on any machine
+- **What:** a tag like `v1.2.3` builds the CLI for linux, darwin and windows on amd64 and arm64 in GitHub Actions, publishes `sshr_<os>_<arch>` (`.exe` on Windows) with `sha256sums.txt`, its signature `sha256sums.txt.sig` made with the release key and a build attestation, `scripts/release.sh v1.2.3` makes the same files on any machine
 - **What for:** install.sh and the packages of #17 (AUR, Homebrew, Scoop, nixpkgs) need a file with a known name and a checksum to take
 - **Why it helps:** installing needs no Go and no build tools, a tampered file is found by the checksum, and `gh attestation verify sshr_linux_amd64 --repo klovbin/sshr` shows which commit and workflow built it
-- **Why this way:** the tests run first, a failing tag publishes nothing, the CLI is built without cgo so one machine builds all six files, the version is set at build time and the binary reports it, the attestation needs no key to store and lose, the GUI is not in these files, it needs cgo and a build per system
+- **Why this way:** the tests run first, a failing tag publishes nothing, the CLI is built without cgo so one machine builds all six files, the version is set at build time and the binary reports it, the release key lives in the repository secret `SSHR_RELEASE_KEY` and the workflow checks its signature against the key install.sh pins, a release without the key or with another one stops before it goes out, the attestation shows the commit and workflow without any key, the GUI is not in these files, it needs cgo and a build per system
 
 ### Application menu and icons
 - **What:** `sshr desktop-entry` adds sshr to the Linux menu and makes `~/Applications/sshr.app` on macOS, the Windows exe carries the icon
