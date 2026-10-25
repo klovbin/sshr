@@ -11,7 +11,6 @@ import (
 	"slices"
 
 	"sshr.dev/internal/hosts"
-
 	"sshr.dev/internal/sshcmd"
 )
 
