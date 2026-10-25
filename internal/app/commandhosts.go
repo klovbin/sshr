@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"sshr.dev/internal/settings"
-
 	"sshr.dev/internal/sshcmd"
 )
 
