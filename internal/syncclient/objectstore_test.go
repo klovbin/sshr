@@ -449,6 +449,63 @@ func TestPutManifestDoesNotDownloadBlobs(t *testing.T) {
 	}
 }
 
+// blobLookups counts the blobs a push looks up
+type blobLookups struct {
+	*memStore
+	n *int
+}
+
+func (s blobLookups) Get(name string, max int) ([]byte, error) {
+	if strings.HasPrefix(name, objBlobs) {
+		*s.n++
+	}
+	return s.memStore.Get(name, max)
+}
+
+// a push looks up only the blobs the previous manifest does not list,
+// a blob that is new still has to be there
+func TestPutManifestLooksUpNewBlobs(t *testing.T) {
+	store := newMemStore()
+	must(t, store.Put(objAccount, []byte("acct")))
+	n := 0
+	o := ObjectBackend{Store: blobLookups{store, &n}}
+	entries := map[string]syncproto.Entry{}
+	put := func(counter uint64) error {
+		body, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: counter, Entries: entries})
+		signed, _ := json.Marshal(syncproto.Signed{Body: body})
+		return o.PutManifest(counter-1, signed)
+	}
+	for i := range 20 {
+		hash := fmt.Sprintf("%064x", i)
+		must(t, store.Put(objBlobs+hash, []byte("x")))
+		entries[fmt.Sprint(i)] = syncproto.Entry{Hash: hash}
+	}
+	must(t, put(1))
+	if n != 20 {
+		t.Fatalf("the first push looked up %d blobs of 20", n)
+	}
+	n = 0
+	hash := fmt.Sprintf("%064x", 99)
+	must(t, store.Put(objBlobs+hash, []byte("x")))
+	entries["0"] = syncproto.Entry{Hash: hash}
+	must(t, put(2))
+	if n != 1 {
+		t.Errorf("a push with one new blob looked up %d", n)
+	}
+	entries["1"] = syncproto.Entry{Hash: fmt.Sprintf("%064x", 100)}
+	if err := put(3); err == nil {
+		t.Error("a manifest with a missing new blob went in")
+	}
+	// a manifest planted under the name of change 2 with another counter
+	// does not vouch for the blobs it lists
+	planted, _ := json.Marshal(syncproto.Manifest{Account: "acct", Counter: 7, Entries: entries})
+	signed, _ := json.Marshal(syncproto.Signed{Body: planted})
+	must(t, store.Put(manifestName(2), signed))
+	if err := put(3); err == nil {
+		t.Error("a planted manifest let a missing blob in")
+	}
+}
+
 // getCount counts the manifests a store hands out
 type getCount struct {
 	*memStore
