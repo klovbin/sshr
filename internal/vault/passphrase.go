@@ -40,12 +40,22 @@ var ErrKeychainCopyLeft = errors.New("keychain_copy_left")
 // ask for the passphrase here (no terminal, no SSHR_ASKPASS)
 var ErrNoPassphrase = errors.New("no_passphrase")
 
-// argonParams are the Argon2id parameters a new file gets, RFC 9106 second
-// recommendation, they are stored in the file, tests make them cheap
-var argonParams = struct {
+// argonCost is what an Argon2id wrap costs, stored with the wrap
+type argonCost struct {
 	Time, MemoryKiB uint32
 	Threads         uint8
-}{3, 64 * 1024, 4}
+}
+
+// argonParams are the Argon2id parameters a new file gets, RFC 9106 second
+// recommendation, they are stored in the file, tests make them cheap
+var argonParams = argonCost{3, 64 * 1024, 4}
+
+// PassphraseOptions are the choices of sshr vault passphrase, Strong takes
+// four times the memory, 256 MiB, a guess at the file costs that much and
+// every open takes longer
+type PassphraseOptions struct {
+	Strong bool
+}
 
 // passphraseDistinct is the fewest different characters a passphrase has,
 // a long passphrase of one repeated key is guessed at once
@@ -102,7 +112,12 @@ func wrapKey(key []byte, pass string) (*wrappedKey, error) {
 // wrapKeyAAD wraps key under pass bound to aad, format 1 binds to wrapAAD,
 // a slot of format 2 to its kind and ID
 func wrapKeyAAD(key []byte, pass string, aad []byte) (*wrappedKey, error) {
-	w := &wrappedKey{Version: 1, KDF: "argon2id", Time: argonParams.Time, MemoryKiB: argonParams.MemoryKiB, Threads: argonParams.Threads, Salt: make([]byte, 16)}
+	return wrapKeyCost(key, pass, aad, argonParams)
+}
+
+// wrapKeyCost is wrapKeyAAD at the Argon2id cost c
+func wrapKeyCost(key []byte, pass string, aad []byte, c argonCost) (*wrappedKey, error) {
+	w := &wrappedKey{Version: 1, KDF: "argon2id", Time: c.Time, MemoryKiB: c.MemoryKiB, Threads: c.Threads, Salt: make([]byte, 16)}
 	if _, err := rand.Read(w.Salt); err != nil {
 		return nil, err
 	}
@@ -244,7 +259,7 @@ func passphraseVaultKey() ([]byte, error) {
 // MoveSecrets, the copy of the key in the system keychain is removed last,
 // it cannot be put back by an undo, a copy that stays is
 // ErrKeychainCopyLeft with the mode already changed
-func SetPassphrase(pass string, secretNames []string) error {
+func SetPassphrase(pass string, secretNames []string, opts ...PassphraseOptions) error {
 	// one mode change at a time, the setting and the files must agree
 	unlock, err := vaultModeLock()
 	if err != nil {
@@ -260,6 +275,10 @@ func SetPassphrase(pass string, secretNames []string) error {
 	}
 	if len(distinct) < passphraseDistinct {
 		return fmt.Errorf("the passphrase has fewer than %d different characters, the file it guards can be attacked offline", passphraseDistinct)
+	}
+	cost := argonParams
+	if len(opts) > 0 && opts[0].Strong {
+		cost.MemoryKiB = argonMaxMemory
 	}
 	key, err := Key()
 	// only a keychain the system reports missing starts with a new key,
@@ -285,7 +304,7 @@ func SetPassphrase(pass string, secretNames []string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	b, err := withPassphrase(old, key, pass)
+	b, err := withPassphraseCost(old, key, pass, cost)
 	if err != nil {
 		return err
 	}

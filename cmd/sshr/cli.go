@@ -1325,10 +1325,12 @@ func cmdVault(args []string) {
 			fmt.Printf("%s\t%s\t%s\n", s.ID, s.Type, note)
 		}
 		return
+	case len(args) == 2 && args[0] == "passphrase" && args[1] == "--strong":
 	case len(args) != 1:
 		fmt.Fprintln(os.Stderr, vaultUsage)
 		os.Exit(1)
 	}
+	strong := len(args) == 2
 	// the keys of the sync device move with the vault key
 	var names []string
 	if args[0] == "passphrase" || args[0] == "keychain" {
@@ -1355,7 +1357,7 @@ func cmdVault(args []string) {
 		if first != again {
 			fatal(fmt.Errorf("the two passphrases differ, nothing is changed"))
 		}
-		err = app.SetVaultPassphrase(first, names)
+		err = app.SetVaultPassphrase(first, names, strong)
 		if err != nil && !errors.Is(err, app.ErrKeychainCopyLeft) {
 			fatal(err)
 		}
@@ -1380,7 +1382,7 @@ func cmdVault(args []string) {
 	}
 }
 
-const vaultUsage = `Usage: sshr vault status|passphrase|keychain|recovery|slots
+const vaultUsage = `Usage: sshr vault status|passphrase [--strong]|keychain|recovery|slots
        sshr vault add-token [--label <name>] [--pin]
        sshr vault remove-slot <id>`
 
