@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -60,6 +61,8 @@ const syncUsage = `Usage:
                                          keep the account in a folder that Syncthing, Dropbox
                                          or iCloud already syncs, no server and no key,
                                          two devices that write at once fork the account
+  sshr sync cleanup [--apply]            count the blobs of a store no change names any more,
+                                         --apply deletes the ones a run saw a day ago or more
   sshr sync leave [--force]              stop syncing here, hosts stay`
 
 // cmdSync runs the sync subcommands
@@ -77,7 +80,7 @@ func cmdSync(store *app.Store, args []string) {
 	var server, name string
 	var rest []string
 	var sf storeFlags
-	replaceKey := false
+	replaceKey, apply := false, false
 	for i := 0; i < len(args); i++ {
 		if ok, err := sf.take(args, &i); err != nil {
 			fatal(err)
@@ -99,6 +102,8 @@ func cmdSync(store *app.Store, args []string) {
 			c.AcceptReset = true
 		case a == "--replace" && sub == "supabase-sql":
 			replaceKey = true
+		case a == "--apply" && sub == "cleanup":
+			apply = true
 		case strings.HasPrefix(a, "-") && sub != "primary" && sub != "recovery":
 			// primary and recovery read their own flags
 			fmt.Fprintln(os.Stderr, syncUsage)
@@ -276,6 +281,24 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Println("The new bucket key is saved on this machine, delete the old key once every device has the new one")
+	case "cleanup":
+		r, err := c.Cleanup(apply)
+		if errors.Is(err, syncclient.ErrServerCleans) {
+			fmt.Println("Nothing to do here, " + err.Error())
+			return
+		}
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("%d blobs in the store, %d no change names, %d of them seen a day ago or more\n", r.Blobs, r.Orphans, r.Due)
+		switch {
+		case apply:
+			fmt.Printf("Deleted %d blobs\n", r.Deleted)
+		case r.Due > 0:
+			fmt.Println("Nothing deleted, run sshr sync cleanup --apply to delete them")
+		default:
+			fmt.Println("Nothing deleted, a blob goes on a run a day after a run first saw it")
+		}
 	case "leave":
 		if err := c.Leave(len(rest) == 1 && rest[0] == "--force"); err != nil {
 			fatal(err)
