@@ -145,10 +145,10 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why this way:** ssh offers only this key and agent forwarding is off, so neither other keys nor the server can reach it
 
 ### Vault under a passphrase
-- **What:** `sshr vault passphrase` keeps the vault key in a file wrapped with a passphrase instead of the system keychain, `sshr vault keychain` moves it back, off by default
-- **What for:** servers, containers and minimal desktops have no Secret Service, saved passwords did not work there at all
-- **Why it helps:** saved passwords and stored keys work on such a machine, the same key as before, so nothing has to be saved again
-- **Why this way:** Argon2id with the parameters in the file makes a stolen file expensive to guess, the passphrase is asked once per run and never from stdin or in mcp, the keychain stays the default because it asks nothing and is not attackable offline
+- **What:** `sshr vault passphrase` keeps the vault key in a file wrapped with a passphrase instead of the system keychain and removes it from the keychain, `--strong` makes every guess cost 256 MiB of memory instead of 64, the passphrase needs 12 characters and 6 different ones, `sshr vault keychain` moves the key back, off by default
+- **What for:** servers, containers and minimal desktops have no Secret Service, saved passwords did not work there at all, and on a desktop a copy left in the keychain opened the file without the passphrase
+- **Why it helps:** saved passwords and stored keys work on such a machine, the same key as before, so nothing has to be saved again, a backup of the home folder with the keyring opens nothing without the passphrase
+- **Why this way:** Argon2id with the parameters in the file makes a stolen file expensive to guess, 256 MiB is the most a file may ask so an older sshr opens a strong file too, the count of different characters needs no word list, the copy in the keychain goes last and only when the keychain says it is gone, a locked keychain keeps it with a warning, the passphrase is asked once per run and never from stdin or in mcp, the keychain stays the default because it asks nothing and is not attackable offline
 
 ### Keys from an ssh agent
 - **What:** a host uses the system agent, the 1Password SSH agent or any agent socket, with one chosen key
