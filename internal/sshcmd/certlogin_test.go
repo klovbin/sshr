@@ -252,3 +252,30 @@ func TestSweepCertFiles(t *testing.T) {
 		}
 	}
 }
+
+// every signed certificate leaves a line with its serial in the log
+func TestCertLog(t *testing.T) {
+	certHome(t)
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	if _, err := InitSoftwareCA(false); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{Dir: t.TempDir()}
+	h, _ := s.Add(Host{Name: "web", Host: "10.0.0.1", User: "deploy"})
+	st, _ := settings.Load()
+	st.EnableCert(h.ID, CertTarget(h), []string{"deploy"})
+	settings.Save(st)
+	if _, err := s.ConnectArgs(h); err != nil {
+		t.Fatal(err)
+	}
+	stop, err := AttachAuth(exec.Command("true"), h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	path, _ := certLogPath()
+	b, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(b), `"serial":`) || !strings.Contains(string(b), `"principals":["deploy"]`) {
+		t.Fatalf("the log: %s %v", b, err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -196,6 +197,9 @@ func attachCert(cmd *exec.Cmd, h *Host) (func(), error) {
 		remove()
 		return noop, err
 	}
+	if err := logCert(h, cert); err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: the certificate is not in the log (%v), its serial is %d\n", err, cert.Serial)
+	}
 	return func() { stop(); remove() }, nil
 }
 
@@ -213,4 +217,50 @@ func sweepCertFiles(dir string, now time.Time) {
 			os.Remove(n)
 		}
 	}
+}
+
+// certLogMax is the size at which the log of signed certificates moves to
+// a .old file and starts again
+const certLogMax = 1 << 20
+
+// certLogPath is ~/.sshr/cert-log.jsonl
+func certLogPath() (string, error) {
+	p, err := settings.Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), "cert-log.jsonl"), nil
+}
+
+// logCert appends a line on the signed certificate to the log, its serial
+// is what a revocation list on a server names
+func logCert(h *Host, cert *ssh.Certificate) error {
+	path, err := certLogPath()
+	if err != nil {
+		return err
+	}
+	if fi, err := os.Stat(path); err == nil && fi.Size() > certLogMax {
+		os.Rename(path, path+".old")
+	}
+	line, err := json.Marshal(struct {
+		Time        time.Time `json:"time"`
+		Host        string    `json:"host"`
+		Name        string    `json:"name"`
+		Principals  []string  `json:"principals"`
+		Serial      uint64    `json:"serial"`
+		KeyID       string    `json:"key_id"`
+		ValidBefore time.Time `json:"valid_before"`
+	}{time.Now().UTC(), h.ID, h.Name, cert.ValidPrincipals, cert.Serial, cert.KeyId, time.Unix(int64(cert.ValidBefore), 0).UTC()})
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(append(line, '\n'))
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
 }
