@@ -359,6 +359,9 @@ func (o ObjectBackend) Head() (uint64, []byte, error) {
 }
 
 func (o ObjectBackend) ManifestsAfter(n uint64) ([]byte, error) {
+	if err := o.checkConflicts(); err != nil {
+		return nil, err
+	}
 	all, err := o.manifests()
 	if err != nil {
 		return nil, err
@@ -380,12 +383,44 @@ func (o ObjectBackend) ManifestsAfter(n uint64) ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// ConflictReporter is an ObjectStore without a compare and swap between
+// devices, a synced folder, that names the copies its sync tool made of
+// the account or of a change two devices wrote at once
+type ConflictReporter interface {
+	Conflicts() ([]string, error)
+}
+
+// checkConflicts refuses to go on while the store holds a copy of the
+// account or of a change, the account forked there and a change built on
+// either side would be refused by the devices on the other
+func (o ObjectBackend) checkConflicts() error {
+	cr, ok := o.Store.(ConflictReporter)
+	if !ok {
+		return nil
+	}
+	names, err := cr.Conflicts()
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	quoted := make([]string, 0, 5)
+	for _, n := range names[:min(len(names), 5)] {
+		quoted = append(quoted, fmt.Sprintf("%q", n))
+	}
+	return fmt.Errorf("%w: the sync folder holds copies its sync tool made when two devices wrote at once (%s), nothing is pulled or pushed until each copy or the file it copies is deleted, keep the one with the newest changes, do not leave and join again", ErrFork, strings.Join(quoted, ", "))
+}
+
 // PutManifest creates manifests/<expect+1>, a device that created it first
 // wins, every blob the manifest names has to be there, no server checks
 // that here
 func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 	if len(signed) > syncproto.MaxManifest {
 		return ErrTooLarge
+	}
+	if err := o.checkConflicts(); err != nil {
+		return err
 	}
 	var sm syncproto.Signed
 	if err := json.Unmarshal(signed, &sm); err != nil {

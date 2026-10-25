@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"sshr.dev/internal/app"
 	"sshr.dev/internal/davstore"
+	"sshr.dev/internal/folderstore"
 	"sshr.dev/internal/s3store"
 	"sshr.dev/internal/supastore"
 	"sshr.dev/internal/syncclient"
@@ -23,6 +25,10 @@ type storeFlags struct {
 	dav     davstore.Config
 	// sbKey is the publishable key of a Supabase project
 	sbKey string
+	// folder is a folder a sync tool shares, given with --path
+	folder folderstore.Config
+	// forInit is set by sshr sync init, a folder store must be empty then
+	forInit bool
 	// given says that one of them was on the command line, s3Given,
 	// davGiven (--url or --user) and keyGiven (--key) which ones
 	given, s3Given, davGiven, keyGiven bool
@@ -58,6 +64,8 @@ func (f *storeFlags) take(args []string, i *int) (bool, error) {
 		dst, f.davGiven = dav[a], true
 	case a == "--key":
 		dst, f.keyGiven = &f.sbKey, true
+	case a == "--path":
+		dst = &f.folder.Path
 	default:
 		return false, nil
 	}
@@ -130,6 +138,14 @@ func (f *storeFlags) setup(c *syncclient.Client, server string) (string, error) 
 			return "", errors.New("--server is for sshr-sync, a WebDAV account takes --url and --user")
 		}
 		return f.setupDAV(c)
+	case "folder":
+		if f.s3Given || f.davGiven || f.keyGiven {
+			return "", errors.New("a folder account takes --path only")
+		}
+		if server != "" {
+			return "", errors.New("--server is for sshr-sync, a folder account takes --path")
+		}
+		return f.setupFolder(c)
 	case "supabase":
 		if f.s3Given || f.dav.User != "" {
 			return "", errors.New("a Supabase account takes --url and --key, not the S3 flags or --user")
@@ -201,6 +217,43 @@ func (f *storeFlags) setupDAV(c *syncclient.Client) (string, error) {
 	return "webdav " + f.dav.URL, nil
 }
 
+// setupFolder opens the synced folder of --path, init wants it empty, two
+// devices that both start an account there before it synced would mix
+// them, the folder has no secret
+func (f *storeFlags) setupFolder(c *syncclient.Client) (string, error) {
+	if f.folder.Path == "" {
+		return "", errors.New("a folder account needs --path <folder that Syncthing, Dropbox or iCloud syncs>")
+	}
+	abs, err := filepath.Abs(f.folder.Path)
+	if err != nil {
+		return "", err
+	}
+	f.folder.Path = abs
+	store, err := folderstore.New(f.folder)
+	if err != nil {
+		return "", err
+	}
+	empty, err := store.Empty()
+	if err != nil {
+		return "", err
+	}
+	if f.forInit && !empty {
+		return "", fmt.Errorf("%s holds an account already, start it on one device only, wait until the folder synced and run sshr sync join on the others", abs)
+	}
+	// the probe proves the create of this machine only, between devices a
+	// synced folder has no compare and swap, see folderstore
+	if err := syncclient.ProbeCreate(store); err != nil {
+		return "", err
+	}
+	cfg, err := json.Marshal(f.folder)
+	if err != nil {
+		return "", err
+	}
+	c.Backend = syncclient.ObjectBackend{Store: store}
+	c.BackendRef = &syncclient.BackendRef{Kind: "folder", Config: cfg}
+	return "folder " + abs, nil
+}
+
 // supabaseKey is the sshr key of a Supabase account, from
 // SSHR_SUPABASE_KEY or asked on the terminal, sshr sync supabase-sql makes
 // it, it never goes on the command line
@@ -267,6 +320,8 @@ func (f *storeFlags) replaceKey(c *syncclient.Client) error {
 		return errors.New("this account syncs through sshr-sync, it has no store key")
 	}
 	switch ref.Kind {
+	case "folder":
+		return errors.New("a folder account has no key, the sync tool decides who reads the folder")
 	case "webdav":
 		return f.replaceDAVPassword(c, *ref)
 	case "supabase":
@@ -367,6 +422,17 @@ func s3Address(cfg s3store.Config) string {
 
 // openStore opens the store a sync state names on later runs
 func openStore(ref syncclient.BackendRef, secret string) (syncclient.Backend, error) {
+	if ref.Kind == "folder" {
+		var cfg folderstore.Config
+		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+			return nil, fmt.Errorf("the folder settings in the sync state: %v", err)
+		}
+		store, err := folderstore.New(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return syncclient.ObjectBackend{Store: store}, nil
+	}
 	if ref.Kind == "supabase" {
 		var cfg supastore.Config
 		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
@@ -408,6 +474,14 @@ func openStore(ref syncclient.BackendRef, secret string) (syncclient.Backend, er
 func joinFlags(server string, ref *syncclient.BackendRef) (string, error) {
 	if ref == nil {
 		return "--server " + server, nil
+	}
+	if ref.Kind == "folder" {
+		var cfg folderstore.Config
+		if err := json.Unmarshal(ref.Config, &cfg); err != nil {
+			return "", fmt.Errorf("the folder settings in the sync state: %v", err)
+		}
+		// the folder may sit under another path on the new device
+		return "--backend folder --path " + shellQuote(cfg.Path), nil
 	}
 	if ref.Kind == "webdav" {
 		var cfg davstore.Config

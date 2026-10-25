@@ -56,6 +56,10 @@ const syncUsage = `Usage:
   sshr sync init --backend supabase --url https://<ref>.supabase.co --key <publishable key>
                                          keep the account in a Supabase project,
                                          the sshr key from SSHR_SUPABASE_KEY or a prompt
+  sshr sync init --backend folder --path <folder>
+                                         keep the account in a folder that Syncthing, Dropbox
+                                         or iCloud already syncs, no server and no key,
+                                         two devices that write at once fork the account
   sshr sync leave [--force]              stop syncing here, hosts stay`
 
 // cmdSync runs the sync subcommands
@@ -111,11 +115,12 @@ func cmdSync(store *app.Store, args []string) {
 		if err := c.CheckFree(); err != nil {
 			fatal(err)
 		}
+		sf.forInit = true
 		if server, err = sf.setup(c, server); err != nil {
 			fatal(err)
 		}
 		if server == "" {
-			fatal(fmt.Errorf("sshr sync init needs --server <url> or --backend s3, webdav or supabase"))
+			fatal(fmt.Errorf("sshr sync init needs --server <url> or --backend s3, webdav, supabase or folder"))
 		}
 		if err := c.Init(server, name); err != nil {
 			fatal(err)
@@ -236,7 +241,9 @@ func cmdSync(store *app.Store, args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Removed %s, the vault key was changed, what it already downloaded it keeps\n", d.Name)
-		if ref, err := c.StoreRef(); err == nil && ref != nil && ref.Kind == "supabase" {
+		if ref, err := c.StoreRef(); err == nil && ref != nil && ref.Kind == "folder" {
+			fmt.Println("This account is in a synced folder and the removed device may still sync it, it reads nothing new, but it can delete files and stop the sync\nTake it out of the share in Syncthing, Dropbox or iCloud too")
+		} else if err == nil && ref != nil && ref.Kind == "supabase" {
 			fmt.Println("This account is in a Supabase project and the removed device still holds the sshr key, it can delete objects and stop the sync\nMake a new key and run its SQL in the project, it drops the old one:\n  sshr sync supabase-sql --replace\nthen run on every device that stays, with the new key:\n  sshr sync store-key")
 		} else if err == nil && ref != nil && ref.Kind == "webdav" {
 			fmt.Println("This account is in a WebDAV folder and the removed device still knows the password, it can delete files and stop the sync\nChange the password (in Nextcloud make a new app password and delete the old one), then run on every device that stays:\n  sshr sync store-key\nwith --user <name> on each of them if the user changes too")

@@ -43,6 +43,7 @@ How sshr is built, which package may use which, where data lives and how the mai
 | `internal/app` | the core: the Store facade over package hosts with its hooks, the system keychain, password managers, the names of sshcmd and sshconf the front ends use | `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `pwmgr`, `sshcmd`, `sshconf` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/s3store` | a sync account in an S3 bucket (AWS S3, R2, MinIO) through the AWS SDK, the create of a manifest is PutObject with If-None-Match: * | `syncclient` |
+| `internal/folderstore` | a sync account in a folder Syncthing, Dropbox or iCloud already syncs, names checked against the account shapes, every path inside an `os.Root`, Create through a hard link, conflict copies of changes reported, a fork between devices is possible, the client stops on it | `syncclient` |
 | `internal/syncclient` | device keys, pull, push, conflicts, key rotation, runs no program | `fileio`, `record`, `vault`, `hosts`, `syncproto`, `handcode` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
 | `internal/api` | local REST API over the core | `app`, `audit` |
