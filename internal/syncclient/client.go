@@ -295,6 +295,22 @@ func (c *Client) load() error {
 	if c.st != nil {
 		return nil
 	}
+	if err := c.loadLocal(); err != nil {
+		return err
+	}
+	if err := c.openBackend(); err != nil {
+		c.st = nil
+		return err
+	}
+	return nil
+}
+
+// loadLocal reads the state and the device key and opens no store, leave
+// tells the hosts changed here apart with it while the store is gone
+func (c *Client) loadLocal() error {
+	if c.st != nil {
+		return nil
+	}
 	b, err := fileio.ReadFileShared(c.statePath())
 	if os.IsNotExist(err) {
 		return ErrNotSetUp
@@ -332,10 +348,6 @@ func (c *Client) load() error {
 		return err
 	}
 	c.st = &st
-	if err := c.openBackend(); err != nil {
-		c.st = nil
-		return err
-	}
 	return nil
 }
 
@@ -664,7 +676,16 @@ func (c *Client) join(server, code, name string) (string, error) {
 		return "", fmt.Errorf("the sync store holds account %s, the invite is for %s, check the server or store", short(tr.Account, 8), short(account, 8))
 	}
 	c.st.Token, c.st.DeviceID = tr.Token, self.ID
-	return DeviceFingerprint(self), c.saveNew()
+	took := c.takeLeftEdits()
+	if err := c.saveNew(); err != nil {
+		return "", err
+	}
+	if took {
+		if err := os.Remove(c.leftEditsPath()); err != nil {
+			c.logf("%s stays (%v), delete it, a later join of this account would take its old entries", c.leftEditsPath(), err)
+		}
+	}
+	return DeviceFingerprint(self), nil
 }
 
 // Pending lists devices that joined and wait for approval
@@ -875,7 +896,7 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 		// change no trusted device signed, padding costs nothing
 		last := out[len(out)-1]
 		if len(out) >= keepHistory && verifySignature(&last, c.st.Trusted) == nil {
-			return nil, fmt.Errorf("the sync keeps only the last %d changes and no longer has changes %d to %d, this device fell behind, run sshr sync leave and join again", keepHistory, cut, m.Counter-1)
+			return nil, fmt.Errorf("the sync keeps only the last %d changes and no longer has changes %d to %d, this device fell behind, run sshr sync leave and join again, the hosts changed here before the leave are kept", keepHistory, cut, m.Counter-1)
 		}
 		return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", cut, m.Counter-1)
 	}
@@ -2278,6 +2299,15 @@ func (c *Client) leave(force bool) error {
 				if err := c.finishRotation(); err != nil {
 					return fmt.Errorf("the other devices still wait for the vault key this device changed and it cannot be delivered now, run sshr sync again, or leave with --force and pair them again: %v", err)
 				}
+			}
+			// the device key goes below, what was changed here is told
+			// apart while it is still there
+			if err := c.keepEdits(); err != nil {
+				if !force {
+					return fmt.Errorf("the hosts changed here since the last sync cannot be kept (%v), a join would take the version of the account for them, fix that or leave with --force", err)
+				}
+				os.Remove(c.leftEditsPath())
+				c.logf("the hosts changed here since the last sync are not kept (%v), a join takes the version of the account for them", err)
 			}
 			for e := 1; e <= st.Epoch; e++ {
 				vault.SecretDelete(c.prefix() + "key-" + strconv.Itoa(e))
