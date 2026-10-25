@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // a child of this process passes the agent check, a process whose parent
@@ -51,7 +53,7 @@ func TestFromOwnChild(t *testing.T) {
 	}
 	defer child.Wait()
 	c := accept()
-	if err := checkAgentPeer(c); err != nil {
+	if err := checkAgentPeer(c, os.Getpid()); err != nil {
 		t.Errorf("a child of sshr was refused: %v", err)
 	}
 	c.Close()
@@ -63,10 +65,41 @@ func TestFromOwnChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	c = accept()
-	if err := checkAgentPeer(c); err == nil {
+	if err := checkAgentPeer(c, os.Getpid()); err == nil {
 		t.Error("a process that is not under sshr got the agent")
-	} else if !strings.Contains(err.Error(), "was not started by sshr") {
+	} else if !strings.Contains(err.Error(), "is not the ssh of this login") {
 		t.Errorf("the refusal does not say why: %v", err)
 	}
 	c.Close()
+}
+
+// once the ssh of a login runs, its agent answers only that ssh and what
+// runs under it, another process of the same sshr is refused, another
+// login or an extension of sshr serve does not get the key
+func TestAgentAnswersOnlyItsLogin(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	login := exec.Command("sleep", "30")
+	if err := login.Start(); err != nil {
+		t.Skip("no sleep")
+	}
+	defer func() { login.Process.Kill(); login.Wait() }()
+	stop, err := serveAgent(login, agent.NewKeyring(), "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	sock := ""
+	for _, kv := range login.Env {
+		if v, ok := strings.CutPrefix(kv, "SSH_AUTH_SOCK="); ok {
+			sock = v
+		}
+	}
+	c, err := dialAgent(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := agent.NewClient(c).List(); err == nil {
+		t.Error("sshr itself, not under the ssh of the login, got the agent")
+	}
 }

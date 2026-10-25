@@ -128,7 +128,7 @@ func serveAgent(cmd *exec.Cmd, keys agent.Agent, name string) (func(), error) {
 				// refusal is said, ssh would only report the key as refused,
 				// the check runs per connection, a flood of refused ones does
 				// not hold up the next
-				if err := checkAgentPeer(c); err != nil {
+				if err := checkAgentPeer(c, agentRoot(cmd)); err != nil {
 					refused.Do(func() {
 						fmt.Fprintf(os.Stderr, "sshr: the agent of %s refused a connection: %v\n", name, err)
 					})
