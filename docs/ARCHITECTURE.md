@@ -36,13 +36,14 @@ How sshr is built, which package may use which, where data lives and how the mai
 | `internal/vault` | the vault key in a keychain or under a passphrase, seals bound to a host and field, named secrets of the sync device, runs no program, the system keychain and the prompt are set by `app` | `fileio`, `settings` |
 | `internal/settings` | `~/.sshr/settings.json`: load, save of the changed fields only, the command list, never synced | `fileio`, `record` |
 | `internal/record` | keeps files readable across versions: unknown keys kept and written back, the `version` of a file | nothing |
+| `internal/handcode` | bytes as text people copy by hand and type back: Crockford base32 in groups with a check character each and a check of the whole, for the recovery kit and the recovery code of the vault | nothing |
 | `internal/fileio` | atomic file writes, file locks between processes, a read that waits out a Windows rename, imports nothing of sshr | nothing |
 | `internal/sshcmd` | the ssh runner: ssh, scp and mosh command lines, jump hosts, reuse of a connection, copy, remote commands, a session plan, keys of the vault, 1Password and Bitwarden served through a private agent, saved passwords through askpass, the ssh binary to use, on an Env over the host store | `fileio`, `settings`, `vault`, `hosts`, `health`, `pwmgr` |
 | `internal/sshconf` | the ssh config: import of the user's hosts through `ssh -G`, the export file of the saved hosts and its Include line in `~/.ssh/config`, on an Env of the ssh env and the export path | `fileio`, `hosts`, `sshcmd` |
 | `internal/app` | the core: the Store facade over package hosts with its hooks, the system keychain, password managers, the names of sshcmd and sshconf the front ends use | `fileio`, `record`, `settings`, `vault`, `hosts`, `health`, `pwmgr`, `sshcmd`, `sshconf` |
 | `internal/syncproto` | wire types and limits of sync, shared by client and server | nothing |
 | `internal/s3store` | a sync account in an S3 bucket (AWS S3, R2, MinIO) through the AWS SDK, the create of a manifest is PutObject with If-None-Match: * | `syncclient` |
-| `internal/syncclient` | device keys, pull, push, conflicts, key rotation, runs no program | `fileio`, `record`, `vault`, `hosts`, `syncproto` |
+| `internal/syncclient` | device keys, pull, push, conflicts, key rotation, runs no program | `fileio`, `record`, `vault`, `hosts`, `syncproto`, `handcode` |
 | `internal/syncserver` | the HTTP sync server, stores ciphertext only | `syncproto`, `fileio` |
 | `internal/api` | local REST API over the core | `app`, `audit` |
 | `internal/mcp` | MCP server over the core | `app`, `audit` |
