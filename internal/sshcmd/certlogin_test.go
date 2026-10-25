@@ -229,3 +229,26 @@ func TestCertLoginRefusesConfigKeys(t *testing.T) {
 		t.Errorf("a host with a key in the ssh config: %v", err)
 	}
 }
+
+// a certificate file older than an hour is from a login whose sshr was
+// killed, it goes at the next certificate login, a fresh one stays
+func TestSweepCertFiles(t *testing.T) {
+	dir := t.TempDir()
+	old, fresh := filepath.Join(dir, "cert-aaaa.pub"), filepath.Join(dir, "cert-bbbb.pub")
+	other := filepath.Join(dir, "master-socket")
+	for _, f := range []string{old, fresh, other} {
+		os.WriteFile(f, []byte("x"), 0o600)
+	}
+	now := time.Now()
+	os.Chtimes(old, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
+	os.Chtimes(other, now.Add(-2*time.Hour), now.Add(-2*time.Hour))
+	sweepCertFiles(dir, now)
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Error("an old certificate file stayed")
+	}
+	for _, f := range []string{fresh, other} {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("%s went: %v", f, err)
+		}
+	}
+}
