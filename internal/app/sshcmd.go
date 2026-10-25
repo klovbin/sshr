@@ -40,6 +40,9 @@ var ErrNoCA = sshcmd.ErrNoCA
 // LoadCertCA reads the certificate authority of this machine
 func LoadCertCA() (*CertCA, error) { return sshcmd.LoadCertCA() }
 
+// CertTarget binds a host listed for certificates to where it points
+func CertTarget(h *Host) string { return sshcmd.CertTarget(h) }
+
 // InitSoftwareCA makes a certificate authority whose key is sealed with
 // the vault key, an authority there stays unless replace
 func InitSoftwareCA(replace bool) (*CertCA, error) { return sshcmd.InitSoftwareCA(replace) }

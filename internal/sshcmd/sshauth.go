@@ -32,6 +32,9 @@ func AttachAuth(cmd *exec.Cmd, h *Host) (func(), error) {
 	if cmd == nil || h == nil {
 		return func() {}, nil
 	}
+	if h.CertFile() != "" {
+		return attachCert(cmd, h)
+	}
 	if h.ServedByAgent() {
 		return attachAgentKey(cmd, h)
 	}

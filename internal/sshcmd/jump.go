@@ -59,7 +59,7 @@ func (e Env) JumpArgs(h *Host) ([]string, error) {
 	// ProxyCommand starts each hop with that environment removed, when every
 	// host needs a hardware key each hop goes through sshr too, so the rule
 	// is checked for it, ssh -J would log the hop in another way
-	if !anySaved && !h.PasswordFromSshr() && !h.ServedByAgent() && !hardwareKeyEverywhere() {
+	if !anySaved && !h.PasswordFromSshr() && !h.ServedByAgent() && h.CertFile() == "" && !hardwareKeyEverywhere() {
 		return []string{"-J", strings.Join(parts, ",")}, nil
 	}
 	exe, err := os.Executable()
@@ -108,11 +108,30 @@ func (e Env) connectArgs(h *Host, check bool) ([]string, error) {
 	if check {
 		pickRoute(h)
 	}
+	h.SetCertFile("")
+	_, cert, err := certFor(h)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", h.Name, err)
+	}
+	hwkey := hardwareKeyRequired(h)
+	if cert {
+		if hwkey {
+			return nil, fmt.Errorf("%s needs a hardware key and is listed for certificates, sshr does not sign on a token yet, take it off one of the lists", h.Name)
+		}
+		args, err := certArgs(h)
+		if err != nil {
+			return nil, err
+		}
+		jump, err := e.JumpArgs(h)
+		if err != nil {
+			return nil, err
+		}
+		return append(args, jump...), nil
+	}
 	jump, err := e.JumpArgs(h)
 	if err != nil {
 		return nil, err
 	}
-	hwkey := hardwareKeyRequired(h)
 	if hwkey {
 		if err := CheckHardwareKey(h); err != nil {
 			return nil, err

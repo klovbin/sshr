@@ -22,7 +22,7 @@ var (
 	// mergeKept are not compared, they belong to this device or do not
 	// travel in sync, the local value stays and Import decides on them
 	mergeKept = []string{"ID", "Key", "KeyData", "KeyPassphrase", "KeySealed", "KeyRef", "Agent", "AgentKey",
-		"PasswordRef", "PasswordSealed", "PlainPassword", "CreatedAt", "LastConnected", "Rev", "route", "format"}
+		"PasswordRef", "PasswordSealed", "PlainPassword", "CreatedAt", "LastConnected", "Rev", "route", "certFile", "format"}
 )
 
 // access is the access group of a host, compared as one value

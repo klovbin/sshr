@@ -271,14 +271,25 @@ sshd_config that turn off passwords and the other ways in, keys sshd
 takes from other files or a command are not read, it changes nothing
 there`},
 	{name: "cert", usage: `sshr cert ca init --software [--replace]
-sshr cert ca show`, short: "short certificates signed on this machine, off by default",
+sshr cert ca show
+sshr cert on <host> --principal <name>[,<name>...]
+sshr cert off <host>
+sshr cert status`, short: "short certificates signed on this machine, off by default",
 		details: `ca init makes the certificate authority of this machine, --software keeps
 its key sealed with the vault key in ~/.sshr/cert-ca.json, whoever opens
 the vault here can log in wherever the authority is trusted, --replace
 makes a new one and every server then needs its key again. ca show prints
 the key and the lines that make a server trust it, TrustedUserCAKeys in
 sshd_config for every account or cert-authority in one authorized_keys.
-The authority never syncs`},
+on lists a host: every connect makes a key in memory for that login, the
+authority signs it for the principals for 10 minutes (cert_validity in
+settings.json, at most 8 hours) and ssh gets only that certificate
+through an agent of sshr, no saved password, no key file, no agent
+forwarding, a jump goes through sshr. A host repointed since it was
+listed is refused until it is listed again, a host that needs a hardware
+key cannot be listed yet. off goes back to the saved login. The
+authority and the list never sync. sshr export writes such a host without
+the certificate`},
 	{name: "hooks", usage: `sshr hooks list
 sshr hooks on|off
 sshr hooks set <host> before|after <command>
