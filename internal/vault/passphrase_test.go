@@ -606,6 +606,7 @@ func TestPassphraseNeedsDifferentCharacters(t *testing.T) {
 		t.Fatalf("a passphrase of two characters: %v", err)
 	}
 }
+
 // the strong cost writes 256 MiB into the file and the file still opens
 func TestPassphraseStrongCost(t *testing.T) {
 	useMockKeychain(t)
