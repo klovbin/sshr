@@ -286,6 +286,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the primary key of a table decides two pushes at once, so the history never forks, the project holds only ciphertext
 - **Why this way:** `sshr sync supabase-sql` prints one SQL file for the SQL editor, the objects sit in a schema the API does not expose, the device reaches them only through functions that check the sshr key first, a stale key is an error and never an empty store, every call is a POST so no read replica answers, the device holds the publishable key and its own sshr key in the keychain, never a secret or service_role key, off by default since every device shares one sshr key
 
+### Sync through a synced folder
+- **What:** `sshr sync init --backend folder --path <folder>` keeps the encrypted account in a folder that Syncthing, Dropbox, iCloud Drive or a network share already syncs, the other devices join with the same flags and the path of the folder on them
+- **What for:** sync with what people already run, no server, no bucket, no account and no key to share
+- **Why it helps:** the folder holds only ciphertext, a device takes part as soon as its folder synced
+- **Why this way:** a sync tool has no compare and swap between devices, two devices that push at once while they do not see each other fork the account, a pull finds that through the head and stops with the edits in place, a conflict copy of a change in the folder stops push and pull until one of the pair is deleted, every path stays inside the folder (`os.Root`), only names of the account shapes are read or listed, a change iCloud moved off the machine is an error and not a shorter history, init refuses a folder that holds an account, off by default, the weakest of the stores
+
 ### Safe saves from several sshr processes
 - **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
 - **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time

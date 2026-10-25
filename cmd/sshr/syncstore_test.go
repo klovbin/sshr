@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"sshr.dev/internal/davstore"
+	"sshr.dev/internal/folderstore"
 	"sshr.dev/internal/s3store"
 	"sshr.dev/internal/syncclient"
 )
@@ -339,5 +340,43 @@ func TestRecoveryWaitDays(t *testing.T) {
 	_, errOut, code := sshrIn(t, home, "sync", "recovery", "create", "--wait", "106751991167301")
 	if code == 0 || !strings.Contains(errOut, "from 1 to 366") {
 		t.Fatalf("a huge --wait: %d %q", code, errOut)
+	}
+}
+
+// a folder account takes --path only, init wants the folder empty, the
+// join line names the folder, the folder has no key to replace (#128)
+func TestFolderStoreFlags(t *testing.T) {
+	dir := t.TempDir()
+	c := &syncclient.Client{}
+	f := storeFlags{backend: "folder", folder: folderstore.Config{Path: dir}, forInit: true}
+	addr, err := f.setup(c, "")
+	if err != nil || addr != "folder "+dir || c.BackendRef == nil || c.BackendRef.Kind != "folder" || c.StoreSecret != "" {
+		t.Fatalf("setup %q %v %+v", addr, err, c.BackendRef)
+	}
+	got, err := joinFlags(addr, c.BackendRef)
+	if err != nil || got != "--backend folder --path "+shellQuote(dir) {
+		t.Errorf("join flags %q %v", got, err)
+	}
+	if _, err := openStore(*c.BackendRef, ""); err != nil {
+		t.Error(err)
+	}
+	os.WriteFile(filepath.Join(dir, "account"), []byte("{}"), 0o600)
+	if _, err := f.setup(&syncclient.Client{}, ""); err == nil || !strings.Contains(err.Error(), "holds an account") {
+		t.Errorf("init in a folder that has an account: %v", err)
+	}
+	f.forInit = false
+	if _, err := f.setup(&syncclient.Client{}, ""); err != nil {
+		t.Errorf("join in a folder that has an account: %v", err)
+	}
+	for _, bad := range []storeFlags{
+		{backend: "folder"},
+		{backend: "folder", folder: folderstore.Config{Path: dir}, keyGiven: true},
+	} {
+		if _, err := bad.setup(&syncclient.Client{}, ""); err == nil {
+			t.Errorf("%+v was taken", bad)
+		}
+	}
+	if _, err := (&storeFlags{backend: "folder", folder: folderstore.Config{Path: dir}}).setup(&syncclient.Client{}, "https://x"); err == nil {
+		t.Error("--server with a folder was taken")
 	}
 }

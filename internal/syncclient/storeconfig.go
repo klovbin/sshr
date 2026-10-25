@@ -41,6 +41,15 @@ func (c *Client) openBackend() error {
 	if c.OpenBackend == nil {
 		return storeOpenError{fmt.Errorf("this sshr cannot open a sync store of kind %q", c.st.Backend.Kind)}
 	}
+	// a synced folder has no secret, the sync tool decides who reads it
+	if c.st.Backend.Kind == "folder" {
+		b, err := c.OpenBackend(*c.st.Backend, "")
+		if err != nil {
+			return storeOpenError{err}
+		}
+		c.Backend = b
+		return nil
+	}
 	secret, ok, err := vault.SecretGet(c.storeSecretName())
 	if err != nil {
 		return err
