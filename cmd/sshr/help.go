@@ -294,7 +294,8 @@ sshr vault remove-slot <id>`, short: "keep the vault key in the keychain, under 
 the system keychain, passphrase moves it into ~/.sshr/vault/vault-key.json
 wrapped with a passphrase (Argon2id) for a machine without a keychain, off by
 default: the passphrase is asked once per run, a forgotten one loses every
-saved secret, and the file can be attacked offline, the copy in the keychain
+saved secret, and the file can be attacked offline, a passphrase needs 12
+characters and 6 different ones, the copy in the keychain
 is removed, a keychain that is locked keeps it and sshr says so, keychain
 moves the key back and removes the file, the keys of the sync device move
 along. recovery makes a recovery code for the vault under a passphrase:

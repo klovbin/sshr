@@ -594,3 +594,15 @@ func TestPassphraseVaultMakesNoKeyOnKeychainError(t *testing.T) {
 		t.Errorf("mode %s", Mode())
 	}
 }
+
+// a passphrase of few different characters is refused however long
+func TestPassphraseNeedsDifferentCharacters(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetPassphrase("abababababababab", nil); err == nil || !strings.Contains(err.Error(), "different characters") {
+		t.Fatalf("a passphrase of two characters: %v", err)
+	}
+}
