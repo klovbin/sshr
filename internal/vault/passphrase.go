@@ -181,11 +181,34 @@ func passphraseVaultKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	pass, err := askPassphrase("sshr vault passphrase: ")
+	if !hasSlot(kf, slotRecovery) {
+		pass, err := askPassphrase("sshr vault passphrase: ")
+		if err != nil {
+			return nil, err
+		}
+		return openPassphraseSlots(v1, kf, pass)
+	}
+	text, err := askPassphrase("sshr vault passphrase or recovery code: ")
 	if err != nil {
 		return nil, err
 	}
-	return openPassphraseSlots(v1, kf, pass)
+	if !looksLikeRecoveryCode(text) {
+		key, err := openPassphraseSlots(v1, kf, text)
+		// a recovery code with a typo is named by its group
+		if errors.Is(err, ErrBadPassphrase) {
+			if terr := recoveryTypo(text); terr != nil {
+				return nil, terr
+			}
+		}
+		return key, err
+	}
+	key, err := openRecoverySlots(kf, text)
+	if err != nil {
+		return nil, err
+	}
+	recoveryUsed.Store(true)
+	fmt.Fprintln(os.Stderr, "sshr: the recovery code opened the vault, it was typed somewhere, sshr vault recovery replaces it")
+	return key, nil
 }
 
 // SetPassphrase wraps the current vault key with pass into the vault

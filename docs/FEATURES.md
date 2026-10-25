@@ -102,6 +102,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** a script or tool running as you outside sshr gets no use of the key, a program sshr started still can, in a long running `sshr serve` or `sshr mcp` the local commands of hosts and extension commands are such programs
 - **Why this way:** the kernel names the process at the other end of the socket (SO_PEERCRED on Linux, LOCAL_PEERPID on macOS) and sshr walks up its parents to its own process, 32 steps at most, a peer that cannot be named is refused, a Windows named pipe gives no such answer through the library sshr uses, there any process of the user is let in as before
 
+### Recovery code of the vault
+- **What:** `sshr vault recovery` makes a recovery code for a vault kept in `vault-key.json`, shown once on a terminal and saved after one of its groups, picked at random, is typed back, the passphrase prompt takes the code instead of the passphrase, after the code opened the vault sshr gives a new one on the terminal, `vault-key.json` holds slots that each open the same key, a passphrase slot and a recovery slot now
+- **What for:** a forgotten passphrase lost every saved secret, a key on a hardware token comes next and a lost token must not lose them either
+- **Why it helps:** the code is a way back in that a copy of `~/.sshr` cannot be guessed from, 128 random bits, unlike a passphrase
+- **Why this way:** groups of letters and digits with a check character each, as in the recovery kit of a sync account, so a typo is named by its group, the key that wraps the vault key is HKDF of the code, Argon2 adds nothing to 128 random bits, a used code was typed somewhere and is replaced, the file stays format 1 until a slot is added, an older sshr refuses format 2 by its version, the setting stays `passphrase`, an older sshr reads any other value as the keychain
+
 ### The vault key forgotten when idle
 - **What:** with the system keychain a running sshr zeroes and forgets its cached vault key 15 minutes after its last use, the next use reads it from the keychain again without asking, `"vault_idle_minutes"` sets the time, below 0 keeps it for the whole run, under a passphrase the key is kept for the whole run
 - **What for:** the window, `sshr serve` and `sshr mcp` run for hours, the key they read once stayed in memory all that time

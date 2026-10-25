@@ -63,7 +63,7 @@ func complete(store *app.Store, words []string, cur string) []string {
 	case c.name == "hooks" && len(words) == 3 && (words[1] == "set" || words[1] == "unset"):
 		return filter([]string{"before", "after"}, cur)
 	case c.name == "vault" && len(words) == 1:
-		return filter([]string{"status", "passphrase", "keychain"}, cur)
+		return filter([]string{"status", "passphrase", "keychain", "recovery"}, cur)
 	case c.name == "gateway" && len(words) == 2:
 		return filter(append(savedNames(store), "--off"), cur)
 	case c.name == "tag" && len(words) == 2:

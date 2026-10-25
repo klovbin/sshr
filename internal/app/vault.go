@@ -65,6 +65,17 @@ func SecretDelete(name string) error { return vault.SecretDelete(name) }
 // MoveSecrets moves named secrets between the keychain and the vault file
 func MoveSecrets(names []string, toFile bool) error { return vault.MoveSecrets(names, toFile) }
 
+// NewVaultRecoveryCode replaces the recovery code of the vault kept in
+// vault-key.json, confirm shows the code and gets a part of it back before
+// anything is written
+func NewVaultRecoveryCode(confirm func(code string) error) error {
+	return vault.NewRecoveryCode(confirm)
+}
+
+// VaultRecoveryUsed tells whether a recovery code opened the vault in
+// this run
+func VaultRecoveryUsed() bool { return vault.RecoveryUsed() }
+
 // ErrKeychainCopyLeft means the vault is under the passphrase and the
 // system keychain still holds the vault key
 var ErrKeychainCopyLeft = vault.ErrKeychainCopyLeft

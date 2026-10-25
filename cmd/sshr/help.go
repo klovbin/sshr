@@ -287,7 +287,7 @@ Examples:
   sshr hooks set web before "wg-quick up office"
   sshr hooks set web after "wg-quick down office"
   sshr hooks on`},
-	{name: "vault", usage: "sshr vault status|passphrase|keychain", short: "keep the vault key in the keychain or under a passphrase",
+	{name: "vault", usage: "sshr vault status|passphrase|keychain|recovery", short: "keep the vault key in the keychain or under a passphrase",
 		details: `The vault key seals saved passwords and keys stored in sshr. It lives in
 the system keychain, passphrase moves it into ~/.sshr/vault/vault-key.json
 wrapped with a passphrase (Argon2id) for a machine without a keychain, off by
@@ -295,11 +295,17 @@ default: the passphrase is asked once per run, a forgotten one loses every
 saved secret, and the file can be attacked offline, the copy in the keychain
 is removed, a keychain that is locked keeps it and sshr says so, keychain
 moves the key back and removes the file, the keys of the sync device move
-along
+along. recovery makes a recovery code for the vault under a passphrase:
+random groups of letters and digits shown once, the passphrase prompt takes
+the code instead of the passphrase, a typo is named by its group, the code
+cannot be guessed offline, write it down and keep it away from the machine,
+a new code replaces the old one, after the code opened the vault sshr gives
+a new one on the terminal
 
 Examples:
   sshr vault status
   sshr vault passphrase
+  sshr vault recovery
   sshr vault keychain`},
 	{name: "ext", usage: `sshr ext install <git url or folder> [--yes]
 sshr ext import <name> [args...]
