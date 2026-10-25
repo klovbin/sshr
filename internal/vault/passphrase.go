@@ -181,18 +181,41 @@ func passphraseVaultKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !hasSlot(kf, slotRecovery) {
+	// a token opens the vault without a question, without one the slots
+	// that are typed are asked
+	var tokenErr error
+	if hasSlot(kf, slotFIDO2) {
+		key, err := openTokenSlots(kf)
+		if err == nil {
+			return key, nil
+		}
+		tokenErr = err
+		if !errors.Is(err, ErrNoToken) {
+			fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
+		}
+	}
+	hasPass, hasCode := v1 != nil || hasSlot(kf, slotPassphrase), hasSlot(kf, slotRecovery)
+	switch {
+	case !hasPass && !hasCode && tokenErr != nil:
+		return nil, fmt.Errorf("the vault opens only with its token: %w", tokenErr)
+	case !hasPass && !hasCode:
+		return nil, errors.New("the vault key file has no slot this sshr can open")
+	case !hasCode:
 		pass, err := askPassphrase("sshr vault passphrase: ")
 		if err != nil {
 			return nil, err
 		}
 		return openPassphraseSlots(v1, kf, pass)
 	}
-	text, err := askPassphrase("sshr vault passphrase or recovery code: ")
+	prompt := "sshr vault passphrase or recovery code: "
+	if !hasPass {
+		prompt = "sshr vault recovery code: "
+	}
+	text, err := askPassphrase(prompt)
 	if err != nil {
 		return nil, err
 	}
-	if !looksLikeRecoveryCode(text) {
+	if hasPass && !looksLikeRecoveryCode(text) {
 		key, err := openPassphraseSlots(v1, kf, text)
 		// a recovery code with a typo is named by its group
 		if errors.Is(err, ErrBadPassphrase) {
