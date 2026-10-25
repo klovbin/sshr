@@ -304,6 +304,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the manifest never names a blob that is gone, the other devices read every host of the push
 - **Why this way:** the check runs after the manifest went in, so no gap is left between the check and the write, the copy is the same sealed bytes under the same hash, sshr-sync checks the blobs itself when it takes the manifest
 
+### Cleanup of a store
+- **What:** `sshr sync cleanup` counts the blobs of a bucket, WebDAV folder, Supabase project or synced folder that no change names any more, `--apply` deletes the ones a run on this device first saw as orphans a day or more before
+- **What for:** every edit of a host leaves its old encrypted blob behind, a store that is slow or counts its items fills up
+- **Why it helps:** the store keeps only what the devices still read, on sshr-sync the server already does this itself
+- **Why this way:** the store needs no clock, a journal on the device notes when it first saw each orphan, a clock set back or another account empties it, the blobs of the head and of the 10 changes before it stay, on a synced folder those of every kept change, a listing that misses a blob of the head or a change pushed during the run stops it, a push puts back a blob the cleanup took while it ran
+
 ### Safe saves from several sshr processes
 - **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
 - **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time
