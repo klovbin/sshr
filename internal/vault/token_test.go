@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"sshr.dev/internal/settings"
 )
 
 // fakeToken stands for a FIDO2 token: its answer is an HMAC under a secret
@@ -206,5 +208,35 @@ func TestDamagedSlotIsNoWayIn(t *testing.T) {
 	}
 	if err := canRemove(slots, "r"); err == nil {
 		t.Error("the recovery code went with only a damaged passphrase slot left beside one token")
+	}
+}
+
+// a vault with a token slot drops its key after the idle time when one is
+// set, the key can be touched again, without a set time or without a token
+// the key is kept for the whole run
+func TestTokenVaultIdleTime(t *testing.T) {
+	answer := "correct horse battery"
+	passphraseVault(t, &answer)
+	t.Cleanup(func() { idleFor, idleLoaded = 0, false })
+	st, _ := settings.Load()
+	st.VaultIdleMinutes = 5
+	settings.Save(st)
+	idleFor, idleLoaded = 0, false
+	if d := lockedIdle(); d != 0 {
+		t.Errorf("a vault without a token drops its key after %s", d)
+	}
+	tok := useFakeToken(t)
+	if err := AddToken(tok.enrol, false, "yubi", func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	idleFor, idleLoaded = 0, false
+	if d := lockedIdle(); d != 5*time.Minute {
+		t.Errorf("a token vault with 5 minutes set: %s", d)
+	}
+	st.VaultIdleMinutes = 0
+	settings.Save(st)
+	idleFor, idleLoaded = 0, false
+	if d := lockedIdle(); d != 0 {
+		t.Errorf("a token vault without a set time drops its key after %s", d)
 	}
 }

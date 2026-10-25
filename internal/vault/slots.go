@@ -149,5 +149,6 @@ func RemoveSlot(id string) error {
 		}
 		return fmt.Errorf("%s did not read back after the slot was removed, it is put back as it was: %v", path, err)
 	}
+	slotsChanged()
 	return nil
 }
