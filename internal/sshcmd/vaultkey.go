@@ -113,18 +113,19 @@ func attachAgentKey(cmd *exec.Cmd, h *Host) (func(), error) {
 			if err != nil {
 				return
 			}
-			// only ssh and the programs sshr started get the key, another
-			// program of the user could log in elsewhere with it, the first
-			// refusal is said, ssh would only report the key as refused
-			if err := checkAgentPeer(c); err != nil {
-				refused.Do(func() {
-					fmt.Fprintf(os.Stderr, "sshr: the agent of %s refused a connection: %v\n", h.Name, err)
-				})
-				c.Close()
-				continue
-			}
 			go func() {
 				defer c.Close()
+				// only ssh and the programs sshr started get the key, another
+				// program of the user could log in elsewhere with it, the first
+				// refusal is said, ssh would only report the key as refused,
+				// the check runs per connection, a flood of refused ones does
+				// not hold up the next
+				if err := checkAgentPeer(c); err != nil {
+					refused.Do(func() {
+						fmt.Fprintf(os.Stderr, "sshr: the agent of %s refused a connection: %v\n", h.Name, err)
+					})
+					return
+				}
 				agent.ServeAgent(keys, c)
 			}()
 		}

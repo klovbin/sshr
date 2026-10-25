@@ -16,8 +16,9 @@ const maxPeerDepth = 32
 // refused, it could log in elsewhere with the key while a session runs,
 // a program sshr started (a local command of a host, an extension in
 // sshr serve) passes too, the check knows the tree and not the one ssh,
-// the error says why, where the system gives no peer process (Windows
-// pipes) every peer of the user is let in
+// the error says why, on Windows the peer of the pipe and its parents are
+// read the same way, where the system gives no peer process (the BSDs)
+// every peer of the user is let in
 func checkAgentPeer(c net.Conn) error {
 	pid, ok, err := peerPID(c)
 	if err != nil {
