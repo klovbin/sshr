@@ -440,12 +440,16 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 	if m.Account != string(account) {
 		return errors.New("the manifest is for another account than the store holds")
 	}
+	known := o.blobsOf(expect, m.Account)
 	for id, e := range m.Entries {
 		if e.Hash == "" {
 			continue
 		}
 		if err := checkHash(e.Hash); err != nil {
 			return err
+		}
+		if known[e.Hash] {
+			continue
 		}
 		// one byte is enough to know the blob is there, ErrTooLarge
 		// says it holds more
@@ -464,6 +468,34 @@ func (o ObjectBackend) PutManifest(expect uint64, signed []byte) error {
 	}
 	o.trimHistory(m.Counter)
 	return nil
+}
+
+// blobsOf names the blobs manifest counter lists, they were checked when
+// it went in, so a push looks up only the blobs that are new since, one
+// read in place of one per host on a store where every read is a
+// request, nil when there is no such manifest and every blob is looked up,
+// a manifest under that name with another counter or account is planted
+// and lists nothing
+func (o ObjectBackend) blobsOf(counter uint64, account string) map[string]bool {
+	if counter == 0 {
+		return nil
+	}
+	raw, err := o.Store.Get(manifestName(counter), syncproto.MaxManifest)
+	if err != nil {
+		return nil
+	}
+	var sm syncproto.Signed
+	var m syncproto.Manifest
+	if json.Unmarshal(raw, &sm) != nil || json.Unmarshal(sm.Body, &m) != nil || m.Counter != counter || m.Account != account {
+		return nil
+	}
+	out := make(map[string]bool, len(m.Entries))
+	for _, e := range m.Entries {
+		if e.Hash != "" {
+			out[e.Hash] = true
+		}
+	}
+	return out
 }
 
 // trimHistory deletes the manifests more than keepHistory changes behind
