@@ -90,6 +90,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
 - **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
+### Short certificates signed on this machine
+- **What:** `sshr cert ca init --software` makes a certificate authority on this machine, its key sealed with the vault key in `~/.sshr/cert-ca.json`, `sshr cert ca show` prints its key and the `TrustedUserCAKeys` or `cert-authority` line a server needs, the authority signs user certificates for 10 minutes, starting 5 minutes back, with a pty and port forwards and no agent or X11 forwarding
+- **What for:** servers that trust one authority instead of a key per laptop, a certificate that runs out in minutes is worth little to whoever copies it
+- **Why it helps:** no long-lived key to put on every server and take off again when a laptop is gone
+- **Why this way:** off by default and local, the authority and the list of hosts never sync, so a stolen sync device cannot sign or turn it on, the software authority warns that whoever opens the vault can log in wherever it is trusted, a hardware token authority follows
+
 ### Hosts that connect only with a hardware key
 - **What:** `sshr hwkey require <host>...|--all` makes hosts connect only with a key on a FIDO token, a host that would log in another way is refused with the reason, `sshr hwkey status` shows which hosts are ready, `sshr hwkey off` lifts it, `sshr hwkey check <host>` reads authorized_keys on the server, lists the keys that are not on a token and prints the sshd_config lines that turn off passwords and the other ways in, it only reads, keys sshd takes from other AuthorizedKeysFile paths, AuthorizedKeysCommand or TrustedUserCAKeys are named and not read
 - **What for:** with a key on a token in place, a password, a saved software key or a forgotten key file would still let sshr in without the token

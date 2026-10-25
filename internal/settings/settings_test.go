@@ -107,7 +107,7 @@ func TestCloneSettingsCoversEveryList(t *testing.T) {
 		if !f.IsExported() {
 			continue
 		}
-		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" && f.Name != "HostCommands" && f.Name != "HardwareKeyHosts" {
+		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" && f.Name != "HostCommands" && f.Name != "HardwareKeyHosts" && f.Name != "CertHosts" && f.Name != "CertPrincipals" {
 			t.Errorf("Settings.%s is a %s, copy it in cloneSettings and list it here", f.Name, k)
 		}
 	}
@@ -246,5 +246,45 @@ func TestHealthEvery(t *testing.T) {
 		if got := (Settings{HealthInterval: in}).HealthEvery(); got != want {
 			t.Errorf("%d: %v", in, got)
 		}
+	}
+}
+
+// a host listed for certificates gets its principals while it points where
+// it did, a repointed host, a host without principals and an unknown mode
+// are errors and never a login without the certificate
+func TestCertFor(t *testing.T) {
+	var s Settings
+	if _, ok, err := s.CertFor("h1", "t1"); ok || err != nil {
+		t.Fatalf("off by default: %v %v", ok, err)
+	}
+	s.EnableCert("h1", "t1", []string{"deploy", "ops"})
+	if p, ok, err := s.CertFor("h1", "t1"); !ok || err != nil || len(p) != 2 || p[0] != "deploy" {
+		t.Errorf("a listed host: %v %v %v", p, ok, err)
+	}
+	if _, ok, err := s.CertFor("h2", "t1"); ok || err != nil {
+		t.Errorf("a host not listed: %v %v", ok, err)
+	}
+	if _, _, err := s.CertFor("h1", "elsewhere"); err == nil {
+		t.Error("a repointed host")
+	}
+	s.CertPrincipals["h1"] = " , "
+	if _, _, err := s.CertFor("h1", "t1"); err == nil {
+		t.Error("a host without principals")
+	}
+	s.Cert = "everything"
+	if _, _, err := s.CertFor("h1", "t1"); err == nil {
+		t.Error("a mode of a newer sshr")
+	}
+	s.Cert = CertListed
+	s.DisableCert("h1")
+	if _, ok, err := s.CertFor("h1", "t1"); ok || err != nil {
+		t.Errorf("a host taken off: %v %v", ok, err)
+	}
+	if s.CertMinutes() != CertValidityDefault {
+		t.Errorf("default life %d", s.CertMinutes())
+	}
+	s.CertValidity = 100000
+	if s.CertMinutes() != CertValidityMax {
+		t.Errorf("a life past the ceiling: %d", s.CertMinutes())
 	}
 }
