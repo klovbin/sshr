@@ -128,7 +128,7 @@ func runCLI(args []string) {
 	case "hwkey":
 		cmdHwkey(store, args[1:])
 	case "cert":
-		cmdCert(args[1:])
+		cmdCert(store, args[1:])
 	case "hooks":
 		cmdHooks(store, args[1:])
 	case "ext":

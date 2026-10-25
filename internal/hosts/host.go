@@ -78,6 +78,14 @@ func (h *Host) Via() string {
 	return h.route
 }
 
+// SetCertFile sets where the certificate of this login goes, empty for a
+// login without one
+func (h *Host) SetCertFile(path string) { h.certFile = path }
+
+// CertFile is where the certificate of this login goes, empty when the
+// host logs in without one
+func (h *Host) CertFile() string { return h.certFile }
+
 // RouteViaGateway makes the connection go through the Gateway when on,
 // directly when off, the route is never anything but the saved Gateway
 func (h *Host) RouteViaGateway(on bool) {

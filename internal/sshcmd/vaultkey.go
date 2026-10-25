@@ -98,6 +98,14 @@ func attachAgentKey(cmd *exec.Cmd, h *Host) (func(), error) {
 	if err := keys.Add(agent.AddedKey{PrivateKey: raw, Comment: h.Name}); err != nil {
 		return noop, err
 	}
+	return serveAgent(cmd, keys, h.Name)
+}
+
+// serveAgent serves keys from an agent of this process to cmd for as long
+// as it runs, only to ssh and the programs sshr started, name is the host
+// a refusal is said for
+func serveAgent(cmd *exec.Cmd, keys agent.Agent, name string) (func(), error) {
+	noop := func() {}
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return noop, err
@@ -122,7 +130,7 @@ func attachAgentKey(cmd *exec.Cmd, h *Host) (func(), error) {
 				// not hold up the next
 				if err := checkAgentPeer(c); err != nil {
 					refused.Do(func() {
-						fmt.Fprintf(os.Stderr, "sshr: the agent of %s refused a connection: %v\n", h.Name, err)
+						fmt.Fprintf(os.Stderr, "sshr: the agent of %s refused a connection: %v\n", name, err)
 					})
 					return
 				}

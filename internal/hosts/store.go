@@ -127,6 +127,9 @@ type Host struct {
 	// route is the Gateway when the last ConnectArgs found the host down
 	// directly
 	route string
+	// certFile is where the certificate of this login goes when the host
+	// logs in with a certificate, set by ConnectArgs, written by AttachAuth
+	certFile string
 	// extra are the keys of the host file this build does not know, a
 	// field a newer sshr wrote, kept through every save (record.go)
 	extra map[string]json.RawMessage
