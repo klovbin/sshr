@@ -34,6 +34,7 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/klovbin/sshr'
 license=('AGPL-3.0-only')
 depends=('openssh')
+optdepends=('libfido2: a security key that opens the vault (sshr vault add-token)')
 provides=('sshr')
 conflicts=('sshr')
 source=("LICENSE-$pkgver::https://raw.githubusercontent.com/klovbin/sshr/v$pkgver/LICENSE")

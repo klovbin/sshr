@@ -287,7 +287,9 @@ Examples:
   sshr hooks set web before "wg-quick up office"
   sshr hooks set web after "wg-quick down office"
   sshr hooks on`},
-	{name: "vault", usage: "sshr vault status|passphrase|keychain|recovery", short: "keep the vault key in the keychain or under a passphrase",
+	{name: "vault", usage: `sshr vault status|passphrase|keychain|recovery|slots
+sshr vault add-token [--label <name>]
+sshr vault remove-slot <id>`, short: "keep the vault key in the keychain, under a passphrase or on a security key",
 		details: `The vault key seals saved passwords and keys stored in sshr. It lives in
 the system keychain, passphrase moves it into ~/.sshr/vault/vault-key.json
 wrapped with a passphrase (Argon2id) for a machine without a keychain, off by
@@ -300,12 +302,22 @@ random groups of letters and digits shown once, the passphrase prompt takes
 the code instead of the passphrase, a typo is named by its group, the code
 cannot be guessed offline, write it down and keep it away from the machine,
 a new code replaces the old one, after the code opened the vault sshr gives
-a new one on the terminal
+a new one on the terminal. add-token adds the one plugged FIDO2 security key
+on Linux and macOS through fido2-cred and fido2-assert of libfido2: the
+vault then opens with a touch and no question, without the key it asks the
+passphrase or the recovery code, the first key comes with a recovery code,
+slots lists what opens the vault, remove-slot removes one, a passphrase slot
+can go once a key and a recovery code are there, then a copy of ~/.sshr
+opens nothing without the key, the last way in that is not a key stays
+unless two keys are there
 
 Examples:
   sshr vault status
   sshr vault passphrase
   sshr vault recovery
+  sshr vault add-token --label yubikey
+  sshr vault slots
+  sshr vault remove-slot 1a2b3c4d
   sshr vault keychain`},
 	{name: "ext", usage: `sshr ext install <git url or folder> [--yes]
 sshr ext import <name> [args...]

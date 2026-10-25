@@ -1283,7 +1283,43 @@ func cmdDesktopEntry(args []string) {
 // cmdVault shows where the vault key lives and moves it between the system
 // keychain and a file under a passphrase
 func cmdVault(args []string) {
-	if len(args) != 1 {
+	switch {
+	case len(args) == 2 && args[0] == "remove-slot":
+		if err := app.RemoveVaultSlot(args[1]); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Slot %s is removed\n", args[1])
+		return
+	case len(args) >= 1 && args[0] == "add-token":
+		label := ""
+		if len(args) == 3 && args[1] == "--label" {
+			label = args[2]
+		} else if len(args) != 1 {
+			fmt.Fprintln(os.Stderr, vaultUsage)
+			os.Exit(1)
+		}
+		if err := app.AddVaultToken(label, confirmRecoveryCode); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The security key opens the vault now, without it the passphrase or the recovery code does, sshr vault slots lists them")
+		return
+	case len(args) == 1 && args[0] == "slots":
+		slots, err := app.VaultSlots()
+		if err != nil {
+			fatal(err)
+		}
+		for _, s := range slots {
+			note := ""
+			switch {
+			case s.Type == "passphrase":
+				note = "a copy of vault-key.json can be guessed offline through it"
+			case s.Type == "fido2" && s.Label != "":
+				note = s.Label
+			}
+			fmt.Printf("%s\t%s\t%s\n", s.ID, s.Type, note)
+		}
+		return
+	case len(args) != 1:
 		fmt.Fprintln(os.Stderr, vaultUsage)
 		os.Exit(1)
 	}
@@ -1338,7 +1374,9 @@ func cmdVault(args []string) {
 	}
 }
 
-const vaultUsage = "Usage: sshr vault status|passphrase|keychain|recovery"
+const vaultUsage = `Usage: sshr vault status|passphrase|keychain|recovery|slots
+       sshr vault add-token [--label <name>]
+       sshr vault remove-slot <id>`
 
 // confirmRecoveryCode shows a new recovery code on a terminal and asks for
 // one of its groups picked at random, so the code is written down before
