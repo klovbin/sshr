@@ -21,7 +21,7 @@ func TestHTTPBackendErrors(t *testing.T) {
 		{"remove other", 500, func(b Backend) error { return b.RemoveDevice("d") }, nil},
 		{"envelope newer", 409, func(b Backend) error { return b.PutEnvelope("d", nil) }, ErrStaleEpoch},
 		{"envelope missing", 404, func(b Backend) error { _, err := b.GetEnvelope("d", 1); return err }, ErrNotFound},
-		{"blob missing", 404, func(b Backend) error { _, err := b.GetBlob("h"); return err }, nil},
+		{"blob missing", 404, func(b Backend) error { _, err := b.GetBlob("h"); return err }, ErrNotFound},
 		{"head none", 404, func(b Backend) error { _, _, err := b.Head(); return err }, ErrNotFound},
 		{"history pending", 403, func(b Backend) error { _, err := b.ManifestsAfter(0); return err }, ErrPending},
 		{"manifest lost", 412, func(b Backend) error { return b.PutManifest(1, nil) }, ErrCASLost},
