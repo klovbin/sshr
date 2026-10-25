@@ -540,3 +540,15 @@ func (o ObjectBackend) list(prefix string) ([]string, error) {
 	}
 	return names, nil
 }
+
+// hasBlob tells whether the store holds blob hash, without reading it
+func (o ObjectBackend) hasBlob(hash string) (bool, error) {
+	_, err := o.Store.Get(objBlobs+hash, 0)
+	switch {
+	case err == nil, errors.Is(err, ErrTooLarge):
+		return true, nil
+	case errors.Is(err, ErrNotFound):
+		return false, nil
+	}
+	return false, err
+}
