@@ -17,6 +17,7 @@ import (
 
 	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/hosts"
+	"sshr.dev/internal/syncproto"
 	"sshr.dev/internal/syncserver"
 	"sshr.dev/internal/vault"
 )
@@ -495,6 +496,78 @@ func TestSyncUnreadableHostIsNotDeleted(t *testing.T) {
 	}
 	if !strings.Contains(w.log.String(), "does not load") {
 		t.Errorf("no word about the broken file:\n%s", w.log.String())
+	}
+}
+
+// a host whose file does not load here travels on in a push of this device
+// with the change another device made meanwhile, not with the version this
+// device had before (#383)
+func TestSyncBrokenHostKeepsTheNewerChange(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	must(t, os.WriteFile(filepath.Join(w.b.Store.Dir, db.ID+".json"), []byte("{broken"), 0o600))
+	h, err := w.a.Store.Find(db.ID)
+	must(t, err)
+	h.Port = 2200
+	_, err = w.a.Store.Update(db.ID, *h)
+	must(t, err)
+	must(t, w.a.Push())
+	want := w.a.st.Entries[db.ID]
+	must(t, w.b.Pull())
+	_, err = w.b.Store.Add(hosts.Host{Name: "other", Host: "10.0.0.9", User: "u"})
+	must(t, err)
+	must(t, w.b.Push())
+	_, raw, err := w.b.backend().Head()
+	must(t, err)
+	var sm syncproto.Signed
+	must(t, json.Unmarshal(raw, &sm))
+	var m syncproto.Manifest
+	must(t, json.Unmarshal(sm.Body, &m))
+	if got := m.Entries[db.ID]; want.Lamport == 0 || got.Lamport != want.Lamport || got.Hash != want.Blob {
+		t.Fatalf("the push of b lists db as %+v, the change of a is %+v", got, want)
+	}
+	must(t, w.a.Pull())
+	if h, err := w.a.Store.Find(db.ID); err != nil || h.Port != 2200 {
+		t.Fatalf("the change on a was undone by a push of b: %+v %v\n%s", h, err, w.log.String())
+	}
+}
+
+// a host that loads again after it was skipped sends the edit made here,
+// merged with the change another device made meanwhile (#383)
+func TestSyncRepairedHostSendsItsEdit(t *testing.T) {
+	w := newWorld(t)
+	_, db := w.pair()
+	path := filepath.Join(w.b.Store.Dir, db.ID+".json")
+	good, err := os.ReadFile(path)
+	must(t, err)
+	must(t, os.WriteFile(path, []byte("{broken"), 0o600))
+	editHost(t, w.a, db.ID, func(h *hosts.Host) { h.Port = 2200 })
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	must(t, os.WriteFile(path, good, 0o600))
+	editHost(t, w.b, db.ID, func(h *hosts.Host) { h.Tags = []string{"prod"} })
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if h, err := w.a.Store.Find(db.ID); err != nil || h.Port != 2200 || len(h.Tags) != 1 {
+		t.Fatalf("db on a after the repair on b: %+v %v\n%s", h, err, w.log.String())
+	}
+}
+
+// a host removed here while it was skipped for a broken file is removed
+// on the other devices too (#383)
+func TestSyncBrokenHostRemoved(t *testing.T) {
+	w := newWorld(t)
+	web, db := w.pair()
+	path := filepath.Join(w.b.Store.Dir, db.ID+".json")
+	must(t, os.WriteFile(path, []byte("{broken"), 0o600))
+	editHost(t, w.a, web.ID, func(h *hosts.Host) { h.Port = 2200 })
+	must(t, w.a.Push())
+	must(t, w.b.Pull())
+	must(t, os.Remove(path))
+	must(t, w.b.Push())
+	must(t, w.a.Pull())
+	if _, err := w.a.Store.Find(db.ID); err == nil {
+		t.Fatalf("db removed on b is still on a\n%s", w.log.String())
 	}
 }
 
