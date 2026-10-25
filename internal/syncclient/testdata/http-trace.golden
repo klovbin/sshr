@@ -3,7 +3,7 @@ a PUT /v1/accounts/<account>/envelopes/<dev-a> auth -> 204
 a PUT /v1/accounts/<account>/blobs/<hash> auth -> 204 x2
 a PUT /v1/accounts/<account>/manifest if-match=0 auth -> 204
 b POST /v1/accounts/<account>/join -> 201
-b GET /v1/accounts/<account>/manifests?after=0 auth -> 403
+b GET /v1/accounts/<account>/manifest auth -> 403
 a GET /v1/accounts/<account>/devices auth -> 200 x2
 a GET /v1/accounts/<account>/manifests?after=1 auth -> 200
 a GET /v1/accounts/<account>/manifest auth -> 200
@@ -12,6 +12,7 @@ a GET /v1/accounts/<account>/manifest auth -> 200 x2
 a PUT /v1/accounts/<account>/manifest if-match=1 auth -> 204
 a PUT /v1/accounts/<account>/envelopes/<dev-b> auth -> 204
 a POST /v1/accounts/<account>/devices/<dev-b>/activate auth -> 204
+b GET /v1/accounts/<account>/manifest auth -> 200
 b GET /v1/accounts/<account>/manifests?after=0 auth -> 200
 b GET /v1/accounts/<account>/manifests?after=2 auth -> 200
 b GET /v1/accounts/<account>/envelopes/<dev-b> auth -> 200
@@ -41,6 +42,7 @@ a GET /v1/accounts/<account>/manifest auth -> 200
 a PUT /v1/accounts/<account>/manifest if-match=4 auth -> 204
 a PUT /v1/accounts/<account>/envelopes/<dev-c> auth -> 204
 a POST /v1/accounts/<account>/devices/<dev-c>/activate auth -> 204
+c GET /v1/accounts/<account>/manifest auth -> 200
 c GET /v1/accounts/<account>/manifests?after=0 auth -> 200
 c GET /v1/accounts/<account>/manifests?after=5 auth -> 200
 c GET /v1/accounts/<account>/envelopes/<dev-c> auth -> 200
