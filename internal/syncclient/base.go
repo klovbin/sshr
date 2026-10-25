@@ -83,6 +83,13 @@ func (c *Client) pruneBase() {
 	for _, e := range c.st.Entries {
 		keep[e.Blob], keep[e.base()] = true, true
 	}
+	// a push the store may still lose goes back to these, a merge after
+	// that needs the versions both sides started from
+	if u := c.st.Unconfirmed; u != nil {
+		for _, e := range u.Entries {
+			keep[e.Blob], keep[e.base()] = true, true
+		}
+	}
 	for _, n := range names {
 		if !keep[n.Name()] {
 			os.Remove(filepath.Join(c.baseDir(), n.Name()))
