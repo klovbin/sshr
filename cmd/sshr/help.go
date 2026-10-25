@@ -292,7 +292,8 @@ forwarding, a jump goes through sshr. A host repointed since it was
 listed is refused until it is listed again, a host that needs a hardware
 key cannot be listed, its login is a key on the token itself. off goes back to the saved login. The
 authority and the list never sync. sshr export writes such a host without
-the certificate`},
+the certificate. Every certificate leaves its serial, principals and life
+in ~/.sshr/cert-log.jsonl, the serial is what a KRL on a server revokes`},
 	{name: "hooks", usage: `sshr hooks list
 sshr hooks on|off
 sshr hooks set <host> before|after <command>
