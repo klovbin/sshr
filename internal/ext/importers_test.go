@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"archive/zip"
 	"bytes"
 	"fmt"
 	"os"
@@ -568,5 +569,121 @@ func TestWinSCPImporter(t *testing.T) {
 	if len(d) != 2 || d[0].Host != "ssh.example" || d[0].User != "root" || d[0].Port != 2200 ||
 		d[1].Jump != "t.example" {
 		t.Errorf("defaults: %+v", d)
+	}
+}
+
+// royalDocument is shaped like a document Royal TSX saves: a flat list of
+// objects linked by ID and ParentID, values as child elements
+const royalDocument = `<?xml version="1.0" encoding="utf-8"?>
+<RTSZDocument>
+  <RoyalDocument><ID>d1</ID><Name>Lab</Name></RoyalDocument>
+  <RoyalTrash><ID>t1</ID><ParentID>d1</ParentID></RoyalTrash>
+  <RoyalSSHConnection><ID>c0</ID><ParentID>t1</ParentID><Name>Deleted</Name><URI>old.example</URI></RoyalSSHConnection>
+  <RoyalCredential><ID>k1</ID><ParentID>d1</ParentID><Name>ops</Name><UserName>CORP\opsuser</UserName><Password>ENCRYPTED</Password></RoyalCredential>
+  <RoyalFolder><ID>f1</ID><ParentID>d1</ParentID><Name>Servers &amp; more</Name><CredentialMode>2</CredentialMode><CredentialUsername>CORP\admin</CredentialUsername></RoyalFolder>
+  <RoyalFolder><ID>f2</ID><ParentID>f1</ParentID><Name>Web</Name><CredentialFromParent>True</CredentialFromParent></RoyalFolder>
+  <RoyalSSHConnection><ID>c1</ID><ParentID>f1</ParentID><Name>router</Name><URI>10.0.0.1</URI><Port>2222</Port>
+    <IsTelnetConnection>False</IsTelnetConnection><CredentialMode>2</CredentialMode><CredentialUsername>netops</CredentialUsername>
+    <CredentialPassword>ENCRYPTED</CredentialPassword><Description>line one
+line two</Description></RoyalSSHConnection>
+  <RoyalSSHConnection><ID>c2</ID><ParentID>f1</ParentID><Name>switch</Name><URI>10.0.0.2</URI><IsTelnetConnection>True</IsTelnetConnection></RoyalSSHConnection>
+  <RoyalSSHConnection><ID>c3</ID><ParentID>f2</ParentID><Name>web1</Name><URI>ssh://web1.example:2200/</URI>
+    <CredentialFromParent>True</CredentialFromParent><CredentialKeyFile>/home/u/.ssh/id_ed25519</CredentialKeyFile><CredentialKeyMode>0</CredentialKeyMode></RoyalSSHConnection>
+  <RoyalSSHConnection><ID>c4</ID><ParentID>d1</ParentID><Name>shared</Name><URI>db.example</URI>
+    <CredentialMode>3</CredentialMode><CredentialId>k1</CredentialId><CredentialKeyMode>1</CredentialKeyMode><CredentialKeyContent>AAAA</CredentialKeyContent></RoyalSSHConnection>
+  <RoyalSSHConnection><ID>c5</ID><ParentID>d1</ParentID><Name>tpl</Name><URI>t.example</URI><IsConnectionTemplate>True</IsConnectionTemplate></RoyalSSHConnection>
+  <RoyalRDSConnection><ID>r1</ID><ParentID>d1</ParentID><Name>desk</Name><URI>desk.example</URI></RoyalRDSConnection>
+</RTSZDocument>
+`
+
+func TestRoyalTSImporter(t *testing.T) {
+	dir := t.TempDir()
+	plain := filepath.Join(dir, "lab.rtsx")
+	if err := os.WriteFile(plain, []byte(royalDocument), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := func(hosts []ExtHost) {
+		t.Helper()
+		got := map[string]ExtHost{}
+		for _, h := range hosts {
+			got[h.Key] = h
+		}
+		if len(got) != 3 {
+			t.Fatalf("hosts %+v", hosts)
+		}
+		if r := got["royalts:c1"]; r.Host != "10.0.0.1" || r.Port != 2222 || r.User != "netops" || len(r.Tags) != 1 || r.Tags[0] != "Servers & more" {
+			t.Errorf("router %+v", r)
+		}
+		if w := got["royalts:c3"]; w.Host != "web1.example" || w.Port != 2200 || w.User != "admin" || w.KeyFile != "/home/u/.ssh/id_ed25519" || len(w.Tags) != 2 || w.Tags[1] != "Web" {
+			t.Errorf("web1, the user of the folder above and the key file: %+v", w)
+		}
+		if s := got["royalts:c4"]; s.Host != "db.example" || s.User != "opsuser" || s.KeyFile != "" {
+			t.Errorf("shared, a credential by ID and an embedded key left out: %+v", s)
+		}
+		for _, h := range got {
+			if _, err := h.ToHost("royalts"); err != nil {
+				t.Errorf("%s: %v", h.Key, err)
+			}
+		}
+	}
+	check(runImporter(t, "royalts", plain))
+	if !strings.Contains(lastNotes, "2 saved passwords") || !strings.Contains(lastNotes, "embedded") {
+		t.Errorf("notes: %s", lastNotes)
+	}
+	if _, err := exec.LookPath("unzip"); err != nil {
+		return
+	}
+	// the same document zipped as Document.rtsz
+	zipped := filepath.Join(dir, "lab.rtsz")
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("Document.rtsz")
+	w.Write([]byte(royalDocument))
+	zw.Close()
+	os.WriteFile(zipped, buf.Bytes(), 0o600)
+	check(runImporter(t, "royalts", zipped))
+}
+
+// royalts.ps1 reads the same document, plain and zipped, to the same
+// hosts as royalts.sh, with pwsh where it is installed
+func TestRoyalTSWindowsImporter(t *testing.T) {
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("no pwsh here")
+	}
+	tmp := t.TempDir()
+	plain := filepath.Join(tmp, "lab.rtsx")
+	os.WriteFile(plain, []byte(royalDocument), 0o600)
+	zipped := filepath.Join(tmp, "lab.rtsz")
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("Document.rtsz")
+	w.Write([]byte(royalDocument))
+	zw.Close()
+	os.WriteFile(zipped, buf.Bytes(), 0o600)
+	dir := filepath.Join(extensionsDir, "royalts")
+	for _, file := range []string{plain, zipped} {
+		cmd := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "royalts.ps1"), file)
+		cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
+		var notes bytes.Buffer
+		cmd.Stderr = &notes
+		out, err := Collect(cmd)
+		if err != nil {
+			t.Fatalf("%v: %s", err, notes.String())
+		}
+		hosts, warnings, err := ParseImport(out)
+		if err != nil || len(warnings) > 0 || len(hosts) != 3 {
+			t.Fatalf("printed %s: %v %v", out, err, warnings)
+		}
+		got := map[string]ExtHost{}
+		for _, h := range hosts {
+			got[h.Key] = h
+		}
+		if w := got["royalts:c3"]; w.User != "admin" || w.Port != 2200 || len(w.Tags) != 2 {
+			t.Errorf("web1 %+v", w)
+		}
+		if s := got["royalts:c4"]; s.User != "opsuser" || s.KeyFile != "" {
+			t.Errorf("shared %+v", s)
+		}
 	}
 }
