@@ -530,3 +530,180 @@ func TestForkIsSeen(t *testing.T) {
 		t.Fatalf("a pull after a fork: %v", err)
 	}
 }
+
+// weakMemStore stands for a synced folder, a store whose create is not a
+// compare and swap between devices
+type weakMemStore struct{ *memStore }
+
+func (weakMemStore) Conflicts() ([]string, error) { return nil, nil }
+
+// on a store without a compare and swap a push the store did not keep is
+// undone at the next pull, the change the store kept comes in and the
+// edits of the losing device go out with its next push, nothing is lost
+// (#128)
+func TestForkIsUndone(t *testing.T) {
+	store, a, b := objWorld(t)
+	weak := ObjectBackend{Store: weakMemStore{store}}
+	a.Backend, b.Backend = weak, weak
+	_, err := a.Store.Add(hosts.Host{Name: "from-a", Host: "10.0.0.3", User: "u"})
+	must(t, err)
+	must(t, a.Push())
+	var mine string
+	for name := range store.m {
+		if strings.HasPrefix(name, "manifests/") && (mine == "" || name > mine) {
+			mine = name
+		}
+	}
+	delete(store.m, mine)
+	_, err = b.Store.Add(hosts.Host{Name: "from-b", Host: "10.0.0.4", User: "u"})
+	must(t, err)
+	must(t, b.Push())
+
+	must(t, a.Pull())
+	names := func(c *Client) map[string]bool {
+		list, _ := c.Store.List()
+		out := map[string]bool{}
+		for _, h := range list {
+			out[h.Name] = true
+		}
+		return out
+	}
+	if n := names(a); !n["from-a"] || !n["from-b"] {
+		t.Fatalf("hosts on a after the fork %v", n)
+	}
+	must(t, a.Push())
+	must(t, b.Pull())
+	if n := names(b); !n["from-a"] || !n["from-b"] {
+		t.Fatalf("hosts on b after a pushed again %v", n)
+	}
+	if a.st.Unconfirmed == nil {
+		t.Error("the last push of a keeps no snapshot")
+	}
+	must(t, a.Pull())
+	must(t, b.Push())
+	_, err = b.Store.Add(hosts.Host{Name: "later", Host: "10.0.0.5", User: "u"})
+	must(t, err)
+	must(t, b.Push())
+	must(t, a.Pull())
+	if a.st.Unconfirmed != nil {
+		t.Error("a change of b on top of the push of a left the snapshot")
+	}
+}
+
+// both devices edit one host while the store keeps only the change of b,
+// after the fork is undone no edit is lost, the host and a conflict copy
+// carry both (#128)
+func TestForkKeepsBothEditsOfOneHost(t *testing.T) {
+	store, a, b := objWorld(t)
+	weak := ObjectBackend{Store: weakMemStore{store}}
+	a.Backend, b.Backend = weak, weak
+	edit := func(c *Client, user string) {
+		list, _ := c.Store.List()
+		h := list[0]
+		h.User = user
+		_, err := c.Store.Update(h.ID, h)
+		must(t, err)
+	}
+	edit(a, "user-a")
+	must(t, a.Push())
+	var mine string
+	for name := range store.m {
+		if strings.HasPrefix(name, "manifests/") && (mine == "" || name > mine) {
+			mine = name
+		}
+	}
+	delete(store.m, mine)
+	edit(b, "user-b")
+	must(t, b.Push())
+	must(t, a.Pull())
+	must(t, a.Push())
+	must(t, b.Pull())
+	for _, c := range []*Client{a, b} {
+		users := map[string]bool{}
+		list, _ := c.Store.List()
+		for _, h := range list {
+			users[h.User] = true
+		}
+		if !users["user-a"] || !users["user-b"] {
+			t.Errorf("users on %s after the fork %v", c.KeyPrefix, users)
+		}
+	}
+}
+
+// forkWorld is a pair on a store without a compare and swap and a way to
+// drop the newest changes of one device, as a sync tool that kept the
+// other side does
+func forkWorld(t *testing.T) (store *memStore, a, b *Client, drop func(n int)) {
+	store, a, b = objWorld(t)
+	weak := ObjectBackend{Store: weakMemStore{store}}
+	a.Backend, b.Backend = weak, weak
+	drop = func(n int) {
+		for ; n > 0; n-- {
+			var last string
+			for name := range store.m {
+				if strings.HasPrefix(name, "manifests/") && name > last {
+					last = name
+				}
+			}
+			delete(store.m, last)
+		}
+	}
+	return store, a, b, drop
+}
+
+func hostNames(c *Client) map[string]bool {
+	list, _ := c.Store.List()
+	out := map[string]bool{}
+	for _, h := range list {
+		out[h.Name] = true
+	}
+	return out
+}
+
+// a pushed twice before it saw that the store kept the change of b under
+// its first number, both pushes are undone, b pushed twice too, every
+// edit ends on both devices
+func TestForkAfterSeveralPushes(t *testing.T) {
+	_, a, b, drop := forkWorld(t)
+	for _, n := range []string{"a1", "a2"} {
+		_, err := a.Store.Add(hosts.Host{Name: n, Host: "10.0.0.3", User: "u"})
+		must(t, err)
+		must(t, a.Push())
+	}
+	drop(2)
+	for _, n := range []string{"b1", "b2"} {
+		_, err := b.Store.Add(hosts.Host{Name: n, Host: "10.0.0.4", User: "u"})
+		must(t, err)
+		must(t, b.Push())
+	}
+	must(t, a.Pull())
+	must(t, a.Push())
+	must(t, b.Pull())
+	for _, c := range []*Client{a, b} {
+		n := hostNames(c)
+		for _, want := range []string{"a1", "a2", "b1", "b2"} {
+			if !n[want] {
+				t.Errorf("%s misses %s: %v", c.KeyPrefix, want, n)
+			}
+		}
+	}
+}
+
+// edits of two fields of one host on the two sides of a fork merge into
+// the host, the version both started from is still kept
+func TestForkMergesFieldsOfOneHost(t *testing.T) {
+	_, a, b, drop := forkWorld(t)
+	list, _ := a.Store.List()
+	id := list[0].ID
+	editHost(t, a, id, func(h *hosts.Host) { h.Name, h.Password = "web1", "" })
+	must(t, a.Push())
+	drop(1)
+	editHost(t, b, id, func(h *hosts.Host) { h.Tags, h.Password = []string{"eu"}, "" })
+	must(t, b.Push())
+	must(t, a.Pull())
+	h, err := a.Store.Find(id)
+	must(t, err)
+	if h.Name != "web1" || len(h.Tags) != 1 || h.Tags[0] != "eu" || conflictCopies(a) != 0 {
+		t.Fatalf("host on a after the fork %+v, %d copies", h, conflictCopies(a))
+	}
+}

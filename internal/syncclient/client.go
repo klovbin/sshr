@@ -94,6 +94,10 @@ type state struct {
 	LastSync time.Time `json:"last_sync"`
 	// Backend is the store of an account that is not sshr-sync
 	Backend *BackendRef `json:"backend,omitempty"`
+	// Unconfirmed is the state before the last push to a store without a
+	// compare and swap between devices, kept until a change of another
+	// device builds on that push, a fork at that change goes back to it
+	Unconfirmed *pushSnapshot `json:"unconfirmed,omitempty"`
 	// extra are the keys a newer sshr wrote, kept through every save
 	extra map[string]json.RawMessage
 }
@@ -896,11 +900,96 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 			return nil, fmt.Errorf("the server shows change %d, this device has seen %d, the server rolled the account back or lost data, run with --accept-reset only if the server was restored from a backup", cur, c.st.Counter)
 		}
 		if cur < c.st.Counter {
-			c.st.Counter, c.st.Head = 0, ""
+			c.st.Counter, c.st.Head, c.st.Unconfirmed = 0, "", nil
 			return c.fetchHistory()
 		}
 	}
 	return out, nil
+}
+
+// pushSnapshot is the chain and the entries of this device before its
+// first push the store has not confirmed yet, later pushes keep it and
+// move Pushed on, FirstHead is the body hash of that first push, the
+// store must keep it at Counter+1, Plain says every push since changed
+// hosts only, a push that changed the devices, the key, the primary
+// device or the recovery kit is not undone on its own
+type pushSnapshot struct {
+	Pushed       uint64                     `json:"pushed"`
+	FirstHead    string                     `json:"first_head"`
+	Plain        bool                       `json:"plain"`
+	Counter      uint64                     `json:"counter"`
+	Head         string                     `json:"head,omitempty"`
+	Epoch        int                        `json:"epoch"`
+	Trusted      []syncproto.Device         `json:"trusted,omitempty"`
+	Entries      map[string]entryState      `json:"entries"`
+	Skipped      map[string]syncproto.Entry `json:"skipped,omitempty"`
+	Primary      string                     `json:"primary,omitempty"`
+	Format       int                        `json:"format,omitempty"`
+	Recovery     string                     `json:"recovery,omitempty"`
+	RecoveryWait int64                      `json:"recovery_wait,omitempty"`
+	Claim        uint64                     `json:"claim,omitempty"`
+}
+
+// weakStore tells whether the store has no compare and swap between
+// devices, a synced folder
+func (c *Client) weakStore() bool {
+	ob, ok := c.backend().(ObjectBackend)
+	if !ok {
+		return false
+	}
+	_, weak := ob.Store.(ConflictReporter)
+	return weak
+}
+
+// forkedPush tells whether the store keeps another change than the first
+// unconfirmed push of this device under its number, a sync tool that
+// kept the change of another device, whatever was pushed on either side
+// after it
+func (c *Client) forkedPush() (bool, error) {
+	u := c.st.Unconfirmed
+	if u == nil {
+		return false, nil
+	}
+	b, err := c.backend().ManifestsAfter(u.Counter)
+	if err != nil {
+		return false, err
+	}
+	var page []syncproto.Signed
+	if err := json.Unmarshal(b, &page); err != nil {
+		return false, err
+	}
+	if len(page) == 0 {
+		// the folder has not brought the change here yet, or lost it
+		return false, nil
+	}
+	var m syncproto.Manifest
+	if err := json.Unmarshal(page[0].Body, &m); err != nil {
+		return false, err
+	}
+	return m.Counter == u.Counter+1 && syncproto.BodyHash(page[0].Body) != u.FirstHead, nil
+}
+
+// undoForkedPush puts the state back to before the pushes the store did
+// not keep, their edits are local edits again and go out with the next
+// push on top of the change the store kept, nothing is lost, a conflict on
+// one host gets a copy as always, it says why when it cannot
+func (c *Client) undoForkedPush() bool {
+	u := c.st.Unconfirmed
+	switch {
+	case u == nil:
+		return false
+	case !u.Plain:
+		c.logf("change %d of this device changed the devices, the key, the primary device or the recovery kit, a fork there is not undone on its own", u.Counter+1)
+		return false
+	}
+	c.st.Counter, c.st.Head, c.st.Epoch, c.st.Trusted = u.Counter, u.Head, u.Epoch, u.Trusted
+	c.st.Entries, c.st.Skipped = u.Entries, u.Skipped
+	c.st.Primary, c.st.Format = u.Primary, u.Format
+	c.st.Recovery, c.st.RecoveryWait, c.st.Claim = u.Recovery, u.RecoveryWait, u.Claim
+	c.st.Unconfirmed = nil
+	c.verified = nil
+	c.logf("changes %d to %d of this device lost to a change another device wrote at the same time, their edits go out again with the next push", u.Counter+1, u.Pushed)
+	return true
 }
 
 // ErrFork means the account went two ways: the store keeps a change under
@@ -1129,6 +1218,20 @@ func (c *Client) pull() error {
 	if err := c.finishRotation(); err != nil {
 		return err
 	}
+	// pushes of this device that the store did not keep are undone and
+	// the change the store kept is pulled instead
+	forked, err := c.forkedPush()
+	if err != nil {
+		return err
+	}
+	if forked {
+		if !c.undoForkedPush() {
+			return fmt.Errorf("%w: the store keeps another change %d than the one this device made, the edits of this device are still here, do not leave and join again, that would overwrite them", ErrFork, c.st.Unconfirmed.Counter+1)
+		}
+		if err := c.save(); err != nil {
+			return err
+		}
+	}
 	history, err := c.fetchHistory()
 	if err != nil {
 		return err
@@ -1180,6 +1283,11 @@ func (c *Client) pull() error {
 			}
 			return err
 		}
+	}
+	// a verified change past the push of this device builds on it, the
+	// store kept that push
+	if u := c.st.Unconfirmed; u != nil && c.st.Counter > u.Pushed {
+		c.st.Unconfirmed = nil
 	}
 	if err := c.finishRotation(); err != nil {
 		return err
@@ -1747,6 +1855,24 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	// the first unconfirmed push keeps the state before it, later pushes
+	// on top only move Pushed on, a fork at the first one undoes them all
+	plain := plan.devices == nil && !reseal && plan.primary == "" && plan.recovery == nil &&
+		plan.rotation == nil && plan.anchorID == "" && len(plan.dropAnchors) == 0 && c.st.Primary != ""
+	switch {
+	case !c.weakStore():
+		c.st.Unconfirmed = nil
+	case c.st.Unconfirmed == nil:
+		c.st.Unconfirmed = &pushSnapshot{
+			Pushed: m.Counter, FirstHead: syncproto.BodyHash(sm.Body), Plain: plain,
+			Counter: c.st.Counter, Head: c.st.Head, Epoch: c.st.Epoch, Trusted: c.st.Trusted,
+			Entries: c.st.Entries, Skipped: c.st.Skipped, Primary: c.st.Primary, Format: c.st.Format,
+			Recovery: c.st.Recovery, RecoveryWait: c.st.RecoveryWait, Claim: c.st.Claim,
+		}
+	default:
+		c.st.Unconfirmed.Pushed = m.Counter
+		c.st.Unconfirmed.Plain = c.st.Unconfirmed.Plain && plain
 	}
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
 	c.st.Epoch, c.st.Skipped = epoch, skipped
