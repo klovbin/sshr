@@ -65,6 +65,7 @@ func certArgs(h *Host) ([]string, error) {
 	if err := checkConfigIdentities(h); err != nil {
 		return nil, err
 	}
+	sweepCertFiles(dir, time.Now())
 	h.SetCertFile(filepath.Join(dir, "cert-"+hex.EncodeToString(b[:])+".pub"))
 	return []string{
 		"-i", h.CertFile(),
@@ -196,4 +197,20 @@ func attachCert(cmd *exec.Cmd, h *Host) (func(), error) {
 		return noop, err
 	}
 	return func() { stop(); remove() }, nil
+}
+
+// certFileAge is how long a certificate file of a login may stay, ssh
+// reads it once when it starts, a file older than this is from an sshr
+// that was killed before it could remove it
+const certFileAge = time.Hour
+
+// sweepCertFiles removes the certificate files of logins that ended
+// without their sshr, they hold only public data
+func sweepCertFiles(dir string, now time.Time) {
+	names, _ := filepath.Glob(filepath.Join(dir, "cert-*.pub"))
+	for _, n := range names {
+		if fi, err := os.Lstat(n); err == nil && fi.Mode().IsRegular() && now.Sub(fi.ModTime()) > certFileAge {
+			os.Remove(n)
+		}
+	}
 }
