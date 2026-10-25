@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "royalts",
+  "version": "0.1.0",
+  "description": "imports the SSH connections of Royal TS and Royal TSX documents (.rtsz, .rtsx), no passwords, they stay encrypted in the document",
+  "command": { "default": ["./royalts.sh"], "windows": ["./royalts.cmd"] },
+  "kinds": ["import"]
+}
