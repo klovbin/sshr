@@ -53,8 +53,6 @@ const (
 	argonMaxTime    = 6
 	argonMaxMemory  = 256 * 1024
 	argonMaxThreads = 16
-	// passphraseFileMax is more than a wrapped key ever needs
-	passphraseFileMax = 4096
 	// passphraseMin is the shortest passphrase taken, the file can be
 	// attacked offline
 	passphraseMin = 12
@@ -94,6 +92,12 @@ func Mode() string {
 }
 
 func wrapKey(key []byte, pass string) (*wrappedKey, error) {
+	return wrapKeyAAD(key, pass, wrapAAD)
+}
+
+// wrapKeyAAD wraps key under pass bound to aad, format 1 binds to wrapAAD,
+// a slot of format 2 to its kind and ID
+func wrapKeyAAD(key []byte, pass string, aad []byte) (*wrappedKey, error) {
 	w := &wrappedKey{Version: 1, KDF: "argon2id", Time: argonParams.Time, MemoryKiB: argonParams.MemoryKiB, Threads: argonParams.Threads, Salt: make([]byte, 16)}
 	if _, err := rand.Read(w.Salt); err != nil {
 		return nil, err
@@ -106,11 +110,15 @@ func wrapKey(key []byte, pass string) (*wrappedKey, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	w.Sealed = aead.Seal(nonce, nonce, key, wrapAAD)
+	w.Sealed = aead.Seal(nonce, nonce, key, aad)
 	return w, nil
 }
 
 func unwrapKey(w *wrappedKey, pass string) ([]byte, error) {
+	return unwrapKeyAAD(w, pass, wrapAAD)
+}
+
+func unwrapKeyAAD(w *wrappedKey, pass string, aad []byte) ([]byte, error) {
 	if w.Version != 1 || w.KDF != "argon2id" {
 		return nil, fmt.Errorf("the vault key file has format %d and kdf %q, this sshr reads format 1 with argon2id", w.Version, w.KDF)
 	}
@@ -124,7 +132,7 @@ func unwrapKey(w *wrappedKey, pass string) ([]byte, error) {
 	if len(w.Sealed) < aead.NonceSize() {
 		return nil, errors.New("the vault key file is damaged")
 	}
-	key, err := aead.Open(nil, w.Sealed[:aead.NonceSize()], w.Sealed[aead.NonceSize():], wrapAAD)
+	key, err := aead.Open(nil, w.Sealed[:aead.NonceSize()], w.Sealed[aead.NonceSize():], aad)
 	if err != nil {
 		return nil, ErrBadPassphrase
 	}
@@ -134,26 +142,27 @@ func unwrapKey(w *wrappedKey, pass string) ([]byte, error) {
 	return key, nil
 }
 
-func readWrappedKey() (*wrappedKey, error) {
+// readKeyFile reads vault-key.json, see parseKeyFile
+func readKeyFile() (*wrappedKey, *keyFile, error) {
 	path, err := passphraseFilePath()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	b, err := fileio.ReadFileShared(path)
-	if err == nil && len(b) > passphraseFileMax {
-		return nil, fmt.Errorf("%s is larger than a vault key file can be", path)
+	if err == nil && len(b) > keyFileMax {
+		return nil, nil, fmt.Errorf("%s is larger than a vault key file can be", path)
 	}
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("the vault is set to a passphrase but %s is missing, run sshr vault passphrase on this machine or set SSHR_VAULT=keychain", path)
+		return nil, nil, fmt.Errorf("the vault is set to a passphrase but %s is missing, run sshr vault passphrase on this machine or set SSHR_VAULT=keychain", path)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var w wrappedKey
-	if err := json.Unmarshal(b, &w); err != nil {
-		return nil, fmt.Errorf("%s is damaged: %v", path, err)
+	v1, kf, err := parseKeyFile(b)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s is damaged: %v", path, err)
 	}
-	return &w, nil
+	return v1, kf, nil
 }
 
 // askPassphrase gets the passphrase, a front end sets how with SetPrompt,
@@ -168,7 +177,7 @@ func SetPrompt(ask func(prompt string) (string, error)) { askPassphrase = ask }
 
 // passphraseVaultKey opens the vault key file with the passphrase
 func passphraseVaultKey() ([]byte, error) {
-	w, err := readWrappedKey()
+	v1, kf, err := readKeyFile()
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +185,7 @@ func passphraseVaultKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return unwrapKey(w, pass)
+	return openPassphraseSlots(v1, kf, pass)
 }
 
 // SetPassphrase wraps the current vault key with pass into the vault
@@ -208,22 +217,19 @@ func SetPassphrase(pass string, secretNames []string) error {
 	if err != nil {
 		return err
 	}
-	w, err := wrapKey(key, pass)
-	if err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(w, "", "  ")
-	if err != nil {
-		return err
-	}
 	path, err := passphraseFilePath()
 	if err != nil {
 		return err
 	}
-	// a passphrase changed again replaces the only wrapped copy of the key,
-	// a failed change puts the old file back instead of removing it
+	// a passphrase changed again replaces the only passphrase wrap of the
+	// key, the other slots of the file stay, a failed change puts the old
+	// file back instead of removing it
 	old, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	b, err := withPassphrase(old, key, pass)
+	if err != nil {
 		return err
 	}
 	undo := func() {
@@ -233,15 +239,15 @@ func SetPassphrase(pass string, secretNames []string) error {
 			os.Remove(path)
 		}
 	}
-	if err := fileio.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+	if err := fileio.WriteFile(path, b, 0o600); err != nil {
 		return err
 	}
 	// the copy in the keychain goes at the end, the file must give the key
 	// back before anything else changes
-	if w, err := readWrappedKey(); err != nil {
+	if v1, kf, err := readKeyFile(); err != nil {
 		undo()
 		return err
-	} else if got, err := unwrapKey(w, pass); err != nil || !bytes.Equal(got, key) {
+	} else if got, err := openPassphraseSlots(v1, kf, pass); err != nil || !bytes.Equal(got, key) {
 		undo()
 		return fmt.Errorf("%s does not give the vault key back after the write, nothing is changed: %v", path, err)
 	}
