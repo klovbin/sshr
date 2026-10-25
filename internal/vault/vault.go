@@ -466,6 +466,7 @@ func ResetForTest(lockPath string) {
 	vaultMu.Lock()
 	vaultKey = nil
 	keySetPending = false
+	tokenFailedAt = time.Time{}
 	stopIdle()
 	vaultMu.Unlock()
 	keyringMu.Lock()

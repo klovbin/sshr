@@ -163,32 +163,42 @@ func hasSlot(f *keyFile, typ string) bool {
 	return false
 }
 
-// withRecovery returns the file old with its recovery slots replaced by a
-// new one for key, a file of format 1 becomes format 2 with its passphrase
-// wrap kept as a legacy slot, the passphrase is not needed for that
-func withRecovery(old []byte, key []byte) (code string, out []byte, err error) {
+// editableSlots are the slots of the file old as raw slots to write back,
+// with the IDs they take, except those of kind drop, a file of format 1
+// gives its passphrase wrap as a legacy slot, the passphrase is not needed
+// for that, room tells how many slots will be added
+func editableSlots(old []byte, drop string, room int) (kept []json.RawMessage, taken map[string]bool, v1 *wrappedKey, err error) {
 	v1, f, err := parseKeyFile(old)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, nil, err
 	}
-	var kept []json.RawMessage
-	taken := map[string]bool{}
-	if f != nil && len(f.Slots) >= keySlotsMax && !hasSlot(f, slotRecovery) {
-		return "", nil, fmt.Errorf("the vault key file holds %d slots, no more fit", len(f.Slots))
-	}
+	taken = map[string]bool{}
 	if v1 != nil {
 		slot, err := json.Marshal(passphraseSlot{slotHead: slotHead{ID: "v1", Type: slotPassphrase}, wrappedKey: *v1, Legacy: true})
 		if err != nil {
-			return "", nil, err
+			return nil, nil, nil, err
 		}
 		kept, taken["v1"] = append(kept, slot), true
 	} else {
 		for _, raw := range f.Slots {
 			var h slotHead
-			if json.Unmarshal(raw, &h) == nil && h.Type != slotRecovery {
+			if json.Unmarshal(raw, &h) == nil && h.Type != drop {
 				kept, taken[h.ID] = append(kept, raw), true
 			}
 		}
+	}
+	if len(kept)+room > keySlotsMax {
+		return nil, nil, nil, fmt.Errorf("the vault key file holds %d slots, no more fit", len(kept))
+	}
+	return kept, taken, v1, nil
+}
+
+// withRecovery returns the file old with its recovery slots replaced by a
+// new one for key
+func withRecovery(old []byte, key []byte) (code string, out []byte, err error) {
+	kept, taken, _, err := editableSlots(old, slotRecovery, 1)
+	if err != nil {
+		return "", nil, err
 	}
 	code, slot, err := newRecoverySlot(key, taken)
 	if err != nil {
