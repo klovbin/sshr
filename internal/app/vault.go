@@ -110,8 +110,8 @@ func VaultRecoveryUsed() bool { return vault.RecoveryUsed() }
 var ErrKeychainCopyLeft = vault.ErrKeychainCopyLeft
 
 // SetVaultPassphrase moves the vault key under a passphrase
-func SetVaultPassphrase(pass string, secretNames []string) error {
-	return vault.SetPassphrase(pass, secretNames)
+func SetVaultPassphrase(pass string, secretNames []string, strong bool) error {
+	return vault.SetPassphrase(pass, secretNames, vault.PassphraseOptions{Strong: strong})
 }
 
 // UseKeychainVault moves the vault key back into the system keychain

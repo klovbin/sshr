@@ -606,3 +606,26 @@ func TestPassphraseNeedsDifferentCharacters(t *testing.T) {
 		t.Fatalf("a passphrase of two characters: %v", err)
 	}
 }
+// the strong cost writes 256 MiB into the file and the file still opens
+func TestPassphraseStrongCost(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	key, err := Key()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPassphrase(pass, nil, PassphraseOptions{Strong: true}); err != nil {
+		t.Fatal(err)
+	}
+	v1, _, err := readKeyFile()
+	if err != nil || v1 == nil || v1.MemoryKiB != argonMaxMemory {
+		t.Fatalf("the strong wrap: %+v %v", v1, err)
+	}
+	forgetVaultKey()
+	if got, err := Key(); err != nil || string(got) != string(key) {
+		t.Fatalf("the strong file does not open: %v", err)
+	}
+}

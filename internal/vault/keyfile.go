@@ -169,6 +169,11 @@ func openPassphraseSlots(v1 *wrappedKey, f *keyFile, pass string) ([]byte, error
 // they are and gets one passphrase slot, any other file becomes format 1,
 // the format an older sshr still reads
 func withPassphrase(old []byte, key []byte, pass string) ([]byte, error) {
+	return withPassphraseCost(old, key, pass, argonParams)
+}
+
+// withPassphraseCost is withPassphrase at the Argon2id cost c
+func withPassphraseCost(old []byte, key []byte, pass string, c argonCost) ([]byte, error) {
 	var f *keyFile
 	if len(old) > 0 {
 		if _, kf, err := parseKeyFile(old); err == nil {
@@ -176,7 +181,7 @@ func withPassphrase(old []byte, key []byte, pass string) ([]byte, error) {
 		}
 	}
 	if f == nil {
-		w, err := wrapKey(key, pass)
+		w, err := wrapKeyCost(key, pass, wrapAAD, c)
 		if err != nil {
 			return nil, err
 		}
@@ -196,7 +201,7 @@ func withPassphrase(old []byte, key []byte, pass string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	w, err := wrapKeyAAD(key, pass, slotAAD(slotPassphrase, id))
+	w, err := wrapKeyCost(key, pass, slotAAD(slotPassphrase, id), c)
 	if err != nil {
 		return nil, err
 	}
