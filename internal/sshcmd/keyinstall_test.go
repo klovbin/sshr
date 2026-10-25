@@ -21,6 +21,20 @@ func TestKeygenArgsNeverOverwrite(t *testing.T) {
 	}
 }
 
+// a key with a passphrase gets 64 rounds of the passphrase KDF, a key
+// without one gets an empty passphrase and no rounds
+func TestKeygenArgsRounds(t *testing.T) {
+	dir := t.TempDir()
+	args, err := KeygenArgs(filepath.Join(dir, "a"), "c", false)
+	if err != nil || !strings.Contains(strings.Join(args, " "), "-a 64") || strings.Contains(strings.Join(args, " "), "-N") {
+		t.Errorf("with a passphrase: %v %v", args, err)
+	}
+	args, err = KeygenArgs(filepath.Join(dir, "b"), "c", true)
+	if err != nil || strings.Contains(strings.Join(args, " "), "-a") || !strings.Contains(strings.Join(args, " "), "-N ") {
+		t.Errorf("without a passphrase: %v %v", args, err)
+	}
+}
+
 func TestReadPublicKey(t *testing.T) {
 	dir := t.TempDir()
 	_, pub := testKey(t, "")

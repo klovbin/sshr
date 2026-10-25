@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
@@ -19,17 +20,23 @@ const DefaultSKKeyName = "sshr_sk"
 
 // KeygenArgs is the ssh-keygen command for a new ed25519 key at path, it
 // refuses a path where a key or its .pub already is, ssh-keygen asks for
-// the passphrase itself so it never reaches a command line
+// the passphrase itself so it never reaches a command line, a key with a
+// passphrase gets keygenRounds of bcrypt_pbkdf
 func KeygenArgs(path, comment string, noPassphrase bool) ([]string, error) {
 	if err := newKeyPath(path); err != nil {
 		return nil, err
 	}
 	args := []string{"-t", "ed25519", "-f", path, "-C", comment}
 	if noPassphrase {
-		args = append(args, "-N", "")
+		return append(args, "-N", ""), nil
 	}
-	return args, nil
+	return append(args, "-a", strconv.Itoa(keygenRounds)), nil
 }
+
+// keygenRounds is twice the 32 rounds ssh-keygen takes by default, every
+// guess at the passphrase of a copied key file costs twice as much, the
+// owner waits a fraction of a second more when the key is loaded
+const keygenRounds = 64
 
 // SKKeyTypes are the key types of a FIDO token in the order sshr key new
 // tries them, a token without Ed25519 makes ECDSA P-256 keys
