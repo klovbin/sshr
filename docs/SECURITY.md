@@ -97,3 +97,8 @@ What happens to passwords, keys and synced data, [USAGE.md](USAGE.md) says how t
 
 - passwords and keys kept in sshr or 1Password are not exported
 - a value ssh could read as another option (a newline, a quote, a space in an address) skips the host, so a synced host cannot add `ProxyCommand` to your config
+
+## Installing
+
+- install.sh takes a release binary only when the line `sshr-release <tag>` followed by `sha256sums.txt` carries a signature of the release key pinned in the script (`ssh-keygen -Y verify`, namespace `sshr-release`) and the checksum matches, otherwise it builds from source, a checksum from the same release alone only proves the download is whole, the tag in the signed text keeps an old signed release from passing for the latest one, install.sh reads the tag of the latest release from the GitHub API, until a key is pinned install.sh always builds from source
+- the private half of the release key is made and kept by the owner of the repository, CI has it in the secret `SSHR_RELEASE_KEY`, a release workflow without it or with another key than the pinned one publishes nothing, whoever holds the key or can push a tag can sign a release, the signing step runs the scripts of the tag, so pushing `v*` tags should be limited to the owners (a tag protection rule) and the secret kept in an Environment with a required reviewer, the build attestation (`gh attestation verify`) names the commit and workflow of a file on top
