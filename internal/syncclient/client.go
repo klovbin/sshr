@@ -818,6 +818,9 @@ func newer(a, b syncproto.Entry) bool {
 // fetchHistory returns the manifests after the last one seen and checks
 // that the server did not roll the account back
 func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
+	if c.st.Counter == 0 && c.st.Approver != "" {
+		return c.joinHistory()
+	}
 	var out []syncproto.Signed
 	after := c.st.Counter
 	// cut is the first change the sync no longer has when the history it
@@ -839,22 +842,20 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 			break
 		}
 		// every change follows the one before, a page that does not move
-		// on would be asked for again and again, a device that joins may
-		// start where the kept history starts
+		// on would be asked for again and again
 		for _, sm := range page {
 			var m syncproto.Manifest
 			if err := json.Unmarshal(sm.Body, &m); err != nil {
 				return nil, err
 			}
-			joining := len(out) == 0 && after == 0 && c.st.Counter == 0 && c.st.Approver != ""
 			switch {
 			case m.Counter <= after:
 				return nil, fmt.Errorf("the server sent change %d again after %d, the history does not add up", m.Counter, after)
-			case m.Counter != after+1 && !joining && len(out) == 0 && after == c.st.Counter:
+			case m.Counter != after+1 && len(out) == 0 && after == c.st.Counter:
 				// trimmed history or a gap, told apart once the length of
 				// what follows is known
 				cut = after + 1
-			case m.Counter != after+1 && !joining:
+			case m.Counter != after+1:
 				return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", after+1, m.Counter-1)
 			}
 			after = m.Counter
@@ -997,6 +998,148 @@ func (c *Client) undoForkedPush() bool {
 // and swap lets two devices write the same number
 var ErrFork = errors.New("sync_fork")
 
+// checkJoinAnchor checks the first manifest a joined device trusts: it
+// trusts only the device that invited it, and only when that device is
+// the primary one or the recovery kit made this device the primary, the
+// manifest must list this device with its own encryption key
+func (c *Client) checkJoinAnchor(sm *syncproto.Signed, m *syncproto.Manifest) error {
+	var signer *syncproto.Device
+	for i := range m.Devices {
+		if m.Devices[i].ID == sm.Signer {
+			signer = &m.Devices[i]
+		}
+	}
+	if signer == nil || strings.ReplaceAll(Fingerprint(signer.SignPub), "-", "") != c.st.Approver {
+		return errors.New("the first manifest is not signed by the device that invited this one")
+	}
+	if err := verifySignature(sm, []syncproto.Device{*signer}); err != nil {
+		return err
+	}
+	// only the primary device adds devices, a stolen one that invites
+	// would keep a way back in after it is removed, a machine restored
+	// from the recovery kit is added by the kit device as the new primary
+	recovered := m.Recovery != "" && sm.Signer == m.Recovery && m.Primary == c.st.DeviceID
+	if m.Version >= 2 && sm.Signer != m.Primary && !recovered {
+		return errors.New("this device was added by a device that is not the primary device of the account, approve it on the primary device")
+	}
+	self := c.self()
+	for _, d := range m.Devices {
+		if d.ID != c.st.DeviceID {
+			continue
+		}
+		if !bytes.Equal(d.KEMPub, self.KEMPub) {
+			return errKEMSwapped
+		}
+		return nil
+	}
+	return errors.New("the manifest does not list this device")
+}
+
+// errKEMSwapped is a signed change that lists this device with another
+// encryption key, the vault key may have gone to someone else
+var errKEMSwapped = errors.New("the account lists this device with another encryption key, the server or the approving device changed it and the vault key may have gone to someone else, do not use this account, compare fingerprints again")
+
+// joinWindow is how many changes a joined device reads before the head
+// at a time to find the change that added it
+const joinWindow = manifestPage
+
+// manifestsBetween reads the changes after a up to b, all of them when b
+// is 0
+func (c *Client) manifestsBetween(a, b uint64) ([]syncproto.Signed, error) {
+	var out []syncproto.Signed
+	for after := a; ; {
+		raw, err := c.backend().ManifestsAfter(after)
+		if errors.Is(err, ErrPending) {
+			return nil, errors.New("this device still waits for approval, run sshr sync approve on a device that is already in")
+		}
+		if err != nil {
+			return nil, err
+		}
+		var page []syncproto.Signed
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return out, nil
+		}
+		for _, sm := range page {
+			var m syncproto.Manifest
+			if err := json.Unmarshal(sm.Body, &m); err != nil {
+				return nil, err
+			}
+			if m.Counter <= after {
+				return nil, fmt.Errorf("the server sent change %d again after %d, the history does not add up", m.Counter, after)
+			}
+			if b != 0 && m.Counter > b {
+				return out, nil
+			}
+			after = m.Counter
+			out = append(out, sm)
+		}
+	}
+}
+
+// joinHistory gives a joined device the history from the newest change
+// that added it, it reads a window before the head and steps back a
+// window at a time only when the change is not in it, so a join reads
+// about one window and never more than the whole kept history, the
+// newest such change carries the same trust as the first, the device that
+// invited this one built on every change before it
+func (c *Client) joinHistory() ([]syncproto.Signed, error) {
+	head, _, err := c.backend().Head()
+	if errors.Is(err, ErrPending) {
+		return nil, errors.New("this device still waits for approval, run sshr sync approve on a device that is already in")
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	start := head - min(head, joinWindow)
+	tail, err := c.manifestsBetween(start, 0)
+	if err != nil {
+		return nil, err
+	}
+	// the head names the newest change, a window before it that holds
+	// nothing means the head lied, stepping back from a huge number
+	// would never end
+	if len(tail) == 0 && head > 0 {
+		return nil, fmt.Errorf("the server names change %d as the newest and sends none before it", head)
+	}
+	for {
+		for i := len(tail) - 1; i >= 0; i-- {
+			var m syncproto.Manifest
+			if json.Unmarshal(tail[i].Body, &m) != nil {
+				continue
+			}
+			err := c.checkJoinAnchor(&tail[i], &m)
+			if err == nil {
+				return tail[i:], nil
+			}
+			// a change the inviting device signed that swaps the key of
+			// this device is said at once
+			if errors.Is(err, errKEMSwapped) {
+				return nil, err
+			}
+		}
+		// a store keeps keepHistory changes, a server that makes up one
+		// more change for every step back is stopped there
+		if start == 0 || len(tail) >= keepHistory {
+			return nil, errors.New("no manifest adds this device yet, approve it on a device that is already in")
+		}
+		prev := start
+		start -= min(start, joinWindow)
+		more, err := c.manifestsBetween(start, prev)
+		if err != nil {
+			return nil, err
+		}
+		// the server keeps the history without holes, an empty window
+		// means nothing older is kept
+		if len(more) == 0 {
+			return nil, errors.New("no manifest adds this device yet, approve it on a device that is already in")
+		}
+		tail = append(more, tail...)
+	}
+}
+
 // verify checks one manifest against what this device trusts and returns
 // it, it then becomes the trusted state, the MAC is checked only when
 // withMAC, the signature already vouches for a manifest in the middle of
@@ -1025,28 +1168,8 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		if err := c.checkPrimary(sm, &m); err != nil {
 			return nil, err
 		}
-	} else {
-		// a joined device trusts only the device that invited it
-		var signer *syncproto.Device
-		for i := range m.Devices {
-			if m.Devices[i].ID == sm.Signer {
-				signer = &m.Devices[i]
-			}
-		}
-		if signer == nil || strings.ReplaceAll(Fingerprint(signer.SignPub), "-", "") != c.st.Approver {
-			return nil, errors.New("the first manifest is not signed by the device that invited this one")
-		}
-		if err := verifySignature(sm, []syncproto.Device{*signer}); err != nil {
-			return nil, err
-		}
-		// only the primary device adds devices, a stolen one that invites
-		// would keep a way back in after it is removed
-		// a machine restored from the recovery kit is added by the kit
-		// device as the new primary
-		recovered := m.Recovery != "" && sm.Signer == m.Recovery && m.Primary == c.st.DeviceID
-		if m.Version >= 2 && sm.Signer != m.Primary && !recovered {
-			return nil, errors.New("this device was added by a device that is not the primary device of the account, approve it on the primary device")
-		}
+	} else if err := c.checkJoinAnchor(sm, &m); err != nil {
+		return nil, err
 	}
 	inside := false
 	self := c.self()
@@ -1058,7 +1181,7 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 			// the vault key is sealed to the encryption key the account
 			// lists, a swapped one sent it to someone else
 			if !bytes.Equal(d.KEMPub, self.KEMPub) {
-				return nil, errors.New("the account lists this device with another encryption key, the server or the approving device changed it and the vault key may have gone to someone else, do not use this account, compare fingerprints again")
+				return nil, errKEMSwapped
 			}
 			inside = true
 		}
@@ -1235,23 +1358,6 @@ func (c *Client) pull() error {
 	history, err := c.fetchHistory()
 	if err != nil {
 		return err
-	}
-	if c.st.Approver != "" {
-		// skip to the manifest that added this device, older ones were
-		// made before it was trusted
-		for i := range history {
-			var m syncproto.Manifest
-			if json.Unmarshal(history[i].Body, &m) == nil {
-				for _, d := range m.Devices {
-					if d.ID == c.st.DeviceID {
-						history = history[i:]
-						goto found
-					}
-				}
-			}
-		}
-		return errors.New("no manifest adds this device yet, approve it on a device that is already in")
-	found:
 	}
 	// a pull cut short keeps the chain where it was, so the next run
 	// verifies and applies the same manifests again, the hosts applied so

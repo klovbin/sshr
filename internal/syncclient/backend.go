@@ -128,7 +128,7 @@ func (h httpBackend) GetBlob(hash string) ([]byte, error) {
 }
 
 func (h httpBackend) Head() (uint64, []byte, error) {
-	b, hdr, err := h.want("GET", "/manifest", nil, nil, http.StatusOK, map[int]error{http.StatusNotFound: ErrNotFound})
+	b, hdr, err := h.want("GET", "/manifest", nil, nil, http.StatusOK, map[int]error{http.StatusNotFound: ErrNotFound, http.StatusForbidden: ErrPending})
 	if err != nil {
 		return 0, nil, err
 	}

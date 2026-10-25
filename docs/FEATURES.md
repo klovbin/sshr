@@ -256,6 +256,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** every device refuses a manifest that adds or removes a device or changes the vault key unless the primary device signed it, the owner's devices keep their hosts instead of taking such a change
 - **Why this way:** the primary is a plaintext field of the signed manifest, so a device that was offline through key changes can still check every step, the manifest format goes to 2 so an older sshr stops with "update sshr" instead of taking a removal from any device, an account made before gets the first device that syncs with this version as primary
 
+### Joining a long history
+- **What:** a new device reads the last 100 changes of the account and steps back 100 at a time only until it finds the change that added it
+- **What for:** joining an account with a long history over a slow store such as WebDAV or a password manager
+- **Why it helps:** the first pull reads about one page of history instead of all kept changes, an account with 1000 kept changes joins in one round of reads
+- **Why this way:** the change that added the device is checked as before, signed by the device that invited it, that device being the primary and the change listing this device with its own encryption key, a newer such change is as trusted as the first one, the inviting device built it on all older changes, a newer change from another device is not taken as the start
+
 ### Recovery kit
 - **What:** `sshr sync recovery create` prints a kit once, `sshr sync recovery restore` brings the account to a new machine from it when every device is lost
 - **What for:** a lost and a broken laptop must not take the hosts of every server with them
