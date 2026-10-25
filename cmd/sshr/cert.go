@@ -9,7 +9,7 @@ import (
 	"sshr.dev/internal/app"
 )
 
-const certUsage = `Usage: sshr cert ca init --software [--replace]
+const certUsage = `Usage: sshr cert ca init --sk | --software [--replace]
        sshr cert ca show
        sshr cert on <host> --principal <name>[,<name>...]
        sshr cert off <host>
@@ -74,7 +74,7 @@ func certOn(store *app.Store, name, principals string) {
 		fatal(err)
 	}
 	if st.HardwareKeyRequired(h.ID) {
-		fatal(fmt.Errorf("%s needs a hardware key, sshr does not sign on a token yet, take it off with sshr hwkey off %s first", h.Name, h.Name))
+		fatal(fmt.Errorf("%s needs a hardware key, it logs in with a key on the token itself, a certificate login uses a key made in memory, take it off with sshr hwkey off %s first", h.Name, h.Name))
 	}
 	st.EnableCert(h.ID, app.CertTarget(h), list)
 	if err := app.SaveSettings(st); err != nil {
@@ -126,11 +126,13 @@ func certStatus(store *app.Store) {
 }
 
 func certCAInit(args []string) {
-	software, replace := false, false
+	software, sk, replace := false, false, false
 	for _, a := range args {
 		switch a {
 		case "--software":
 			software = true
+		case "--sk":
+			sk = true
 		case "--replace":
 			replace = true
 		default:
@@ -138,9 +140,13 @@ func certCAInit(args []string) {
 			os.Exit(1)
 		}
 	}
-	if !software {
+	if software == sk {
 		fmt.Fprintln(os.Stderr, certUsage)
 		os.Exit(1)
+	}
+	if sk {
+		certCAInitToken(replace)
+		return
 	}
 	fmt.Fprintln(os.Stderr, "WARNING: the key of this authority is sealed with the vault key on this machine, whoever opens the vault here can log in to every server that trusts it, as any principal those servers allow")
 	ca, err := app.InitSoftwareCA(replace)
@@ -148,6 +154,41 @@ func certCAInit(args []string) {
 		fatal(err)
 	}
 	fmt.Println("A certificate authority is set up on this machine")
+	certCAShow(ca)
+}
+
+// certCAInitToken makes the key of the authority on a FIDO token with
+// ssh-keygen, it needs the token and a touch, an OpenSSH with FIDO support
+func certCAInitToken(replace bool) {
+	if _, err := app.LoadCertCA(); err == nil && !replace {
+		fatal(fmt.Errorf("a certificate authority is set up here already, the servers trust its key, replace it with --replace"))
+	}
+	handle, err := app.TokenCAHandle()
+	if err != nil {
+		fatal(err)
+	}
+	if replace {
+		// the old handle is kept aside, a server may still trust its key
+		for _, f := range []string{handle, handle + ".pub"} {
+			if fileExists(f) {
+				if err := os.Rename(f, f+".old"); err != nil {
+					fatal(err)
+				}
+			}
+		}
+	}
+	fmt.Println("Plug in the security key, ssh-keygen asks for a touch (and its PIN if it has one)")
+	fmt.Println("It needs an OpenSSH 8.2 or newer built with FIDO support (libfido2) on this machine")
+	host, _ := os.Hostname()
+	typ, err := makeSKKey(handle, "sshr-ca@"+host, false, false, true, runKeygen)
+	if err != nil {
+		fatal(err)
+	}
+	ca, err := app.InitTokenCA(handle, replace)
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Printf("A certificate authority on the token (%s) is set up on this machine, every login to a listed host asks for a touch\n", typ)
 	certCAShow(ca)
 }
 

@@ -40,6 +40,14 @@ var ErrNoCA = sshcmd.ErrNoCA
 // LoadCertCA reads the certificate authority of this machine
 func LoadCertCA() (*CertCA, error) { return sshcmd.LoadCertCA() }
 
+// InitTokenCA makes the handle ssh-keygen made on a token the authority
+func InitTokenCA(handle string, replace bool) (*CertCA, error) {
+	return sshcmd.InitTokenCA(handle, replace)
+}
+
+// TokenCAHandle is where sshr cert ca init --sk keeps the handle
+func TokenCAHandle() (string, error) { return sshcmd.TokenCAHandle() }
+
 // CertTarget binds a host listed for certificates to where it points
 func CertTarget(h *Host) string { return sshcmd.CertTarget(h) }
 

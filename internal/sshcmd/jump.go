@@ -116,7 +116,7 @@ func (e Env) connectArgs(h *Host, check bool) ([]string, error) {
 	hwkey := hardwareKeyRequired(h)
 	if cert {
 		if hwkey {
-			return nil, fmt.Errorf("%s needs a hardware key and is listed for certificates, sshr does not sign on a token yet, take it off one of the lists", h.Name)
+			return nil, fmt.Errorf("%s needs a hardware key and is listed for certificates, a certificate login uses a key made in memory and not one on the token, take it off one of the lists", h.Name)
 		}
 		args, err := certArgs(h)
 		if err != nil {

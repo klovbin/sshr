@@ -9,8 +9,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,6 +126,48 @@ func InitSoftwareCA(replace bool) (*CertCA, error) {
 	return ca, nil
 }
 
+// InitTokenCA makes the handle at handle, already made by ssh-keygen on a
+// token, the authority of this machine
+func InitTokenCA(handle string, replace bool) (*CertCA, error) {
+	path, err := certCAPath()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(path); err == nil && !replace {
+		return nil, errors.New("a certificate authority is set up here already, the servers trust its key, replace it with --replace")
+	}
+	b, err := os.ReadFile(handle + ".pub")
+	if err != nil {
+		return nil, err
+	}
+	pub, comment, _, _, err := ssh.ParseAuthorizedKey(b)
+	if err != nil {
+		return nil, err
+	}
+	if t := pub.Type(); t != ssh.KeyAlgoSKED25519 && t != ssh.KeyAlgoSKECDSA256 {
+		return nil, fmt.Errorf("%s is a %s key, not one on a token", handle, t)
+	}
+	ca := &CertCA{Type: CAToken, Pub: authorizedLine(pub, comment), Handle: handle}
+	out, err := json.MarshalIndent(ca, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := fileio.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+		return nil, err
+	}
+	return ca, nil
+}
+
+// TokenCAHandle is where sshr cert ca init --sk keeps the handle of the
+// key on the token, next to settings.json
+func TokenCAHandle() (string, error) {
+	p, err := certCAPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), "cert-ca-sk"), nil
+}
+
 // PublicKey is the key servers trust
 func (ca *CertCA) PublicKey() (ssh.PublicKey, error) {
 	k, _, _, _, err := ssh.ParseAuthorizedKey([]byte(ca.Pub))
@@ -133,23 +179,31 @@ func (ca *CertCA) PublicKey() (ssh.PublicKey, error) {
 // takes it, keyID names the login in the server log, only a pty and port
 // forwards are allowed, agent and X11 forwarding are not
 func (ca *CertCA) SignUserCert(pub ssh.PublicKey, keyID string, principals []string, minutes int, now time.Time) (*ssh.Certificate, error) {
-	if ca.Type != CASoftware {
-		return nil, fmt.Errorf("an authority of kind %q does not sign in this sshr yet", ca.Type)
-	}
 	if len(principals) == 0 {
 		return nil, errors.New("a certificate needs a principal")
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, err
+	}
+	serial := binary.BigEndian.Uint64(b[:])
+	if ca.Type == CAToken {
+		cert, err := ca.tokenSign(pub, keyID, principals, minutes, serial)
+		if err != nil {
+			return nil, err
+		}
+		if err := ca.checkSigned(cert, pub, principals, now, minutes); err != nil {
+			return nil, err
+		}
+		return cert, nil
 	}
 	signer, err := ca.softwareSigner()
 	if err != nil {
 		return nil, err
 	}
-	var serial [8]byte
-	if _, err := rand.Read(serial[:]); err != nil {
-		return nil, err
-	}
 	cert := &ssh.Certificate{
 		Key:             pub,
-		Serial:          binary.BigEndian.Uint64(serial[:]),
+		Serial:          serial,
 		CertType:        ssh.UserCert,
 		KeyId:           keyID,
 		ValidPrincipals: principals,
@@ -164,6 +218,78 @@ func (ca *CertCA) SignUserCert(pub ssh.PublicKey, keyID string, principals []str
 		return nil, err
 	}
 	return cert, nil
+}
+
+// tokenSign has ssh-keygen sign pub with the key of the authority on the
+// token, ssh-keygen asks for the touch, the files live in a folder of
+// this login that goes right after
+func (ca *CertCA) tokenSign(pub ssh.PublicKey, keyID string, principals []string, minutes int, serial uint64) (*ssh.Certificate, error) {
+	keygen, err := KeygenPath()
+	if err != nil {
+		return nil, err
+	}
+	base, err := ControlDir()
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp(base, "sign-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	keyFile := filepath.Join(dir, "key.pub")
+	if err := os.WriteFile(keyFile, ssh.MarshalAuthorizedKey(pub), 0o600); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(keygen, "-q", "-s", ca.Handle, "-I", keyID, "-n", strings.Join(principals, ","),
+		"-V", fmt.Sprintf("-5m:+%dm", minutes), "-z", strconv.FormatUint(serial, 10),
+		"-O", "clear", "-O", "permit-pty", "-O", "permit-port-forwarding", keyFile)
+	var errOut strings.Builder
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errOut)
+	fmt.Fprintln(os.Stderr, "sshr: touch the security key of the certificate authority")
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("ssh-keygen -s: %v %s", err, strings.TrimSpace(errOut.String()))
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "key-cert.pub"))
+	if err != nil {
+		return nil, err
+	}
+	k, _, _, _, err := ssh.ParseAuthorizedKey(b)
+	if err != nil {
+		return nil, err
+	}
+	cert, ok := k.(*ssh.Certificate)
+	if !ok {
+		return nil, errors.New("ssh-keygen -s wrote no certificate")
+	}
+	return cert, nil
+}
+
+// checkSigned makes sure what ssh-keygen signed is the certificate asked:
+// the key of this login, the authority, the principals, a user certificate
+// that holds now and no longer than asked
+func (ca *CertCA) checkSigned(cert *ssh.Certificate, pub ssh.PublicKey, principals []string, now time.Time, minutes int) error {
+	caPub, err := ca.PublicKey()
+	if err != nil {
+		return err
+	}
+	checker := ssh.CertChecker{
+		IsUserAuthority: func(k ssh.PublicKey) bool { return bytes.Equal(k.Marshal(), caPub.Marshal()) },
+		Clock:           func() time.Time { return now },
+	}
+	switch {
+	case !bytes.Equal(cert.Key.Marshal(), pub.Marshal()):
+		return errors.New("ssh-keygen signed another key")
+	case cert.CertType != ssh.UserCert:
+		return errors.New("ssh-keygen signed no user certificate")
+	case !slices.Equal(cert.ValidPrincipals, principals):
+		return errors.New("ssh-keygen signed other principals")
+	case len(cert.CriticalOptions) != 0:
+		return errors.New("ssh-keygen signed critical options")
+	case int64(cert.ValidBefore) > now.Add(time.Duration(minutes+1)*time.Minute).Unix():
+		return errors.New("ssh-keygen signed a longer life")
+	}
+	return checker.CheckCert(principals[0], cert)
 }
 
 func (ca *CertCA) softwareSigner() (ssh.Signer, error) {
