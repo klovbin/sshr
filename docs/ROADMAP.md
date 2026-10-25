@@ -22,12 +22,16 @@ Passwords and keys
 - passwords and keys read from 1Password, new 1Password items from the app ([#13](https://github.com/klovbin/sshr/issues/13))
 - keys from an ssh agent, the 1Password SSH agent included ([#5](https://github.com/klovbin/sshr/issues/5))
 - passwords and keys read from Bitwarden with `bw` ([#20](https://github.com/klovbin/sshr/issues/20))
+- keys on a FIDO token with `sshr key new --sk`, hosts that connect only with one, `sshr hwkey require`, off by default
+- the vault under a passphrase, a recovery code or a FIDO2 token, the vault key forgotten when idle, process memory closed to other programs, the agent of sshr answers only the ssh it started
+- short certificates signed per login by an authority on this machine or on a FIDO token, `sshr cert`, off by default
 
 Moving hosts in and out
 
 - import from `~/.ssh/config` through `ssh -G`
 - export to `~/.ssh/config` with an `Include` line, kept up to date, off by default
 - sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), changes to different fields of one host on two devices merge into one host ([#152](https://github.com/klovbin/sshr/issues/152)), only the primary device adds and removes devices ([#292](https://github.com/klovbin/sshr/issues/292)), a paper recovery kit with a claim, a wait and a cancel ([#150](https://github.com/klovbin/sshr/issues/150)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
+- sync through a store you already have: an S3 bucket, a WebDAV folder, a Supabase project or a folder Syncthing, Dropbox or iCloud syncs, still end to end encrypted ([#128](https://github.com/klovbin/sshr/issues/128)), a joining device reads only the end of the history, `sshr sync cleanup` deletes the blobs no change names
 
 For other programs
 
@@ -59,9 +63,8 @@ Later
 
 7. sshr on iOS and Android, ssh in process, keys in the phone's keystore, joins sync like any device ([#25](https://github.com/klovbin/sshr/issues/25))
 9. Sync: automatic background sync, pairing by QR code
-12. Sync through a store you already have, Supabase, a 1Password vault or a folder Syncthing or Dropbox syncs, still end to end encrypted, the store sees only ciphertext ([#128](https://github.com/klovbin/sshr/issues/128))
+12. Sync through a 1Password vault, waits for measurements of the op CLI ([#128](https://github.com/klovbin/sshr/issues/128))
 10. Sync without a server: device to device over the local network or the user's own WireGuard tunnel, TLS 1.3 with device keys pinned at pairing
-11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required: `sshr key new --sk` makes one and the handle is a key file, `sshr hwkey require` refuses hosts that would log in without one
 
 ## Not planned
 
