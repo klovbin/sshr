@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -34,6 +35,14 @@ func TestFIDO2Helper(t *testing.T) {
 		}
 	}
 	tool, args := args[0], args[1:]
+	if tool == "fido2-token" && len(args) > 0 && args[0] == "-I" {
+		retries := "8"
+		if mode == "few-tries" {
+			retries = "2"
+		}
+		fmt.Println("pin retries: " + retries)
+		os.Exit(0)
+	}
 	if tool == "fido2-token" {
 		// a line of another shape and a path that reads as an option are
 		// not devices
@@ -43,7 +52,7 @@ func TestFIDO2Helper(t *testing.T) {
 		os.Exit(0)
 	}
 	var in []string
-	hmacOn := false
+	hmacOn, verify := false, false
 	for i, a := range args {
 		switch a {
 		case "-i":
@@ -51,7 +60,16 @@ func TestFIDO2Helper(t *testing.T) {
 			in = strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 		case "-h":
 			hmacOn = true
+		case "-v", "pin=true":
+			verify = true
 		}
+	}
+	// a PIN comes on stdin, as from readpassphrase without a terminal
+	stdin, _ := io.ReadAll(os.Stdin)
+	pinGiven := strings.TrimSpace(string(stdin)) == "1234"
+	if (verify || tool == "fido2-cred" && mode == "pin-cred") && !pinGiven {
+		fmt.Fprintln(os.Stderr, tool+": invalid PIN length")
+		os.Exit(1)
 	}
 	switch tool {
 	case "fido2-cred":
@@ -73,6 +91,9 @@ func TestFIDO2Helper(t *testing.T) {
 			m := hmac.New(sha256.New, []byte("device secret"))
 			m.Write(cred)
 			m.Write(salt)
+			if verify {
+				m.Write([]byte{1})
+			}
 			fmt.Println(base64.StdEncoding.EncodeToString(m.Sum(nil)))
 		}
 	}
@@ -106,9 +127,6 @@ func TestFIDO2EnrolAndAsk(t *testing.T) {
 	if err != nil || !bytes.Equal(got, secret) {
 		t.Fatalf("ask: %v", err)
 	}
-	if _, _, err := enrolFIDO2("sshr:vault", salt, true, nil); err == nil {
-		t.Error("a PIN was taken while only a touch is supported")
-	}
 	// the key that holds a credential of the vault is enrolled already
 	if _, _, err := enrolFIDO2("sshr:vault", salt, false, [][]byte{cred}); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Errorf("the same key twice: %v", err)
@@ -139,5 +157,66 @@ func TestFIDO2StrictAnswers(t *testing.T) {
 	}
 	if _, err := askFIDO2(req); !errors.Is(err, vault.ErrNoToken) {
 		t.Errorf("a missing tool: %v", err)
+	}
+}
+
+// a key with a PIN set asks it to make a credential, sshr asks the person
+// once then, with uv the PIN is asked at enrolment and at every open and
+// the secret is the one with user verification
+func TestFIDO2PIN(t *testing.T) {
+	asked := 0
+	old := fido2PIN
+	fido2PIN = func(string) (string, error) { asked++; return "1234", nil }
+	t.Cleanup(func() { fido2PIN = old })
+	salt := bytes.Repeat([]byte{3}, 32)
+
+	fakeFIDO2(t, "pin-cred")
+	cred, secret, err := enrolFIDO2("sshr:vault", salt, false, nil)
+	if err != nil || asked != 1 {
+		t.Fatalf("a key that wants its PIN to make a credential: %v, asked %d", err, asked)
+	}
+	if got, err := askFIDO2(vault.TokenRequest{RP: "sshr:vault", Cred: cred, Salt: salt}); err != nil || !bytes.Equal(got, secret) || asked != 1 {
+		t.Fatalf("touch only after that: %v, asked %d", err, asked)
+	}
+
+	fakeFIDO2(t, "ok")
+	asked = 0
+	cred, uvSecret, err := enrolFIDO2("sshr:vault", salt, true, nil)
+	if err != nil || asked != 1 {
+		t.Fatalf("enrolment with a PIN: %v, asked %d", err, asked)
+	}
+	got, err := askFIDO2(vault.TokenRequest{RP: "sshr:vault", Cred: cred, Salt: salt, UV: true})
+	if err != nil || !bytes.Equal(got, uvSecret) || asked != 2 {
+		t.Fatalf("an open with a PIN: %v, asked %d", err, asked)
+	}
+	if bytes.Equal(uvSecret, secret) {
+		t.Error("the secret with user verification is the one without")
+	}
+}
+
+// a key with few PIN tries left is not asked, the PIN never comes from the
+// helper of the vault passphrase, a failed PIN is marked as one
+func TestFIDO2PINSafety(t *testing.T) {
+	fakeFIDO2(t, "few-tries")
+	old := fido2PIN
+	asked := 0
+	fido2PIN = func(string) (string, error) { asked++; return "1234", nil }
+	if _, err := askPIN("/dev/hidraw9", "yubi"); !errors.Is(err, vault.ErrTokenPIN) || asked != 0 {
+		t.Errorf("a key with 2 tries left: %v, asked %d", err, asked)
+	}
+	fido2PIN = old
+	t.Cleanup(func() { fido2PIN = old; NoTerminalPrompts = false })
+
+	t.Setenv("SSHR_ASKPASS", "/bin/echo")
+	NoTerminalPrompts = true
+	if _, err := fido2PIN("yubi"); !errors.Is(err, vault.ErrTokenPIN) || !strings.Contains(err.Error(), "SSHR_PIN_ASKPASS") {
+		t.Errorf("the PIN from the passphrase helper: %v", err)
+	}
+	t.Setenv("SSHR_PIN_ASKPASS", "/bin/echo")
+	if pin, err := fido2PIN("yubi"); err != nil || pin != "PIN of the security key yubi: " {
+		t.Errorf("the PIN from SSHR_PIN_ASKPASS: %q %v", pin, err)
+	}
+	if err := pinFailure(errors.New("fido2-assert: fido_dev_get_assert: FIDO_ERR_PIN_INVALID")); !errors.Is(err, vault.ErrTokenPIN) {
+		t.Errorf("a wrong PIN: %v", err)
 	}
 }

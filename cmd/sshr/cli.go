@@ -1291,14 +1291,20 @@ func cmdVault(args []string) {
 		fmt.Printf("Slot %s is removed\n", args[1])
 		return
 	case len(args) >= 1 && args[0] == "add-token":
-		label := ""
-		if len(args) == 3 && args[1] == "--label" {
-			label = args[2]
-		} else if len(args) != 1 {
-			fmt.Fprintln(os.Stderr, vaultUsage)
-			os.Exit(1)
+		label, pin := "", false
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--pin":
+				pin = true
+			case args[i] == "--label" && i+1 < len(args):
+				label = args[i+1]
+				i++
+			default:
+				fmt.Fprintln(os.Stderr, vaultUsage)
+				os.Exit(1)
+			}
 		}
-		if err := app.AddVaultToken(label, confirmRecoveryCode); err != nil {
+		if err := app.AddVaultToken(label, pin, confirmRecoveryCode); err != nil {
 			fatal(err)
 		}
 		fmt.Println("The security key opens the vault now, without it the passphrase or the recovery code does, sshr vault slots lists them")
@@ -1375,7 +1381,7 @@ func cmdVault(args []string) {
 }
 
 const vaultUsage = `Usage: sshr vault status|passphrase|keychain|recovery|slots
-       sshr vault add-token [--label <name>]
+       sshr vault add-token [--label <name>] [--pin]
        sshr vault remove-slot <id>`
 
 // confirmRecoveryCode shows a new recovery code on a terminal and asks for
