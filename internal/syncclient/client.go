@@ -1402,6 +1402,14 @@ func (c *Client) pull() error {
 			return err
 		}
 	}
+	if last == nil {
+		// a host skipped while its file did not load is applied again from
+		// the head once it loads or is removed, its edit or its removal
+		// then goes through the conflict rules and the push sends it
+		if last, err = c.headToRetry(); err != nil {
+			return err
+		}
+	}
 	if last != nil {
 		if err := c.apply(last); err != nil {
 			rollback()
@@ -1421,6 +1429,49 @@ func (c *Client) pull() error {
 	}
 	c.st.LastSync = time.Now().UTC()
 	return c.save()
+}
+
+// headToRetry is the head manifest when a skipped host this device synced
+// before loads again or is gone, nil otherwise, the head must be the one
+// this device verified
+func (c *Client) headToRetry() (*syncproto.Manifest, error) {
+	retry := false
+	var broken map[string]string
+	for id := range c.st.Skipped {
+		if _, seen := c.st.Entries[id]; !seen || isAnchor(id) {
+			continue
+		}
+		if broken == nil {
+			var err error
+			if _, broken, err = c.localHosts(); err != nil {
+				return nil, err
+			}
+		}
+		if _, bad := broken[id]; !bad {
+			retry = true
+			break
+		}
+	}
+	if !retry {
+		return nil, nil
+	}
+	_, raw, err := c.backend().Head()
+	if err != nil {
+		return nil, err
+	}
+	var sm syncproto.Signed
+	if err := json.Unmarshal(raw, &sm); err != nil {
+		return nil, err
+	}
+	if syncproto.BodyHash(sm.Body) != c.st.Head {
+		// a newer head is pulled on the next run
+		return nil, nil
+	}
+	var m syncproto.Manifest
+	if err := json.Unmarshal(sm.Body, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // apply writes the hosts of m that changed since the last sync, a host
@@ -1460,6 +1511,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		if why, ok := broken[id]; ok {
 			c.logf("skipped %s, %s", short(id, 8), why)
 			c.leaveOut(id, why)
+			// the push carries the entry of the head, the one this device
+			// had before would undo a newer change of another device
+			c.st.Skipped[id] = e
 			continue
 		}
 		delete(c.st.Skipped, id)
