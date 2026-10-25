@@ -5,6 +5,7 @@ package app
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,10 +86,13 @@ func TestBitwardenKey(t *testing.T) {
 	if h.KeyPub != pub || !h.ServedByAgent() {
 		t.Fatalf("KeyPub = %q, want %q", h.KeyPub, pub)
 	}
-	raw, err := loadKey(h)
-	if err != nil || raw == nil {
-		t.Fatalf("loadKey = %v", err)
+	// the key reaches the agent of the connection, read through bw
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	stop, err := AttachAuth(exec.Command("true"), h)
+	if err != nil {
+		t.Fatalf("AttachAuth = %v", err)
 	}
+	stop()
 	if _, err := s.Add(Host{Host: "h", User: "u", KeyMode: KeyBitwarden, KeyRef: "login"}); err == nil || !strings.Contains(err.Error(), "not an SSH Key item") {
 		t.Errorf("login item as key: %v", err)
 	}

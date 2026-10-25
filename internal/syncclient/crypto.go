@@ -59,6 +59,13 @@ func (k *deviceKeys) device(name string) syncproto.Device {
 
 // Fingerprint is what a person compares between two screens, 20 hex
 // characters of the hash of a device's signing key in groups of four
+// DeviceFingerprint is what people compare when a device joins or the
+// primary role moves, it covers the signing key and the encryption key
+// the vault key is sealed to, a server that swaps either changes it
+func DeviceFingerprint(d syncproto.Device) string {
+	return Fingerprint(append(append(append([]byte(nil), d.SignPub...), 0), d.KEMPub...))
+}
+
 func Fingerprint(signPub []byte) string {
 	sum := sha256.Sum256(append([]byte("sshr-sync fingerprint\x00"), signPub...))
 	h := hex.EncodeToString(sum[:10])
@@ -150,9 +157,7 @@ func manifestMAC(vaultKey, body []byte) []byte {
 	return m.Sum(nil)
 }
 
-func signInput(body []byte) []byte {
-	return append([]byte("sshr-sync manifest\x00"), body...)
-}
+func signInput(body []byte) []byte { return syncproto.SignInput(body) }
 
 // signManifest makes the stored form of m, MAC'd with the vault key of its
 // epoch and signed by this device

@@ -65,6 +65,10 @@ func SecretDelete(name string) error { return vault.SecretDelete(name) }
 // MoveSecrets moves named secrets between the keychain and the vault file
 func MoveSecrets(names []string, toFile bool) error { return vault.MoveSecrets(names, toFile) }
 
+// ErrKeychainCopyLeft means the vault is under the passphrase and the
+// system keychain still holds the vault key
+var ErrKeychainCopyLeft = vault.ErrKeychainCopyLeft
+
 // SetVaultPassphrase moves the vault key under a passphrase
 func SetVaultPassphrase(pass string, secretNames []string) error {
 	return vault.SetPassphrase(pass, secretNames)

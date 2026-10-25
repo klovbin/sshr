@@ -40,6 +40,19 @@ type entryState struct {
 	// Local is a keyed hash of the host as it was written here at the last
 	// sync, a different one means the host was changed here since
 	Local string `json:"local,omitempty"`
+	// Base is the hash of the blob the host here was last in step with, the
+	// base of a field merge (base.go), Blob moves past it when a conflict
+	// copy keeps an unpushed local edit or another device rotates the key,
+	// empty means Blob
+	Base string `json:"base,omitempty"`
+}
+
+// base is the hash of the blob a local edit started from
+func (e entryState) base() string {
+	if e.Base != "" {
+		return e.Base
+	}
+	return e.Blob
 }
 
 type state struct {
@@ -55,8 +68,22 @@ type state struct {
 	Trusted []syncproto.Device `json:"trusted,omitempty"`
 	// Approver is the fingerprint of the inviting device, a joined device
 	// trusts only it until it has verified its first manifest
-	Approver string                `json:"approver,omitempty"`
-	Entries  map[string]entryState `json:"entries"`
+	Approver string `json:"approver,omitempty"`
+	// Primary is the primary device of the last verified manifest, Format
+	// the highest manifest format seen, a format 1 manifest after a format
+	// 2 one is refused, it would drop the primary
+	Primary string `json:"primary,omitempty"`
+	Format  int    `json:"format,omitempty"`
+	// Recovery, RecoveryWait and Claim are those of the last verified
+	// manifest (#150), ClaimSeen is the claim this device saw and
+	// ClaimSeenAt when by its own clock, a hand-over by the recovery kit is
+	// taken only RecoveryWait after that
+	Recovery     string                `json:"recovery,omitempty"`
+	RecoveryWait int64                 `json:"recovery_wait,omitempty"`
+	Claim        uint64                `json:"claim,omitempty"`
+	ClaimSeen    uint64                `json:"claim_seen,omitempty"`
+	ClaimSeenAt  time.Time             `json:"claim_seen_at,omitzero"`
+	Entries      map[string]entryState `json:"entries"`
 	// Skipped are remote entries this device could not import (a mode of a
 	// newer sshr, a host that fails validation), a push carries them on
 	// unchanged and every pull tries them again
@@ -92,11 +119,30 @@ type pushPlan struct {
 	key   []byte
 	// rotation is saved together with the new manifest
 	rotation *rotation
+	// primary hands the primary role to this device, empty keeps it
+	primary string
+	// recovery replaces the recovery kit fields, nil keeps them
+	recovery *recoveryFields
+	// anchor adds the anchor entry of a recovery kit, its id and its
+	// plain payload, dropAnchors takes out the entries of kits with these
+	// ids (recovery.go)
+	anchorID    string
+	anchorPlain []byte
+	dropAnchors []string
+}
+
+// recoveryFields are the recovery kit fields of a manifest
+type recoveryFields struct {
+	device string
+	wait   int64
+	claim  uint64
 }
 
 // Client syncs one Store
 type Client struct {
 	Store *hosts.Store
+	// Now is the clock of the recovery wait, nil is time.Now
+	Now func() time.Time
 	// Dir holds state.json, ~/.sshr/sync
 	Dir string
 	// KeyPrefix names the keychain entries of this device, tests give two
@@ -128,6 +174,12 @@ type Client struct {
 	// LeftOut names the hosts the last run did not sync and why, a run
 	// that left hosts out still succeeds, the caller says so
 	LeftOut map[string]string
+	// kit is set on the client of a recovery kit device, it imports no
+	// host and carries every entry on as it is (recovery.go)
+	kit bool
+	// verified are the entries of the manifest verify took last in this
+	// run, the state has them only once the pull applied the newest one
+	verified map[string]syncproto.Entry
 }
 
 // leaveOut notes a host the run did not sync
@@ -154,7 +206,7 @@ func (c *Client) run(fn func() error) error {
 		return err
 	}
 	defer unlock()
-	c.running, c.st, c.LeftOut = true, nil, nil
+	c.running, c.st, c.LeftOut, c.verified = true, nil, nil, nil
 	defer func() { c.running = false }()
 	return fn()
 }
@@ -296,7 +348,11 @@ func (c *Client) save() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	return fileio.WriteFile(c.statePath(), b, 0o600)
+	if err := fileio.WriteFile(c.statePath(), b, 0o600); err != nil {
+		return err
+	}
+	c.pruneBase()
+	return nil
 }
 
 // serverOf is the server of a new state: an sshr-sync address, or the
@@ -604,7 +660,7 @@ func (c *Client) join(server, code, name string) (string, error) {
 		return "", fmt.Errorf("the sync store holds account %s, the invite is for %s, check the server or store", short(tr.Account, 8), short(account, 8))
 	}
 	c.st.Token, c.st.DeviceID = tr.Token, self.ID
-	return Fingerprint(self.SignPub), c.saveNew()
+	return DeviceFingerprint(self), c.saveNew()
 }
 
 // Pending lists devices that joined and wait for approval
@@ -647,7 +703,7 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	}
 	var found []syncproto.DeviceRecord
 	for _, d := range pending {
-		if strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", "")) {
+		if strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(DeviceFingerprint(d.Device), "-", ""), strings.ReplaceAll(prefix, "-", "")) {
 			found = append(found, d)
 		}
 	}
@@ -658,6 +714,12 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 	if err := c.Pull(); err != nil {
 		return nil, err
 	}
+	if err := c.errNotPrimary("approves devices"); err != nil {
+		return nil, err
+	}
+	if err := c.claimPrimary(); err != nil {
+		return nil, err
+	}
 	// the list is taken from the state each attempt pulled, a device
 	// another one removed meanwhile is not written back
 	plan := func() (pushPlan, error) {
@@ -665,6 +727,11 @@ func (c *Client) approve(prefix string) (*syncproto.DeviceRecord, error) {
 			if t.ID == d.ID {
 				return pushPlan{}, nil
 			}
+		}
+		// a retry after a lost race plans from the pulled state, the role
+		// may have moved meanwhile
+		if err := c.errNotPrimary("approves devices"); err != nil {
+			return pushPlan{}, err
 		}
 		return pushPlan{devices: append(append([]syncproto.Device(nil), c.st.Trusted...), d.Device)}, nil
 	}
@@ -848,6 +915,9 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		if err := verifySignature(sm, c.st.Trusted); err != nil {
 			return nil, err
 		}
+		if err := c.checkPrimary(sm, &m); err != nil {
+			return nil, err
+		}
 	} else {
 		// a joined device trusts only the device that invited it
 		var signer *syncproto.Device
@@ -862,6 +932,32 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		if err := verifySignature(sm, []syncproto.Device{*signer}); err != nil {
 			return nil, err
 		}
+		// only the primary device adds devices, a stolen one that invites
+		// would keep a way back in after it is removed
+		// a machine restored from the recovery kit is added by the kit
+		// device as the new primary
+		recovered := m.Recovery != "" && sm.Signer == m.Recovery && m.Primary == c.st.DeviceID
+		if m.Version >= 2 && sm.Signer != m.Primary && !recovered {
+			return nil, errors.New("this device was added by a device that is not the primary device of the account, approve it on the primary device")
+		}
+	}
+	inside := false
+	self := c.self()
+	for _, d := range m.Devices {
+		if syncproto.DeviceID(d.SignPub) != d.ID {
+			return nil, errors.New("manifest lists a device whose id does not match its key")
+		}
+		if d.ID == c.st.DeviceID {
+			// the vault key is sealed to the encryption key the account
+			// lists, a swapped one sent it to someone else
+			if !bytes.Equal(d.KEMPub, self.KEMPub) {
+				return nil, errors.New("the account lists this device with another encryption key, the server or the approving device changed it and the vault key may have gone to someone else, do not use this account, compare fingerprints again")
+			}
+			inside = true
+		}
+	}
+	if !inside {
+		return nil, errors.New("this device was removed from the account, run sshr sync leave")
 	}
 	if m.Epoch < c.st.Epoch {
 		return nil, errors.New("manifest of an old vault key epoch")
@@ -893,19 +989,100 @@ func (c *Client) verify(sm *syncproto.Signed, withMAC bool) (*syncproto.Manifest
 		}
 		c.markKey(m.Epoch)
 	}
-	inside := false
-	for _, d := range m.Devices {
-		if syncproto.DeviceID(d.SignPub) != d.ID {
-			return nil, errors.New("manifest lists a device whose id does not match its key")
-		}
-		inside = inside || d.ID == c.st.DeviceID
-	}
-	if !inside {
-		return nil, errors.New("this device was removed from the account, run sshr sync leave")
+	if m.Version >= 2 && c.st.Primary == "" && c.st.Counter > 0 {
+		c.logf("device %s is now the primary device of the account, only it adds and removes devices (sshr sync status)", short(m.Primary, 8))
 	}
 	c.st.Trusted, c.st.Head, c.st.Counter, c.st.Epoch = m.Devices, syncproto.BodyHash(sm.Body), m.Counter, m.Epoch
 	c.st.Approver = ""
+	if m.Version >= 2 {
+		c.st.Primary = m.Primary
+		c.st.Recovery, c.st.RecoveryWait, c.st.Claim = m.Recovery, m.RecoveryWait, m.Claim
+	}
+	c.st.Format = max(c.st.Format, m.Version)
+	c.verified = m.Entries
 	return &m, nil
+}
+
+// checkPrimary refuses a manifest that changes who is in the account
+// without the primary device (syncproto.CheckPrimary), the state of this
+// device stands for the manifest before, a device refusing a change keeps
+// its hosts and stops syncing, the account is not taken from the owner, a
+// claim of the recovery kit is noted with the time this device saw it and
+// a hand-over by the kit is taken only after the wait by that clock
+func (c *Client) checkPrimary(sm *syncproto.Signed, m *syncproto.Manifest) error {
+	entries := c.verified
+	if entries == nil {
+		entries = c.knownEntries()
+	}
+	prev := &syncproto.Manifest{Version: c.st.Format, Primary: c.st.Primary, Epoch: c.st.Epoch, Devices: c.st.Trusted,
+		Recovery: c.st.Recovery, RecoveryWait: c.st.RecoveryWait, Claim: c.st.Claim, Entries: entries}
+	step, err := syncproto.CheckPrimary(prev, m, sm.Signer)
+	if err == nil && step == syncproto.StepRecover {
+		wait := time.Duration(prev.RecoveryWait) * time.Second
+		switch {
+		case c.st.ClaimSeen != prev.Claim:
+			err = fmt.Errorf("change %d hands the account to a new device with the recovery kit, but this device never saw the claim it needs, it does not take it", m.Counter)
+		case c.now().Sub(c.st.ClaimSeenAt) < wait:
+			err = fmt.Errorf("change %d hands the account to a new device with the recovery kit before the wait is over (%s left), this device does not take it", m.Counter, (wait - c.now().Sub(c.st.ClaimSeenAt)).Round(time.Minute))
+		}
+	}
+	if err != nil {
+		if prev.Primary != "" {
+			return fmt.Errorf("%w, this device keeps its hosts and does not take it, if that device is lost or stolen remove it on the primary device, if the account cannot sync any more start a new one from the hosts here: sshr sync leave, then sshr sync init (on S3 or WebDAV a new --prefix or folder, on Supabase a new project)", err)
+		}
+		return err
+	}
+	if m.Claim != 0 && c.st.ClaimSeen != m.Claim {
+		c.st.ClaimSeen, c.st.ClaimSeenAt = m.Claim, c.now()
+		c.logf("WARNING: the recovery kit of this account was used on change %d, in %s it may hand the account to a new device, if that was not you, run sshr sync recovery cancel on the primary device now", m.Claim, (time.Duration(m.RecoveryWait) * time.Second).Round(time.Hour))
+	}
+	return nil
+}
+
+// knownEntries is the entry list of the last verified manifest as the
+// state keeps it, the recovery kit may not change it
+func (c *Client) knownEntries() map[string]syncproto.Entry {
+	out := make(map[string]syncproto.Entry, len(c.st.Entries)+len(c.st.Skipped))
+	for id, e := range c.st.Entries {
+		out[id] = syncproto.Entry{Hash: e.Blob, Lamport: e.Lamport, Device: e.Device, Deleted: e.Deleted}
+	}
+	for id, e := range c.st.Skipped {
+		out[id] = e
+	}
+	return out
+}
+
+// now is the clock of the recovery wait, tests move it
+func (c *Client) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
+}
+
+// claimPrimary makes this device the first primary of an account made
+// before primary devices, in a change of its own, the change that adds or
+// removes a device or hands the role on comes after it, other devices take
+// no first primary together with such a change
+func (c *Client) claimPrimary() error {
+	if c.st.Primary != "" {
+		return nil
+	}
+	return c.push(func() (pushPlan, error) {
+		if c.st.Primary != "" {
+			return pushPlan{}, nil
+		}
+		return pushPlan{primary: c.st.DeviceID}, nil
+	})
+}
+
+// errNotPrimary refuses what only the primary device may do, before
+// anything is sent
+func (c *Client) errNotPrimary(what string) error {
+	if c.st.Primary == "" || c.st.Primary == c.st.DeviceID {
+		return nil
+	}
+	return fmt.Errorf("only the primary device of the account %s (device %s, sshr sync status shows it), run this there", what, short(c.st.Primary, 8))
 }
 
 // checkFormat takes a manifest of this format or an older one, a field
@@ -961,6 +1138,12 @@ func (c *Client) pull() error {
 	before := *c.st
 	rollback := func() {
 		c.st.Counter, c.st.Head, c.st.Trusted, c.st.Epoch, c.st.Approver = before.Counter, before.Head, before.Trusted, before.Epoch, before.Approver
+		// the primary and the format belong to the manifests put back, the
+		// next pull checks them again from here
+		c.st.Primary, c.st.Format = before.Primary, before.Format
+		c.st.Recovery, c.st.RecoveryWait, c.st.Claim = before.Recovery, before.RecoveryWait, before.Claim
+		c.st.ClaimSeen, c.st.ClaimSeenAt = before.ClaimSeen, before.ClaimSeenAt
+		c.verified = nil
 	}
 	var last *syncproto.Manifest
 	for i := range history {
@@ -1006,8 +1189,21 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// the anchor of a kit that was cancelled or replaced is gone from the
+	// manifest, a device that kept it would push it back
+	for id := range c.st.Skipped {
+		if _, ok := m.Entries[id]; !ok && isAnchor(id) {
+			delete(c.st.Skipped, id)
+		}
+	}
 	for _, id := range ids {
 		e := m.Entries[id]
+		if isAnchor(id) || c.kit {
+			// the anchor of a recovery kit is no host, it is carried on, the
+			// kit device itself keeps no hosts and carries every entry
+			c.st.Skipped[id] = e
+			continue
+		}
 		if why, ok := broken[id]; ok {
 			c.logf("skipped %s, %s", short(id, 8), why)
 			c.leaveOut(id, why)
@@ -1020,6 +1216,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		knownEntry := syncproto.Entry{Lamport: known.Lamport, Device: known.Device}
 		if seen && e.Lamport == known.Lamport && e.Device == known.Device {
 			if e.Hash != "" {
+				// a key rotation of another device, the content is the same,
+				// the kept base under the old hash stays the base
+				known.Base = known.base()
 				known.Blob = e.Hash
 				c.st.Entries[id] = known
 			}
@@ -1068,6 +1267,9 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 				c.logf("%s was removed here and changed on device %s, it is back with that change, remove it again to drop it", short(id, 8), short(e.Device, 8))
 			}
 			if plain, ok := local[id]; ok && seen && c.localHash(plain) != known.Local {
+				if merged, err := c.mergeEdit(store, id, known, e, p, plain); err != nil || merged {
+					return err
+				}
 				// neither side is lost, the later change keeps the host and
 				// the other one becomes a copy that syncs like any host
 				mine := syncproto.Entry{Lamport: known.Lamport + 1, Device: c.st.DeviceID}
@@ -1094,7 +1296,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 					// and keeps the old local hash, the change made here
 					// still counts as not pushed and the next push outranks
 					// the remote one, a later pull makes no second copy
-					c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local}
+					c.st.Entries[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Deleted: e.Deleted, Local: known.Local, Base: known.base()}
 					return nil
 				}
 				conflict = true
@@ -1152,7 +1354,7 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 			if err != nil {
 				return err
 			}
-			next.Local = c.localHash(written)
+			next.Local, next.Base = c.localHash(written), e.Hash
 			c.st.Entries[id] = next
 			c.logf("updated %s", h.Name)
 			return nil
@@ -1164,6 +1366,50 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 	return nil
 }
 
+// mergeEdit merges a host changed here and on another device against the
+// version both started from, it returns false when there is no such
+// version or both changed the same part, the caller then keeps both as
+// before, after a merge the entry takes the remote stamp and the result is
+// pushed as a local change unless it equals the remote version
+func (c *Client) mergeEdit(store *hosts.Store, id string, known entryState, e syncproto.Entry, remote *payload, plain []byte) (bool, error) {
+	if e.Deleted || known.Deleted || remote == nil {
+		return false, nil
+	}
+	base := c.basePayload(id, known.base())
+	if base == nil {
+		c.logf("%s changed here and on device %s, the version both started from is not kept here, both are kept", short(id, 8), short(e.Device, 8))
+		return false, nil
+	}
+	mine, err := parsePayload(id, plain)
+	if err != nil {
+		c.logf("%s changed here and on device %s, the host here does not read for a merge (%v), both are kept", short(id, 8), short(e.Device, 8), err)
+		return false, nil
+	}
+	b, l, r := base.Host, mine.Host, remote.Host
+	b.Password, l.Password, r.Password = base.Password, mine.Password, remote.Password
+	merged, ok := hosts.MergeThreeWay(b, l, r)
+	if !ok {
+		c.logf("%s: here and on device %s the same part was changed in different ways (or the address on one side and the password or key on the other), both are kept", l.Name, short(e.Device, 8))
+		return false, nil
+	}
+	h, err := store.Import(merged)
+	if err != nil {
+		c.logf("%s: the merge of the changes made here and on device %s is refused (%v), both are kept", l.Name, short(e.Device, 8), err)
+		return false, nil
+	}
+	next := entryState{Lamport: e.Lamport, Device: e.Device, Blob: e.Hash, Base: e.Hash}
+	if hosts.SameSynced(merged, r) {
+		written, err := payloadOf(*h)
+		if err != nil {
+			return false, err
+		}
+		next.Local = c.localHash(written)
+	}
+	c.st.Entries[id] = next
+	c.logf("merged the changes made here and on device %s into %s", short(e.Device, 8), h.Name)
+	return true, nil
+}
+
 // fetchBlob downloads the blob hash of entry id and opens it
 func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
 	blob, err := c.backend().GetBlob(hash)
@@ -1173,7 +1419,12 @@ func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, erro
 	if blobHash(blob) != hash {
 		return nil, fmt.Errorf("blob of %s does not match its hash", short(id, 8))
 	}
-	return openEntry(key, c.st.Account, id, epoch, blob)
+	plain, err := openEntry(key, c.st.Account, id, epoch, blob)
+	if err != nil {
+		return nil, err
+	}
+	c.keepBase(epoch, blob)
+	return plain, nil
 }
 
 // putBlob seals the plain payload of entry id and uploads it
@@ -1186,6 +1437,7 @@ func (c *Client) putBlob(key []byte, id string, epoch int, plain []byte) (string
 	if err := c.backend().PutBlob(h, blob); err != nil {
 		return "", err
 	}
+	c.keepBase(epoch, blob)
 	return h, nil
 }
 
@@ -1199,6 +1451,11 @@ func (c *Client) fetchPayload(id string, e syncproto.Entry, key []byte, epoch in
 	if err != nil {
 		return nil, err
 	}
+	return parsePayload(id, plain)
+}
+
+// parsePayload reads the opened blob of entry id
+func parsePayload(id string, plain []byte) (*payload, error) {
 	var wire payloadJSON
 	if err := json.Unmarshal(plain, &wire); err != nil {
 		return nil, fmt.Errorf("%w: entry %s: %v", errBadPayload, short(id, 8), err)
@@ -1326,7 +1583,7 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	for id, e := range c.st.Skipped {
 		entries[id] = e
 	}
-	changed := devices != nil || c.st.Counter == 0
+	changed := devices != nil || c.st.Counter == 0 || plan.primary != "" || plan.recovery != nil
 	fresh := map[string]bool{}
 	for id, plain := range local {
 		if _, ok := c.st.Skipped[id]; ok {
@@ -1347,14 +1604,14 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 			// only the key changed, the stamp stays, so a device with its
 			// own edit of this host sees no change from here
 			entries[id] = syncproto.Entry{Hash: h, Lamport: known.Lamport, Device: known.Device}
-			known.Blob = h
+			known.Blob, known.Base = h, h
 			next[id] = known
 			changed = true
 			continue
 		}
 		e := syncproto.Entry{Hash: h, Lamport: known.Lamport + 1, Device: c.st.DeviceID}
 		entries[id] = e
-		next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: h, Local: lh}
+		next[id] = entryState{Lamport: e.Lamport, Device: e.Device, Blob: h, Local: lh, Base: h}
 		changed = true
 	}
 	for id, known := range c.st.Entries {
@@ -1376,6 +1633,35 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	skipped := map[string]syncproto.Entry{}
 	for id, e := range c.st.Skipped {
 		skipped[id] = e
+	}
+	// the anchor of a recovery kit is carried like a skipped entry, no
+	// device imports it as a host or deletes it, only the anchor of the
+	// kit of the account is, one of an older kit goes
+	current := ""
+	if plan.recovery != nil {
+		current = anchorID(plan.recovery.device)
+	} else if c.st.Recovery != "" {
+		current = anchorID(c.st.Recovery)
+	}
+	for id := range skipped {
+		if isAnchor(id) && id != current && id != plan.anchorID {
+			plan.dropAnchors = append(plan.dropAnchors, id)
+		}
+	}
+	for _, id := range plan.dropAnchors {
+		delete(entries, id)
+		delete(skipped, id)
+		changed = true
+	}
+	if plan.anchorID != "" {
+		h, err := c.putBlob(key, plan.anchorID, epoch, plan.anchorPlain)
+		if err != nil {
+			return false, err
+		}
+		e := syncproto.Entry{Hash: h, Lamport: 1, Device: c.st.DeviceID}
+		entries[plan.anchorID], skipped[plan.anchorID] = e, e
+		fresh[plan.anchorID] = true
+		changed = true
 	}
 	if reseal {
 		// an entry carried on without a host here to seal (skipped, or a
@@ -1415,9 +1701,23 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	if devices == nil {
 		devices = c.st.Trusted
 	}
+	// the first manifest of format 2 in an older account makes this device
+	// the primary one
+	primary := c.st.Primary
+	if primary == "" {
+		primary = c.st.DeviceID
+	}
+	if plan.primary != "" {
+		primary = plan.primary
+	}
+	rf := recoveryFields{device: c.st.Recovery, wait: c.st.RecoveryWait, claim: c.st.Claim}
+	if plan.recovery != nil {
+		rf = *plan.recovery
+	}
 	m := &syncproto.Manifest{
 		Version: syncproto.FormatVersion, Account: c.st.Account, Epoch: epoch,
 		Counter: c.st.Counter + 1, Prev: c.st.Head, Devices: devices, Entries: entries,
+		Primary: primary, Recovery: rf.device, RecoveryWait: rf.wait, Claim: rf.claim,
 	}
 	b, sm, err := c.keys.signManifest(m, key, c.st.DeviceID)
 	if err != nil {
@@ -1432,6 +1732,9 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	}
 	c.st.Counter, c.st.Head, c.st.Trusted, c.st.Entries = m.Counter, syncproto.BodyHash(sm.Body), devices, next
 	c.st.Epoch, c.st.Skipped = epoch, skipped
+	c.st.Primary, c.st.Format = primary, syncproto.FormatVersion
+	c.st.Recovery, c.st.RecoveryWait, c.st.Claim = rf.device, rf.wait, rf.claim
+	c.verified = m.Entries
 	if plan.rotation != nil {
 		c.st.Rotation = plan.rotation
 	}
@@ -1468,6 +1771,14 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 		return nil, fmt.Errorf("no other device matches %q", prefix)
 	}
 	removed := *target
+	// before the token: other devices would refuse the manifest, a revoked
+	// token could not be given back
+	if err := c.errNotPrimary("removes devices"); err != nil {
+		return nil, err
+	}
+	if err := c.claimPrimary(); err != nil {
+		return nil, err
+	}
 	// the token goes first, a removed device that can still push could
 	// block the others with manifests no one trusts, a rerun after a lost
 	// race finds the device still listed and gets 404 here
@@ -1476,6 +1787,9 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 	}
 	gone := false
 	plan := func() (pushPlan, error) {
+		if err := c.errNotPrimary("removes devices"); err != nil {
+			return pushPlan{}, err
+		}
 		target, keep, err := c.matchDevice(removed.ID)
 		if err != nil {
 			return pushPlan{}, err
@@ -1493,7 +1807,12 @@ func (c *Client) removeDevice(prefix string) (*syncproto.Device, error) {
 			return pushPlan{}, err
 		}
 		epoch := c.st.Epoch + 1
-		return pushPlan{devices: keep, epoch: epoch, key: key, rotation: &rotation{Epoch: epoch, Devices: keep}}, nil
+		plan := pushPlan{devices: keep, epoch: epoch, key: key, rotation: &rotation{Epoch: epoch, Devices: keep}}
+		if target.ID == c.st.Recovery {
+			// removing the kit device cancels a claim and drops its anchor
+			plan.recovery, plan.dropAnchors = &recoveryFields{}, []string{anchorID(target.ID)}
+		}
+		return plan, nil
 	}
 	if err := c.push(plan); err != nil {
 		if c.st.Rotation == nil {
@@ -1528,7 +1847,7 @@ func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Devi
 	var target *syncproto.Device
 	var keep []syncproto.Device
 	for i, d := range c.st.Trusted {
-		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(Fingerprint(d.SignPub), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
+		if d.ID != c.st.DeviceID && prefix != "" && (strings.HasPrefix(d.ID, prefix) || strings.HasPrefix(strings.ReplaceAll(DeviceFingerprint(d), "-", ""), strings.ReplaceAll(prefix, "-", ""))) {
 			if target != nil {
 				return nil, nil, fmt.Errorf("%q matches several devices", prefix)
 			}
@@ -1540,6 +1859,62 @@ func (c *Client) matchDevice(prefix string) (*syncproto.Device, []syncproto.Devi
 		keep = append(keep, d)
 	}
 	return target, keep, nil
+}
+
+// HandPrimary makes the device matching prefix the primary device of the
+// account, only the primary device does it, confirm sees the device first
+// and says no to stop before anything is sent, the fingerprint it shows
+// must match the one the other device shows in sshr sync status
+func (c *Client) HandPrimary(prefix string, confirm func(name, fingerprint string) bool) (out *syncproto.Device, err error) {
+	err = c.run(func() error {
+		out, err = c.handPrimary(prefix, confirm)
+		return err
+	})
+	return out, err
+}
+
+func (c *Client) handPrimary(prefix string, confirm func(name, fingerprint string) bool) (*syncproto.Device, error) {
+	if err := c.Pull(); err != nil {
+		return nil, err
+	}
+	if err := c.errNotPrimary("hands the primary role on"); err != nil {
+		return nil, err
+	}
+	target, _, err := c.matchDevice(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("no other device matches %q", prefix)
+	}
+	if target.ID == c.st.Recovery {
+		return nil, errors.New("that is the device of the recovery kit, it cannot be the primary device")
+	}
+	if !confirm(CleanName(target.Name), DeviceFingerprint(*target)) {
+		return nil, errors.New("not handed on")
+	}
+	if err := c.claimPrimary(); err != nil {
+		return nil, err
+	}
+	id := target.ID
+	err = c.push(func() (pushPlan, error) {
+		if c.st.Primary == id {
+			return pushPlan{}, nil
+		}
+		// another push may have come first, the role is handed on only by
+		// the primary device and only to a device still in the account
+		if err := c.errNotPrimary("hands the primary role on"); err != nil {
+			return pushPlan{}, err
+		}
+		if t, _, err := c.matchDevice(id); err != nil || t == nil {
+			return pushPlan{}, fmt.Errorf("device %s left the account meanwhile", short(id, 8))
+		}
+		return pushPlan{primary: id}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return target, nil
 }
 
 // finishRotation delivers a committed vault key to every kept device and
@@ -1565,9 +1940,25 @@ func (c *Client) finishRotation() error {
 	if err := vault.SecretSet(c.prefix()+"key-"+strconv.Itoa(r.Epoch), key); err != nil {
 		return err
 	}
-	for _, d := range r.Devices {
-		if err := c.putEnvelope(d, r.Epoch, key); err != nil {
-			return err
+	if c.st.Primary != "" && c.st.Primary != c.st.DeviceID {
+		// the role moved before the delivery, only the primary delivers
+		// keys now, retrying would fail every sync of this device, the key
+		// stays here and a device still without it needs the primary to
+		// change the key again (remove a device) or pair it again
+		c.logf("the vault key change of epoch %d was not delivered to every device before device %s became primary, a device that cannot read the account needs the primary to change the key again", r.Epoch, short(c.st.Primary, 8))
+	} else {
+		for _, d := range r.Devices {
+			err := c.putEnvelope(d, r.Epoch, key)
+			var se *StatusError
+			if errors.As(err, &se) && se.Code == http.StatusForbidden {
+				// sshr-sync knows of a new primary this device has not
+				// pulled yet, the same as above
+				c.logf("the vault key change of epoch %d was not delivered to every device before another device became primary, a device that cannot read the account needs the primary to change the key again", r.Epoch)
+				break
+			}
+			if err != nil {
+				return err
+			}
 		}
 	}
 	vault.SecretDelete(c.prefix() + "key-pending")
@@ -1588,6 +1979,9 @@ type Status struct {
 	LastSync time.Time
 	// Backend is the store of an account that is not sshr-sync
 	Backend *BackendRef
+	// Primary is the ID of the primary device, empty in an account no sshr
+	// with primary devices wrote to yet
+	Primary string
 }
 
 func (c *Client) Status() (*Status, error) {
@@ -1596,8 +1990,9 @@ func (c *Client) Status() (*Status, error) {
 	}
 	st := &Status{
 		Server: c.st.Server, Account: c.st.Account, Device: c.st.DeviceID, Name: c.st.Name,
-		Fingerprint: Fingerprint(c.self().SignPub), Counter: c.st.Counter,
+		Fingerprint: DeviceFingerprint(c.self()), Counter: c.st.Counter,
 		Waiting: c.st.Approver != "", LastSync: c.st.LastSync, Backend: c.st.Backend,
+		Primary: c.st.Primary,
 	}
 	for _, d := range c.st.Trusted {
 		d.Name = CleanName(d.Name)

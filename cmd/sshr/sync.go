@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 
 	"sshr.dev/internal/app"
 	"sshr.dev/internal/supastore"
@@ -24,12 +28,23 @@ const syncUsage = `Usage:
                                          ask to add this machine, shows its fingerprint,
                                          an S3 or WebDAV account takes the flags of init instead of --server
   sshr sync pending                      devices waiting for approval
-  sshr sync approve <id|fingerprint>     add a waiting device after comparing fingerprints
+  sshr sync approve <id|fingerprint>     add a waiting device after comparing fingerprints,
+                                         on the primary device
+  sshr sync primary <id|fingerprint> [--yes]
+                                         hand the primary role on, only the primary
+                                         device adds and removes devices
+  sshr sync recovery create [--passphrase] [--wait <days>]
+                                         print a recovery kit, on the primary device
+  sshr sync recovery cancel              take the kit out, also cancels a claim
+  sshr sync recovery restore --server <url> --account <id>
+                                         bring the account to a new machine from a kit,
+                                         then --finish after the wait
   sshr sync pull [--accept-reset]        only take changes from other devices
   sshr sync push                         same as sshr sync
   sshr sync status                       server, devices, state fingerprint
   sshr sync remove-device <id|fingerprint>
-                                         take a device out, the vault key changes
+                                         take a device out, the vault key changes,
+                                         on the primary device
   sshr sync init --backend webdav --url <folder> --user <name> [--name <device>]
                                          keep the account in a WebDAV folder (Nextcloud),
                                          the password from SSHR_WEBDAV_PASSWORD or a prompt
@@ -80,14 +95,15 @@ func cmdSync(store *app.Store, args []string) {
 			c.AcceptReset = true
 		case a == "--replace" && sub == "supabase-sql":
 			replaceKey = true
-		case strings.HasPrefix(a, "-"):
+		case strings.HasPrefix(a, "-") && sub != "primary" && sub != "recovery":
+			// primary and recovery read their own flags
 			fmt.Fprintln(os.Stderr, syncUsage)
 			os.Exit(1)
 		default:
 			rest = append(rest, a)
 		}
 	}
-	if sf.given && sub != "init" && sub != "join" && sub != "store-key" {
+	if sf.given && sub != "init" && sub != "join" && sub != "store-key" && sub != "recovery" {
 		fatal(fmt.Errorf("--backend and the S3, WebDAV and Supabase flags are for sshr sync init and join, later runs read them from the sync state"))
 	}
 	switch sub {
@@ -151,7 +167,7 @@ func cmdSync(store *app.Store, args []string) {
 			fmt.Println("No devices are waiting")
 		}
 		for _, d := range ds {
-			fmt.Printf("%s  %s  %s\n", d.ID[:8], syncclient.Fingerprint(d.SignPub), d.Name)
+			fmt.Printf("%s  %s  %s\n", d.ID[:8], syncclient.DeviceFingerprint(d.Device), d.Name)
 		}
 	case "approve":
 		if len(rest) != 1 {
@@ -161,7 +177,22 @@ func cmdSync(store *app.Store, args []string) {
 		if err != nil {
 			fatal(err)
 		}
-		fmt.Printf("Added %s (%s)\n", d.Name, syncclient.Fingerprint(d.SignPub))
+		fmt.Printf("Added %s (%s)\n", d.Name, syncclient.DeviceFingerprint(d.Device))
+	case "primary":
+		if len(rest) < 1 || len(rest) > 2 || len(rest) == 2 && rest[1] != "--yes" {
+			fatal(fmt.Errorf("sshr sync primary <id|fingerprint> [--yes], see sshr sync status"))
+		}
+		yes := len(rest) == 2
+		d, err := c.HandPrimary(rest[0], func(name, fingerprint string) bool {
+			fmt.Printf("Make %s the primary device, fingerprint %s\nCompare it with sshr sync status on that device, only the primary device adds and removes devices\n", name, fingerprint)
+			return yes || askYes("Hand the primary role on?")
+		})
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("%s is now the primary device\n", d.Name)
+	case "recovery":
+		cmdSyncRecovery(c, rest, server, name, &sf)
 	case "pull":
 		if err := c.Pull(); err != nil {
 			fatal(err)
@@ -190,7 +221,11 @@ func cmdSync(store *app.Store, args []string) {
 		}
 		fmt.Println("devices")
 		for _, d := range st.Devices {
-			fmt.Printf("  %s  %s  %s\n", d.ID[:8], syncclient.Fingerprint(d.SignPub), d.Name)
+			role := ""
+			if d.ID == st.Primary {
+				role = "  (primary, adds and removes devices)"
+			}
+			fmt.Printf("  %s  %s  %s%s\n", d.ID[:8], syncclient.DeviceFingerprint(d), d.Name, role)
 		}
 	case "remove-device":
 		if len(rest) != 1 {
@@ -253,4 +288,151 @@ func leftOut(c *syncclient.Client) {
 	}
 	fmt.Fprintf(os.Stderr, "sshr: %s left out of this sync, the lines above say why\n", plural(len(c.LeftOut), "host"))
 	os.Exit(1)
+}
+
+// askYes asks a yes or no question on the terminal, without one the answer
+// is no and the command says to add --yes
+func askYes(q string) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(os.Stderr, "sshr: there is no terminal to ask in, add --yes")
+		return false
+	}
+	fmt.Print(q + " [y/N]: ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	a := strings.ToLower(strings.TrimSpace(line))
+	return a == "y" || a == "yes"
+}
+
+const recoveryUsage = `Usage: sshr sync recovery create [--passphrase] [--wait <days>]
+       sshr sync recovery cancel
+       sshr sync recovery restore --server <url> --account <id> [--name <device>]
+       sshr sync recovery restore --finish`
+
+// cmdSyncRecovery makes, replaces and cancels the recovery kit of the
+// account on the primary device
+func cmdSyncRecovery(c *syncclient.Client, args []string, server, name string, sf *storeFlags) {
+	if len(args) == 0 {
+		fatal(fmt.Errorf("%s", recoveryUsage))
+	}
+	switch args[0] {
+	case "create":
+		pass, wait := false, syncclient.DefaultRecoveryWait
+		for i := 1; i < len(args); i++ {
+			switch {
+			case args[i] == "--passphrase":
+				pass = true
+			case args[i] == "--wait" && i+1 < len(args):
+				i++
+				days, err := strconv.Atoi(args[i])
+				// checked before it turns into a duration, a huge count would
+				// wrap around into the allowed range
+				if err != nil || days < 1 || days > 366 {
+					fatal(fmt.Errorf("--wait takes whole days, from 1 to 366"))
+				}
+				wait = time.Duration(days) * 24 * time.Hour
+			default:
+				fatal(fmt.Errorf("%s", recoveryUsage))
+			}
+		}
+		pw := ""
+		if pass {
+			pw = readNewPassphrase()
+		}
+		kit, err := c.CreateRecoveryKit(pw, wait)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Println("Write this down or print it and keep it where you keep your passport, it is shown once.")
+		fmt.Println("It brings the account back to a new machine when every device is lost: sshr sync recovery restore.")
+		fmt.Println("A restore first claims the account, your devices warn about it and the primary device can cancel it,")
+		fmt.Println("the new machine gets the account only after the wait. A kit made before is worth nothing now.")
+		fmt.Println()
+		fmt.Print(kit.Header)
+		fmt.Println()
+		fmt.Println(kit.Secret)
+	case "restore":
+		if len(args) == 2 && args[1] == "--finish" {
+			if err := c.RestoreFinish(); err != nil {
+				fatal(err)
+			}
+			fmt.Println("The account is back on this machine, it is the primary device now, the old kit is worth nothing")
+			fmt.Println("Make a new kit now: sshr sync recovery create")
+			return
+		}
+		account := ""
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--account" && i+1 < len(args) {
+				i++
+				account = args[i]
+				continue
+			}
+			fatal(fmt.Errorf("%s", recoveryUsage))
+		}
+		if account == "" || (server == "" && sf.backend == "") {
+			fatal(fmt.Errorf("%s\nthe account, the server or the store are on the kit", recoveryUsage))
+		}
+		if err := c.CheckFree(); err != nil {
+			fatal(err)
+		}
+		var err error
+		if server, err = sf.setup(c, server); err != nil {
+			fatal(err)
+		}
+		fmt.Fprintln(os.Stderr, "Type the groups of the kit, then an empty line:")
+		var text strings.Builder
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() && strings.TrimSpace(sc.Text()) != "" {
+			text.WriteString(sc.Text() + " ")
+		}
+		ready, err := c.RestoreClaim(server, account, text.String(), name, func() (string, error) {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return "", fmt.Errorf("the kit needs its passphrase and there is no terminal to ask in")
+			}
+			fmt.Fprint(os.Stderr, "Passphrase of the kit: ")
+			b, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			return string(b), err
+		})
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("The kit claimed the account, the devices of the owner warn about it and the primary device can cancel it\nRun sshr sync recovery restore --finish after %s\n", ready.Local().Format(time.DateTime))
+	case "cancel":
+		if err := c.CancelRecovery(); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The recovery kit is cancelled, its device is out of the account and the vault key changed, make a new one with sshr sync recovery create")
+	default:
+		fatal(fmt.Errorf("%s", recoveryUsage))
+	}
+}
+
+// readNewPassphrase asks a passphrase twice on the terminal
+func readNewPassphrase() string {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fatal(fmt.Errorf("the passphrase is asked on a terminal, there is none"))
+	}
+	for {
+		fmt.Fprint(os.Stderr, "Passphrase of the recovery kit (it is not on the paper, a forgotten one makes the kit useless): ")
+		a, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Fprint(os.Stderr, "Again: ")
+		b, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			fatal(err)
+		}
+		if len(a) < 8 {
+			fmt.Fprintln(os.Stderr, "sshr: at least 8 characters")
+			continue
+		}
+		if string(a) != string(b) {
+			fmt.Fprintln(os.Stderr, "sshr: the two do not match")
+			continue
+		}
+		return string(a)
+	}
 }

@@ -119,7 +119,7 @@ func (w *world) pair() (web, db *hosts.Host) {
 	}
 	pending, err := w.a.Pending()
 	must(t, err)
-	if len(pending) != 1 || Fingerprint(pending[0].SignPub) != fp {
+	if len(pending) != 1 || DeviceFingerprint(pending[0].Device) != fp {
 		t.Fatalf("pending = %+v, fingerprint on b %s", pending, fp)
 	}
 	_, err = w.a.Approve(pending[0].ID[:6])
@@ -292,7 +292,7 @@ func TestSyncDetectsServerTampering(t *testing.T) {
 		Sig    []byte `json:"sig"`
 	}
 	json.Unmarshal(orig, &sm)
-	sm.Body = bytes.Replace(sm.Body, []byte(`"version":1`), []byte(`"version":1 `), 1)
+	sm.Body = bytes.Replace(sm.Body, []byte(`"version":2`), []byte(`"version":2 `), 1)
 	forged, _ := json.Marshal(sm)
 	os.WriteFile(last, forged, 0o600)
 	if err := w.b.Pull(); err == nil || !strings.Contains(err.Error(), "signature") {
@@ -769,11 +769,9 @@ func TestRemoveDeviceFinishesAfterACrash(t *testing.T) {
 	}
 }
 
-func TestApproveDoesNotBringBackARemovedDevice(t *testing.T) {
+func TestApproveAfterALostRace(t *testing.T) {
 	w := newWorld(t)
-	w.pair()
-	c := w.client("c-")
-	w.join(c)
+	web, _ := w.pair()
 	d := w.client("d-")
 	code, err := w.a.Invite()
 	must(t, err)
@@ -784,23 +782,21 @@ func TestApproveDoesNotBringBackARemovedDevice(t *testing.T) {
 	raced := false
 	w.a.HTTP = &http.Client{Transport: hookRT{func(r *http.Request) (*http.Response, error) {
 		if isManifestPut(r) && !raced {
-			// b removes c and changes the key just before a pushes
+			// b pushes a change of a host just before a pushes, devices
+			// are added and removed only by a, the primary device
 			raced = true
-			_, err := w.b.RemoveDevice(c.st.DeviceID[:8])
-			must(t, err)
+			editHost(t, w.b, web.ID, func(h *hosts.Host) { h.Port, h.Password = 2201, "" })
+			must(t, w.b.Push())
 		}
 		return nil, nil
 	}}}
 	_, err = w.a.Approve(pending[0].ID)
 	must(t, err)
-	for _, x := range w.a.st.Trusted {
-		if x.ID == c.st.DeviceID {
-			t.Fatal("approve wrote the removed device back")
-		}
-	}
 	must(t, d.Pull())
-	if d.st.Epoch != w.a.st.Epoch || d.st.Epoch != 2 {
-		t.Fatalf("d is on epoch %d, a on %d", d.st.Epoch, w.a.st.Epoch)
+	h, err := d.Store.Find(web.ID)
+	must(t, err)
+	if h.Port != 2201 || len(w.a.st.Trusted) != 3 {
+		t.Fatalf("after the lost race: port %d, %d devices", h.Port, len(w.a.st.Trusted))
 	}
 }
 
@@ -809,11 +805,12 @@ func TestSyncRotationResealsCarriedEntries(t *testing.T) {
 	web, db := w.pair()
 	c := w.client("c-")
 	w.join(c)
-	// b cannot load db, it still carries the entry when it changes the key
-	must(t, os.WriteFile(filepath.Join(w.b.Store.Dir, db.ID+".json"), []byte("{broken"), 0o600))
-	_, err := w.b.RemoveDevice(c.st.DeviceID[:8])
+	// a, the primary device, cannot load db, it still carries the entry
+	// when it changes the key
+	must(t, os.WriteFile(filepath.Join(w.a.Store.Dir, db.ID+".json"), []byte("{broken"), 0o600))
+	_, err := w.a.RemoveDevice(c.st.DeviceID[:8])
 	must(t, err)
-	must(t, w.a.Pull())
+	must(t, w.b.Pull())
 	// a device joining now reads every entry with the new key only
 	d := w.client("d-")
 	w.join(d)
@@ -829,16 +826,17 @@ func TestSyncRotationResealsSkippedEntries(t *testing.T) {
 	_, db := w.pair()
 	c := w.client("c-")
 	w.join(c)
-	// a writes a db that b cannot import, b carries it as skipped
-	writeRaw(t, w.a.Store, db.ID, func(m map[string]any) { m["password_mode"] = "from-the-future" })
-	must(t, w.a.Push())
-	must(t, w.b.Pull())
-	if _, ok := w.b.st.Skipped[db.ID]; !ok {
-		t.Fatal("db is not skipped on b")
-	}
-	_, err := w.b.RemoveDevice(c.st.DeviceID[:8])
-	must(t, err)
+	// b writes a db that a, the primary device, cannot import, a carries
+	// it as skipped
+	writeRaw(t, w.b.Store, db.ID, func(m map[string]any) { m["password_mode"] = "from-the-future" })
+	must(t, w.b.Push())
 	must(t, w.a.Pull())
+	if _, ok := w.a.st.Skipped[db.ID]; !ok {
+		t.Fatal("db is not skipped on a")
+	}
+	_, err := w.a.RemoveDevice(c.st.DeviceID[:8])
+	must(t, err)
+	must(t, w.b.Pull())
 	d := w.client("d-")
 	w.join(d)
 	if !strings.Contains(w.log.String(), "skipped db") {

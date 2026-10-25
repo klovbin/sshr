@@ -55,7 +55,11 @@ func writeShow(w io.Writer, h *app.Host, argv []string, now time.Time) {
 	row("id", h.ID)
 	row("address", fmt.Sprintf("%s@%s:%d", h.User, h.Host, h.Port))
 	row("login", h.AuthLabel())
-	row("key file", h.Key)
+	if typ := app.HardwareKeyFile(app.ExpandHome(h.Key)); typ != "" {
+		row("key file", h.Key+" (hardware key, "+typ+")")
+	} else {
+		row("key file", h.Key)
+	}
 	row("agent", h.Agent)
 	row("jump hosts", h.Jump)
 	row("gateway", h.Gateway)

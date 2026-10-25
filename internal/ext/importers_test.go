@@ -2,6 +2,7 @@ package ext
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -223,6 +224,16 @@ func TestImportersDropControlCharacters(t *testing.T) {
 	if strings.ContainsAny(lastNotes, "\x1b\x7f") || strings.Contains(lastNotes, "\xc2\x9b") || !strings.Contains(lastNotes, "PuTTY key") {
 		t.Errorf("notes %q", lastNotes)
 	}
+	// a proxy user or host of control characters only gives no "@gw" and
+	// no empty jump (#324)
+	jdir := t.TempDir()
+	os.WriteFile(filepath.Join(jdir, "u"), []byte("HostName=u.example\nProxyMethod=6\nProxyHost=gw.example\nProxyUsername=\x1b\x7f\n"), 0o600)
+	os.WriteFile(filepath.Join(jdir, "h"), []byte("HostName=h.example\nProxyMethod=6\nProxyHost=\x1b\xc2\x9b\n"), 0o600)
+	for _, h := range runImporter(t, "putty", jdir) {
+		if want := map[string]string{"u": "gw.example", "h": ""}[h.Key]; h.Jump != want {
+			t.Errorf("%s: jump %q, want %q", h.Key, h.Jump, want)
+		}
+	}
 	rdir := t.TempDir()
 	os.WriteFile(filepath.Join(rdir, "r.remmina"), []byte("[remmina]\nname=we\x7fb\xc2\x9b\x1b[0m\nprotocol=SSH\nserver=r.example\n"), 0o600)
 	if hosts := runImporter(t, "remmina", rdir); len(hosts) != 1 || hosts[0].Name != "web[0m" {
@@ -252,5 +263,310 @@ func TestPuttyImporterKeysAndNames(t *testing.T) {
 	}
 	if HostID("putty", "A") == HostID("putty", "%41") {
 		t.Error("two files share a host")
+	}
+}
+
+// TestPuttyWindowsImporter runs putty.ps1, the importer of Windows, on a
+// .reg file as regedit writes it (UTF-16 with a BOM), with pwsh where it
+// is installed, the same sessions give the same hosts as putty.sh
+func TestPuttyWindowsImporter(t *testing.T) {
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("no pwsh here")
+	}
+	reg := "Windows Registry Editor Version 5.00\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\Default%20Settings]` + "\r\n" +
+		`"HostName"="default.example"` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\web%20prod]` + "\r\n" +
+		`"HostName"="deploy@10.0.0.5"` + "\r\n" +
+		`"PortNumber"=dword:00000016` + "\r\n" +
+		`"Protocol"="ssh"` + "\r\n" +
+		`"PublicKeyFile"="C:\\keys\\web.ppk"` + "\r\n" +
+		`"ProxyMethod"=dword:00000006` + "\r\n" +
+		`"ProxyHost"="gw.example"` + "\r\n" +
+		`"ProxyUsername"="ops"` + "\r\n" +
+		`"ProxyPort"=dword:00000824` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\%D0%B1%D0%B0%D0%B7%D0%B0]` + "\r\n" +
+		`"HostName"="db.local"` + "\r\n" +
+		`"UserName"="u"` + "\r\n" +
+		`"PortNumber"=dword:00000d05` + "\r\n" +
+		`"PublicKeyFile"="C:\\keys\\id_ed25519"` + "\r\n" +
+		`"ProxyMethod"=dword:00000002` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\switch]` + "\r\n" +
+		`"HostName"="sw1"` + "\r\n" +
+		`"Protocol"="telnet"` + "\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\Other]` + "\r\n" +
+		`"HostName"="other.example"` + "\r\n"
+	// a second file, every file given is read (#319)
+	second := "Windows Registry Editor Version 5.00\r\n\r\n" +
+		`[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\work]` + "\r\n" +
+		`"HostName"="work.example"` + "\r\n"
+	tmp := t.TempDir()
+	var files []string
+	for i, text := range []string{reg, second} {
+		utf16 := []byte{0xff, 0xfe}
+		for _, r := range text {
+			utf16 = append(utf16, byte(r), byte(r>>8))
+		}
+		file := filepath.Join(tmp, fmt.Sprintf("putty%d.reg", i))
+		if err := os.WriteFile(file, utf16, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, file)
+	}
+	// a REGEDIT4 file in Windows-1252 and a UTF-8 one without a BOM (#320)
+	for name, body := range map[string]string{
+		"ansi.reg": "REGEDIT4\r\n\r\n[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\ansi]\r\n\"HostName\"=\"ansi.example\"\r\n\"UserName\"=\"jos\xe9\"\r\n",
+		"utf8.reg": "Windows Registry Editor Version 5.00\n\n[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\utf8]\n\"HostName\"=\"utf8.example\"\n\"UserName\"=\"jürgen\"\n",
+	} {
+		file := filepath.Join(tmp, name)
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, file)
+	}
+	// a link is skipped, not followed (#323)
+	link := filepath.Join(tmp, "link.reg")
+	if err := os.Symlink(files[0], link); err == nil {
+		files = append(files, link)
+	}
+	dir := filepath.Join(extensionsDir, "putty")
+	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, "putty.ps1")}, files...)
+	cmd := exec.Command(pwsh, args...)
+	cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
+	var notes bytes.Buffer
+	cmd.Stderr = &notes
+	out, err := Collect(cmd)
+	if err != nil {
+		t.Fatalf("%v: %s", err, notes.String())
+	}
+	hosts, warnings, err := ParseImport(out)
+	if err != nil || len(warnings) > 0 || len(hosts) != 5 || hosts[2].Host != "work.example" {
+		t.Fatalf("printed %s: %v %v", out, err, warnings)
+	}
+	users := map[string]string{}
+	for _, h := range hosts[3:] {
+		users[h.Host] = h.User
+	}
+	if users["ansi.example"] != "josé" || users["utf8.example"] != "jürgen" {
+		t.Errorf("charsets: %q", users)
+	}
+	web, db := hosts[0], hosts[1]
+	if web.Key != "web%20prod" || web.Name != "web prod" || web.Host != "10.0.0.5" || web.User != "deploy" ||
+		web.Port != 22 || web.KeyFile != "" || web.Jump != "ops@gw.example:2084" {
+		t.Errorf("web: %+v", web)
+	}
+	if db.Name != "база" || db.Port != 3333 || db.User != "u" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" {
+		t.Errorf("db: %+v", db)
+	}
+	if n := notes.String(); !strings.Contains(n, "puttygen") || !strings.Contains(n, "ProxyMethod 2") ||
+		strings.HasSuffix(files[len(files)-1], "link.reg") && !strings.Contains(n, "is a link") {
+		t.Errorf("notes: %s", n)
+	}
+	for _, h := range hosts {
+		if _, err := h.ToHost("putty"); err != nil {
+			t.Errorf("%s: %v", h.Name, err)
+		}
+	}
+}
+
+// runPwshImporter runs the PowerShell script of an importer with pwsh,
+// the importers of Windows are checked this way on any system, the test
+// is skipped where pwsh is missing
+func runPwshImporter(t *testing.T, name string, files ...string) ([]ExtHost, string) {
+	t.Helper()
+	pwsh, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("no pwsh here")
+	}
+	dir := filepath.Join(extensionsDir, name)
+	args := append([]string{"-NoProfile", "-NonInteractive", "-File", filepath.Join(dir, name+".ps1")}, files...)
+	cmd := exec.Command(pwsh, args...)
+	cmd.Env = Env(os.Environ(), KindImport, dir, t.TempDir(), "sshr")
+	var notes bytes.Buffer
+	cmd.Stderr = &notes
+	out, err := Collect(cmd)
+	if err != nil {
+		t.Fatalf("%v: %s", err, notes.String())
+	}
+	hosts, warnings, err := ParseImport(out)
+	if err != nil || len(warnings) > 0 {
+		t.Fatalf("%s printed %s: %v %v", name, out, err, warnings)
+	}
+	return hosts, notes.String()
+}
+
+// TestMobaXtermImporter reads an export of MobaXterm in Windows-1252 with
+// a folder, two gateways, an RDP session and a session outside the
+// bookmarks, and a .moba file of one session
+func TestMobaXtermImporter(t *testing.T) {
+	ini := "[Bookmarks]\r\nSubRep=\r\nImgNum=42\r\n" +
+		"web \x80=#109#0%10.0.0.5%2222%deploy%%-1%-1%%gw1.example__PIPE__gw2.example%22__PIPE__2200%ops__PIPE__%0%0%0%_CurrentDrive_:\\keys\\web.ppk%%-1%0%0%2%socks.example%1080%%0%0%1%%0%%%%0%-1%-1%0#MobaFont%10%0%0%-1%15%236,236,236%30,30,30%180,180,192%0%-1%0%%xterm%-1%0%_Std_Colors_0_%80%24%0%0%-1%<none>%%0%0%-1%-1#0# #-1\r\n" +
+		"desk=#91#4%10.0.0.9%3389%%0%0%0%0%-1%0%0%-1#MobaFont#0# #-1\r\n" +
+		// an SFTP session keeps the proxy password in plain text at 14
+		"files=#140#7%sftp.example%22%u%-1%0%%0%0%%4%proxy.example%1080%pu%secretpass%%-1#MobaFont#0# #-1\r\n" +
+		"a=1= #109#0%a1.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"a=2=#109#0%a2.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"x=#109#0%lower.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"X=#109#0%upper.example%22%%%-1#MobaFont#0# #-1\r\n" +
+		"gw=#109#0%gw.example%22%%%-1%-1%%j1.example__PIPE__j2.example%22__PIPE__22%<default>__PIPE__me%0#MobaFont#0# #-1\r\n" +
+		"x__DIEZE__1=#109#0%esc.example%22%u__PERCENT__1%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\k__DIEZE__1%%-1#MobaFont#0# #-1\r\n" +
+		"\r\n[Bookmarks_1]\r\nSubRep=Clients\\Acme\r\nImgNum=41\r\n" +
+		"db=#109#0%db.local%22%<default>%%-1%-1%%%%%0%-1%0%_CurrentDrive_:\\keys\\id_ed25519%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
+		"web \x80=#109#0%10.1.0.5%22%%%-1%-1%%%%%0%-1%0%%%-1%0%0%0%%1080%%0#MobaFont#0# #-1\r\n" +
+		"\r\n[Misc]\r\nnot=#109#0%misc.example%22%u%%-1\r\n"
+	tmp := t.TempDir()
+	file := filepath.Join(tmp, "export.mxtsessions")
+	moba := filepath.Join(tmp, "one.moba")
+	if os.WriteFile(file, []byte(ini), 0o600) != nil || os.WriteFile(moba, []byte("single=#109#0%single.example%22%root%%-1%-1#MobaFont#0# #-1\r\n"), 0o600) != nil {
+		t.Fatal("cannot write the files")
+	}
+	// a file saved as UTF-16 by an editor is read too (#330)
+	u16 := filepath.Join(tmp, "u16.mxtsessions")
+	b16 := []byte{0xff, 0xfe}
+	for _, r := range "[Bookmarks]\r\nu16=#109#0%u16.example%22%%%-1#MobaFont#0# #-1\r\n" {
+		b16 = append(b16, byte(r), byte(r>>8))
+	}
+	if os.WriteFile(u16, b16, 0o600) != nil {
+		t.Fatal("cannot write the UTF-16 file")
+	}
+	// a western system, the export is in Windows-1252
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	// _CurrentDrive_ of an export is the drive of Windows (#329)
+	t.Setenv("SystemDrive", "D:")
+	hosts, notes := runPwshImporter(t, "mobaxterm", file, moba, u16)
+	got := map[string]ExtHost{}
+	for _, h := range hosts {
+		got[h.Key] = h
+	}
+	if len(hosts) != 11 || got["u16"].Host != "u16.example" {
+		t.Fatalf("%+v", hosts)
+	}
+	// only SSH sessions are read, the password of an SFTP one never shows
+	if _, ok := got["files"]; ok || strings.Contains(fmt.Sprint(hosts), "secretpass") || strings.Contains(notes, "secretpass") {
+		t.Errorf("SFTP session: %+v %s", got["files"], notes)
+	}
+	// names that differ in case stay two hosts (#331)
+	if got["x"].Host != "lower.example" || got["X"].Host != "upper.example" {
+		t.Errorf("case: %+v", got)
+	}
+	// a name with = keeps it (#327)
+	if got["a=1"].Host != "a1.example" || got["a=2"].Host != "a2.example" {
+		t.Errorf("names with =: %+v", got)
+	}
+	// <default> as a gateway user is no user (#328)
+	if j := got["gw"].Jump; j != "j1.example,me@j2.example" {
+		t.Errorf("gateway users: %q", j)
+	}
+	// the escapes of MobaXterm are decoded (#329)
+	if e := got["x#1"]; e.User != "u%1" || e.KeyFile != `D:\k#1` {
+		t.Errorf("escapes: %+v", got)
+	}
+	web := got["web \u20ac"]
+	if web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" || web.KeyFile != "" ||
+		web.Jump != "ops@gw1.example,gw2.example:2200" || len(web.Tags) != 0 {
+		t.Errorf("web: %+v", web)
+	}
+	db := got[`Clients\Acme\db`]
+	if db.Host != "db.local" || db.User != "" || db.KeyFile != `D:\keys\id_ed25519` || db.Jump != "" ||
+		strings.Join(db.Tags, ",") != "Clients,Acme" {
+		t.Errorf("db: %+v", db)
+	}
+	if got[`Clients\Acme\web `+"\u20ac"].Host != "10.1.0.5" || got["single"].User != "root" {
+		t.Errorf("%+v", got)
+	}
+	if !strings.Contains(notes, "puttygen") || !strings.Contains(notes, "proxy (type 2)") {
+		t.Errorf("notes: %s", notes)
+	}
+	// on a Cyrillic system MobaXterm writes Windows-1251 (#330), pwsh
+	// takes the culture from LC_ALL outside Windows
+	if runtime.GOOS != "windows" {
+		t.Setenv("LC_ALL", "ru_RU.UTF-8")
+		cyr := filepath.Join(tmp, "cyr.mxtsessions")
+		os.WriteFile(cyr, []byte("[Bookmarks]\r\n\xc1\xe0\xe7\xe0=#109#0%cyr.example%22%%%-1#MobaFont#0# #-1\r\n"), 0o600)
+		if c, _ := runPwshImporter(t, "mobaxterm", cyr); len(c) != 1 || c[0].Name != "База" {
+			t.Errorf("1251: %+v", c)
+		}
+	}
+	for _, h := range hosts {
+		if _, err := h.ToHost("mobaxterm"); err != nil {
+			t.Errorf("%s: %v", h.Name, err)
+		}
+	}
+}
+
+// TestWinSCPImporter reads a WinSCP.ini with a folder, a tunnel, a user in
+// the host field, an FTP site, escaped names in UTF-8 and in the ANSI code
+// page and an encrypted password that must not show
+func TestWinSCPImporter(t *testing.T) {
+	ini := "[Configuration\\Interface]\r\nHostName=not.a.site\r\n\r\n" +
+		"[Sessions\\Default%20Settings]\r\nHostName=default.example\r\n\r\n" +
+		"[Sessions\\My%20Folder/web%20prod]\r\nHostName=10.0.0.5\r\nPortNumber=2222\r\nUserName=deploy\r\n" +
+		"PublicKeyFile=C:%5Ckeys%5Cweb.ppk\r\nPassword=A35C4E5C1D2B3A4F5E6D\r\n" +
+		"Tunnel=1\r\nTunnelHostName=gw.example\r\nTunnelUserName=ops\r\nTunnelPortNumber=2084\r\nTunnelPasswordPlain=tunnelsecret\r\n\r\n" +
+		"[Sessions\\db]\r\nHostName=u@db.local\r\nUserName=other\r\nFSProtocol=0\r\n" +
+		"PublicKeyFile=C:%5Ckeys%5Cid_ed25519\r\nProxyMethod=2\r\nProxyPassword=proxysecret\r\n\r\n" +
+		"[Sessions\\ftp]\r\nHostName=ftp.example\r\nFSProtocol=5\r\n\r\n" +
+		"[Sessions\\%EF%BB%BF%D0%B1%D0%B0%D0%B7%D0%B0]\r\nHostName=b.example\r\nUserName=%EF%BB%BF%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8C\r\nTunnel=on\r\nTunnelHostName=j.example\r\n\r\n" +
+		"[Sessions\\caf%E9]\r\nHostName=c.example\r\n\r\n" +
+		"[Sessions\\x]\r\nHostName=lower.example\r\n\r\n[Sessions\\X]\r\nHostName=upper.example\r\n"
+	file := filepath.Join(t.TempDir(), "WinSCP.ini")
+	if err := os.WriteFile(file, []byte(ini), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// a western system, an escape without a BOM is Windows-1252
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	hosts, notes := runPwshImporter(t, "winscp", file)
+	got := map[string]ExtHost{}
+	for _, h := range hosts {
+		got[h.Key] = h
+	}
+	if len(hosts) != 6 {
+		t.Fatalf("%+v", hosts)
+	}
+	web := got["My%20Folder/web%20prod"]
+	if web.Name != "web prod" || web.Host != "10.0.0.5" || web.Port != 2222 || web.User != "deploy" ||
+		web.KeyFile != "" || web.Jump != "ops@gw.example:2084" || strings.Join(web.Tags, ",") != "My Folder" {
+		t.Errorf("web: %+v", web)
+	}
+	db := got["db"]
+	if db.Host != "db.local" || db.User != "u" || db.KeyFile != `C:\keys\id_ed25519` || db.Jump != "" {
+		t.Errorf("db: %+v", db)
+	}
+	b := got["%EF%BB%BF%D0%B1%D0%B0%D0%B7%D0%B0"]
+	if b.Name != "база" || b.User != "пользователь" || b.Jump != "j.example" {
+		t.Errorf("utf-8: %+v", b)
+	}
+	if got["caf%E9"].Name != "café" || got["x"].Host != "lower.example" || got["X"].Host != "upper.example" {
+		t.Errorf("%+v", got)
+	}
+	if !strings.Contains(notes, "puttygen") || !strings.Contains(notes, "ProxyMethod 2") {
+		t.Errorf("notes: %s", notes)
+	}
+	all := fmt.Sprint(hosts) + notes
+	for _, secret := range []string{"A35C4E", "tunnelsecret", "proxysecret", "ftp.example", "not.a.site", "default.example"} {
+		if strings.Contains(all, secret) {
+			t.Errorf("%s reached the output", secret)
+		}
+	}
+
+	// a site takes what it does not set from Default Settings (#332)
+	defs := filepath.Join(t.TempDir(), "WinSCP.ini")
+	os.WriteFile(defs, []byte("[Sessions\\Default%20Settings]\r\nFSProtocol=5\r\nUserName=root\r\nPortNumber=2200\r\n\r\n"+
+		"[Sessions\\ftpsite]\r\nHostName=ftp.example\r\n\r\n[Sessions\\sshsite]\r\nHostName=ssh.example\r\nFSProtocol=2\r\n"+
+		// a workspace and a hidden session are no sites (#333)
+		"\r\n[Sessions\\work/0000]\r\nHostName=w.example\r\nFSProtocol=1\r\nIsWorkspace=1\r\n"+
+		"\r\n[Sessions\\_!_hidden]\r\nHostName=h.example\r\nFSProtocol=1\r\n"+
+		// a boolean too large for a number does not stop the import (#334)
+		"\r\n[Sessions\\big]\r\nHostName=big.example\r\nFSProtocol=1\r\nTunnel=99999999999999999999\r\nTunnelHostName=t.example\r\n"+
+		"TunnelPublicKeyFile=C:%5Ckeys%5Ctunnel\r\n"), 0o600)
+	d, dnotes := runPwshImporter(t, "winscp", defs)
+	// a tunnel key is not carried and the user is told (#336)
+	if !strings.Contains(dnotes, `tunnel key C:\keys\tunnel`) {
+		t.Errorf("tunnel key note: %s", dnotes)
+	}
+	if len(d) != 2 || d[0].Host != "ssh.example" || d[0].User != "root" || d[0].Port != 2200 ||
+		d[1].Jump != "t.example" {
+		t.Errorf("defaults: %+v", d)
 	}
 }

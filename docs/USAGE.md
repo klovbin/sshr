@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/klovbin/sshr/main/install.sh | sh  
 - adds one line marked `# added by the sshr installer` to your shell startup file when the folder is not in `PATH` (`--no-modify-path` skips it), runs `sshr desktop-entry` when the GUI is installed
 - writes Tab completion for bash and fish when they are installed (`--no-completion` skips it), for zsh it prints the line to add to `~/.zshrc`
 - `--uninstall` removes the binary, the menu entry, the completion files and that line, hosts in `~/.sshr` stay
-- Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are planned ([#17](https://github.com/klovbin/sshr/issues/17))
+- Windows: `go build -o sshr.exe ./cmd/sshr`, packages for AUR, Homebrew, Scoop and nixpkgs are planned ([#17](https://github.com/klovbin/sshr/issues/17)), sshr runs the OpenSSH client of Windows (Settings, Optional features), when the ssh of Git for Windows, MSYS2 or Cygwin comes first on PATH (told by its runtime DLL) the one in `System32\OpenSSH` is taken instead, it reads the Windows paths sshr writes, `SSHR_SSH=<path>` names the ssh to run on any system, the msys one included
 
 **Icon and menu:** `sshr desktop-entry` (`--remove` undoes it) writes `sshr.desktop` and icons to `~/.local/share` on Linux and `~/Applications/sshr.app` on macOS (signed ad hoc, it holds a copy of sshr because the Dock shows a bundle icon only for a program inside it, run it again after an update, `install.sh` does), on Windows the icon is a resource of `sshr.exe`, icons are built into the binary, logo files are in `assets/icons`, `go generate ./cmd/sshr` rebuilds the Windows resources
 
@@ -30,6 +30,7 @@ sshr connect web                         # by name or ID
 sshr connect deploy@10.0.0.7:2222        # not saved: connects once, then offers to save
 sshr show web                            # the host and the exact ssh command connect runs
 sshr key new                             # ed25519 key in ~/.ssh/sshr_ed25519, never overwrites
+sshr key new --sk                        # the key on a YubiKey or other FIDO token, ~/.ssh/sshr_sk is only a handle
 sshr key install web --use               # put the public key on web and log in with it from then on
 sshr rm web
 sshr help                                # one line per command
@@ -44,6 +45,7 @@ sshr add db.example.com -u admin --no-key         # saved, encrypted
 sshr add db.example.com -u admin --ask-password   # nothing saved, ssh asks every time
 ```
 
+- a saved password needs OpenSSH 8.4 or newer (`ssh -V`), an older ssh would ask on the terminal instead, sshr says so before it connects (Windows 10 before 21H2 ships 8.1, install a newer OpenSSH there)
 - a saved password is sealed with XChaCha20-Poly1305 in the host file, the key is 32 random bytes in the system keychain (Secret Service, macOS Keychain, Windows Credential Manager), never on disk
 - it reaches ssh through sshr's own askpass over a one-shot unix socket, never through a file, argv or the environment, it is tried once (`NumberOfPasswordPrompts=1`, three failures are enough for fail2ban), only a password prompt gets it, host key questions and one-time codes go to the terminal
 - `sshr list` and the host form never decrypt, an empty password field keeps the saved one
@@ -58,10 +60,11 @@ sshr vault status        # keychain or passphrase
 sshr vault keychain      # back to the system keychain, the file is removed
 ```
 
-- the vault key that seals saved passwords and stored keys lives in the system keychain, on a server or a machine without one `passphrase` wraps it into `~/.sshr/vault/vault-key.json` with Argon2id, the key stays the same, so everything saved before still opens
+- the vault key that seals saved passwords and stored keys lives in the system keychain, on a server or a machine without one `passphrase` wraps it into `~/.sshr/vault/vault-key.json` with Argon2id and removes it from the keychain, the key stays the same, so everything saved before still opens, a locked keychain keeps its copy and sshr warns
 - off by default: the passphrase is asked once per run, a forgotten one loses every saved secret, the file can be attacked offline with a weak passphrase (8 characters at least)
 - it is asked on the terminal, or from the program in `SSHR_ASKPASS`, `sshr mcp` never asks on its terminal, `SSHR_VAULT=keychain|passphrase` picks the mode for one run
 - the keys of the sync device move along into `~/.sshr/vault/secrets.json`, each sealed with the vault key, so a machine without a keychain syncs too, `keychain` moves them back
+- with the system keychain a running sshr (the window, `sshr serve`, `sshr mcp`) forgets the vault key 15 minutes after its last use and reads it from the keychain again without asking when it is needed, `"vault_idle_minutes"` in settings.json changes the time, a value below 0 keeps the key for the whole run, under a passphrase the key is kept for the whole run, asking again would stop `sshr serve` and `sshr mcp` with no one to answer
 
 ## Keys stored in sshr
 
@@ -108,6 +111,24 @@ sshr add web -u deploy --bw-key <item id>        # an SSH Key item
 - needs the `bw` CLI unlocked (`BW_SESSION`), each connect reads the item, sshr never sees the master password, a name works only when it finds one item
 - no session: ssh asks for a password, a key host stops with the error, items are created in Bitwarden itself
 - 1Password and Bitwarden references stay on the device where they were set and never sync
+
+## Hosts that need a hardware key
+
+```sh
+sshr key new --sk                        # a key on a YubiKey or other FIDO token
+sshr key install web ~/.ssh/sshr_sk.pub --use
+sshr hwkey require web                   # web connects only with a key on a token from now on
+sshr hwkey require --all                 # every host
+sshr hwkey status                        # the hosts under it and whether each is ready
+sshr hwkey off web                       # web off the list, sshr hwkey off turns it all off
+sshr hwkey check web                     # the keys on web that are not on a token and the sshd_config lines to lock it
+```
+
+- a host under the requirement is refused when it would log in with a password, a key kept in sshr, 1Password or Bitwarden, the default keys of ssh or a key file outside a token, the error says which and how to fix it, there is no way around it for one connect
+- ssh then gets only sk key types, no password, no keyboard-interactive login and no connection shared through ControlMaster, so it cannot fall back to another key from ssh_config or the agent
+- `"hardware_key": "listed"|"all"` and `"hardware_key_hosts"` in settings.json, never synced, a stolen sync device cannot turn it off, a host keeps the requirement when it is changed or repointed elsewhere
+- with `--all` the jump hops of a host go through sshr and each is checked like a host, in the listed mode a hop logs in its own way unless it is listed too
+- sshr can only keep itself from logging in another way, a server that still takes a password or another key lets anyone in who has them, the export to `~/.ssh/config` writes these hosts without the rule, plain `ssh` is not held to the token
 
 ## Jump hosts
 
@@ -162,6 +183,17 @@ The spec is what ssh takes after `-L`, `-R`, `-D`, checked on save, `tunnel` use
 ## Connecting with mosh
 
 `--mosh` / `--ssh` per call or `"mosh": true`: survives network changes and sleep, echoes typing at once, off by default: needs `mosh` here and `mosh-server` plus open UDP 60000-61000 there, no port or agent forwarding, no scrollback without tmux, no terminal images, no Windows client, falls back to ssh when mosh is missing, fails within 20 s, or an ssh option has spaces
+
+## Commands before and after connect
+
+```sh
+sshr hooks set web before "wg-quick up office"
+sshr hooks set web after "wg-quick down office"
+sshr hooks on
+sshr connect web
+```
+
+The command before runs before ssh starts, if it fails sshr does not connect, the command after runs when the session ends, also after an error, the exit code of the session is in `SSHR_EXIT`. Both run through `sh -c` (`cmd /C` on Windows) on this machine with `SSHR_HOST_NAME`, `SSHR_HOST`, `SSHR_PORT`, `SSHR_USER` and `SSHR_HOST_ID` set. They are off until `sshr hooks on` (`local_commands` in `~/.sshr/settings.json`), `connect --local-commands` and `--no-local-commands` decide for one run, a connect with commands that are off says so. `sshr hooks list` shows them, `sshr hooks unset web [before|after]` removes them, `sshr rm` removes them with the host. They stay on this machine: settings never sync and only `sshr hooks` writes them. The host name can be set on another device, quote `"$SSHR_HOST_NAME"` and never pass it to `eval`, sshr drops control characters from it and on Windows turns the characters cmd.exe acts on (`& | < > ^ % " ( ) !`) into `_`.
 
 ## Health check
 
@@ -244,16 +276,22 @@ sshr export --uninstall
 ```sh
 sshr sync init --server https://sync.example.com --name laptop   # first device
 sshr sync join --server https://sync.example.com <code>          # new device, shows its fingerprint
-sshr sync approve <id>                                           # on a device already in, after comparing fingerprints
+sshr sync approve <id>                                           # on the primary device, after comparing fingerprints
 sshr sync                                                        # pull, then push
 sshr sync status                                                 # devices and a state fingerprint
-sshr sync remove-device <id>                                     # rotates the vault key
+sshr sync remove-device <id>                                     # on the primary device, rotates the vault key
+sshr sync primary <id>                                           # on the primary device, hands the role on after comparing fingerprints
+sshr sync recovery create --passphrase                           # on the primary device, prints a recovery kit once
+sshr sync recovery restore --server <url> --account <id>         # on a new machine when every device is lost, then --finish after the wait
+sshr sync recovery cancel                                        # on the primary device, the kit is worth nothing after it
 sshr sync leave                                                  # stop syncing here, the hosts stay
 ```
 
 - end to end encrypted: per-device keys in the keychain (Ed25519, ML-KEM-768 + X25519), hosts encrypted with a shared vault key, signed and chained manifests, the server stores only ciphertext and cannot add a device or forge history
 - saved passwords sync inside the encryption, keys kept in sshr and password manager references do not, key file paths sync, the files do not
-- a host changed on two devices keeps both, the other one as `<name> (conflict <device> <date>)`, a host removed on one device and changed on another comes back with the change, the log says so
+- a recovery kit (`sshr sync recovery create`, off until made) is a paper that brings the account to a new machine when every device is lost, write it down or print it, `--passphrase` adds a passphrase that is not on the paper (without it a photo of the paper is enough), a restore first claims the account, every device of the owner then warns "the recovery kit of this account was used", `sshr sync recovery cancel` on the primary device stops it, the new machine gets the account only after the wait (7 days, `--wait <days>`, at least 1), checked by sshr-sync and by every device of the owner with its own clock, then it is the primary device, the kit device is out and a new kit should be made, a new kit or a cancel makes the old paper worthless, the credential of an S3, WebDAV or Supabase store is not on the paper, have it ready for a restore (`--backend` and the flags of `sshr sync join`)
+- the device that made the account is its primary device (`sshr sync status` marks it), only it approves and removes devices, every device refuses a change that adds or removes a device or changes the vault key unless the primary device wrote it, so a stolen laptop cannot throw the others out, in an account made with an older sshr the first device that syncs with this version becomes primary and the others say so, an older sshr stops on such an account and asks for an update, when a refused change stops the account for good (on S3, WebDAV or Supabase a stolen device can make one the head) start a new account from the hosts here: `sshr sync leave`, then `sshr sync init` (a new `--prefix` or folder, or a new Supabase project), and join the other devices again
+- a host changed on two devices is merged when they changed different things (a rename here, a tag there), the log says "merged the changes", a host where both changed the same thing, or one the address and the other the password or key, keeps both, the other one as `<name> (conflict <device> <date>)`, a host removed on one device and changed on another comes back with the change, the log says so
 - a host whose saved password does not open here, or one this sshr cannot read, is left out and named, the other hosts still sync, `sshr sync` then ends with "N hosts left out" and exit code 1
 - `leave` first delivers a vault key this device changed and has not handed to the others yet, `--force` leaves without it, then the others pair again
 - an S3 bucket instead of sshr-sync: `sshr sync init --backend s3 --endpoint https://<account>.r2.cloudflarestorage.com --bucket sshr --key-id <id> --name laptop`, `--prefix` keeps several accounts in one bucket, `--region` defaults to `auto`, the secret key comes from `SSHR_S3_SECRET` or a prompt and is kept in the keychain, `sshr sync invite` prints the join flags without it, pass the secret to the new device yourself, the endpoint has to be HTTPS without a user or password in it (plain HTTP only to a loopback address such as 127.0.0.1, also when the sync state is edited), setup checks that the bucket refuses a second create of one name, see SECURITY.md for what a shared bucket key allows, after `remove-device` make a new bucket key, delete the old one and run `sshr sync store-key --key-id <new id>` on every device that stays, it keeps the bucket and checks that the new key reads the account and the vault key of this device before it saves it, the key needs read, write, list and delete on the whole prefix of the account
@@ -293,7 +331,7 @@ sshr ext remove hello
 
 The catalog is off until `sshr ext community on` (`sshr ext community off` turns it off again, installed extensions stay). It is a JSON file at `ext_catalog` in `~/.sshr/settings.json`, by default the community one, `extensions/catalog.json` in the sshr repository (`https://raw.githubusercontent.com/klovbin/sshr/main/extensions/catalog.json`). To add your extension, open a pull request that adds an entry there, the test of the repository checks its shape, nobody reviews its code, each entry has a name, an https git address, a full commit hash, a description, an author and kinds, an entry of a wrong shape or a name listed twice is left out with a warning, a folder here with the same name as a catalog entry is installed as a folder. A company can serve its own file over HTTPS, the format is `{"version":1,"extensions":[{"name":"hello","url":"https://…/hello.git","commit":"<40 hex>","description":"…","author":"…","kinds":["command"]}]}`. Nobody reviews the code of catalog extensions, an entry is checked for its shape only.
 
-A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. `extensions/putty` reads the saved sessions of PuTTY on Linux and macOS where PuTTY keeps them (`~/.config/putty/sessions` or `~/.putty/sessions`, `$PUTTYSESSIONS` and `$PUTTYDIR` count), an SSH proxy of a session becomes a jump host, a `.ppk` key is left out with the `puttygen` command that converts it, PuTTY saves no passwords. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
+A working one to copy from is `examples/extensions/hello` (`sshr ext install ./examples/extensions/hello`). Importers that come with sshr are in `extensions/`, `extensions/remmina` reads the SSH profiles of Remmina (`~/.local/share/remmina/*.remmina`, or the folders you pass), Remmina keeps passwords in the keyring, so a host comes without its password and logs in as ssh does by default, install it from a clone with `sshr ext install ./extensions/remmina`. `extensions/putty` reads the saved sessions of PuTTY on Linux and macOS where PuTTY keeps them (`~/.config/putty/sessions` or `~/.putty/sessions`, `$PUTTYSESSIONS` and `$PUTTYDIR` count), on Windows it reads the registry (`HKCU\Software\SimonTatham\PuTTY\Sessions`) or the `.reg` files you pass (`reg export HKCU\Software\SimonTatham\PuTTY\Sessions putty.reg`), it runs with the PowerShell of Windows, where Group Policy forbids scripts PowerShell refuses it and says so, an SSH proxy of a session becomes a jump host, a `.ppk` key is left out with the `puttygen` command that converts it, PuTTY saves no passwords. `extensions/mobaxterm` reads the SSH sessions of MobaXterm on Windows from `%APPDATA%\MobaXterm\MobaXterm.ini`, or the files you pass: the `MobaXterm.ini` of the portable edition, an export (`.mxtsessions`) or one session (`.moba`), a folder becomes tags, SSH gateways become jump hosts, a `.ppk` key is left out with the `puttygen` command, passwords stay in MobaXterm. `extensions/winscp` reads the SSH sites of WinSCP on Windows (SCP and SFTP, not FTP, WebDAV or S3) from the registry, or from `%APPDATA%\WinSCP.ini` when WinSCP keeps its configuration there, or from the `WinSCP.ini` files you pass, a site folder becomes tags, a tunnel becomes a jump host, the saved passwords are never read. An extension is a folder with a manifest `sshr-ext.json` and the program it runs:
 
 ```json
 {

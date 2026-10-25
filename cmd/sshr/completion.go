@@ -20,7 +20,7 @@ var hostCommands = map[string]bool{
 	"forward": true, "tunnel": true, "close": true, "paste": true, "run": true,
 }
 
-var syncCommands = []string{"init", "invite", "join", "pending", "approve", "pull", "push", "status", "remove-device", "leave"}
+var syncCommands = []string{"init", "invite", "join", "pending", "approve", "pull", "push", "status", "primary", "recovery", "remove-device", "leave"}
 
 var flagRe = regexp.MustCompile(`(?:^|[\s\[|])(--?[A-Za-z][A-Za-z-]*)`)
 
@@ -52,6 +52,16 @@ func complete(store *app.Store, words []string, cur string) []string {
 		return filter([]string{"list", "only", "all", "allow", "deny"}, cur)
 	case c.name == "commands" && len(words) == 2 && (words[1] == "allow" || words[1] == "deny"):
 		return filter(savedNames(store), cur)
+	case c.name == "hwkey" && len(words) == 1:
+		return filter([]string{"status", "require", "off", "check"}, cur)
+	case c.name == "hwkey" && len(words) >= 2 && (words[1] == "require" || words[1] == "off" || words[1] == "check" && len(words) == 2):
+		return filter(savedNames(store), cur)
+	case c.name == "hooks" && len(words) == 1:
+		return filter([]string{"list", "on", "off", "set", "unset"}, cur)
+	case c.name == "hooks" && len(words) == 2 && (words[1] == "set" || words[1] == "unset"):
+		return filter(savedNames(store), cur)
+	case c.name == "hooks" && len(words) == 3 && (words[1] == "set" || words[1] == "unset"):
+		return filter([]string{"before", "after"}, cur)
 	case c.name == "vault" && len(words) == 1:
 		return filter([]string{"status", "passphrase", "keychain"}, cur)
 	case c.name == "gateway" && len(words) == 2:

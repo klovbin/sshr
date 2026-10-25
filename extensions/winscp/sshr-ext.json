@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "winscp",
+  "version": "0.1.0",
+  "description": "imports the SSH sites of WinSCP on Windows (registry or WinSCP.ini), no passwords",
+  "command": { "windows": ["./winscp.cmd"] },
+  "kinds": ["import"]
+}

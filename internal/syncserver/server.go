@@ -4,6 +4,7 @@
 package syncserver
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -54,6 +55,15 @@ type Server struct {
 	// creates limits account creation and joins per client address
 	creates map[string][]time.Time
 	swept   time.Time
+	// Now is the clock of the recovery wait, nil is time.Now, tests move it
+	Now func() time.Time
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 // New serves accounts stored under dir
@@ -351,9 +361,16 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request, _ ctxDevice
 	reply(w, http.StatusOK, out)
 }
 
-func (s *Server) activate(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) activate(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	defer s.lock(a)()
+	// a machine restored from the recovery kit is the primary of the head
+	// and is activated by the kit device that handed the account to it
+	if m, _, err := s.head(a); err != nil || m == nil || m.Recovery == "" || dev.id != m.Recovery || id != m.Primary {
+		if !s.onlyPrimary(w, a, dev, "approves devices") {
+			return
+		}
+	}
 	ds, err := s.loadDevices(a)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -373,9 +390,12 @@ func (s *Server) activate(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
 	fail(w, http.StatusNotFound, "no such device")
 }
 
-func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	defer s.lock(a)()
+	if !s.onlyPrimary(w, a, dev, "removes devices") {
+		return
+	}
 	ds, err := s.loadDevices(a)
 	if err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
@@ -399,10 +419,16 @@ func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request, _ ctxDevic
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) putBlob(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) putBlob(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, h := r.PathValue("a"), r.PathValue("h")
 	if !hashPattern.MatchString(h) {
 		fail(w, http.StatusBadRequest, "bad hash")
+		return
+	}
+	// the recovery kit writes no hosts, a paper must not fill the account
+	// so that a cancel finds no room for the hosts sealed again
+	if m, _, err := s.head(a); err == nil && m != nil && m.Recovery != "" && dev.id == m.Recovery {
+		fail(w, http.StatusForbidden, "the recovery kit device uploads nothing")
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(r.Body, syncproto.MaxBlob+1))
@@ -464,7 +490,7 @@ func (s *Server) getBlob(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
 	w.Write(data)
 }
 
-func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
+func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, dev ctxDevice) {
 	a, id := r.PathValue("a"), r.PathValue("d")
 	if !idPattern.MatchString(id) {
 		fail(w, http.StatusBadRequest, "bad device id")
@@ -478,6 +504,25 @@ func (s *Server) putEnvelope(w http.ResponseWriter, r *http.Request, _ ctxDevice
 	// a key of an older epoch never replaces a newer one, a device still
 	// delivering an old key change would lock the device out of the vault
 	defer s.lock(a)()
+	// keys go out from the primary device (approve, key changes), or from
+	// the recovery kit to the device it handed the account to, another
+	// device writing an envelope of a far epoch would lock the others out
+	// and break a cancel of the kit
+	m, _, err := s.head(a)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if m != nil && m.Version >= 2 && m.Primary != "" {
+		if dev.id != m.Primary && !(m.Recovery != "" && dev.id == m.Recovery && id == m.Primary) {
+			fail(w, http.StatusForbidden, "only the primary device of the account delivers vault keys")
+			return
+		}
+		if env.Epoch > m.Epoch {
+			fail(w, http.StatusConflict, "the envelope is for a vault key newer than the account")
+			return
+		}
+	}
 	path := filepath.Join(s.accountDir(a), "envelopes", id+".json")
 	var cur syncproto.Envelope
 	if old, err := os.ReadFile(path); err == nil && json.Unmarshal(old, &cur) == nil && cur.Epoch > env.Epoch {
@@ -527,6 +572,44 @@ func (s *Server) current(a string) uint64 {
 		return 0
 	}
 	return cs[len(cs)-1]
+}
+
+// head is the stored head manifest of account a and who signed it, nil
+// before the first push
+func (s *Server) head(a string) (*syncproto.Manifest, *syncproto.Signed, error) {
+	c := s.current(a)
+	if c == 0 {
+		return nil, nil, nil
+	}
+	b, err := os.ReadFile(filepath.Join(s.accountDir(a), "manifests", fmt.Sprintf("%d.json", c)))
+	if err != nil {
+		return nil, nil, err
+	}
+	var sm syncproto.Signed
+	var m syncproto.Manifest
+	if err := json.Unmarshal(b, &sm); err != nil {
+		return nil, nil, err
+	}
+	if err := json.Unmarshal(sm.Body, &m); err != nil {
+		return nil, nil, err
+	}
+	return &m, &sm, nil
+}
+
+// onlyPrimary refuses a device that is not the primary device of the head
+// of account a, an account no primary was named in yet lets every device
+// as before
+func (s *Server) onlyPrimary(w http.ResponseWriter, a string, dev ctxDevice, what string) bool {
+	m, _, err := s.head(a)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if m != nil && m.Version >= 2 && m.Primary != "" && m.Primary != dev.id {
+		fail(w, http.StatusForbidden, "only the primary device of the account "+what)
+		return false
+	}
+	return true
 }
 
 func (s *Server) getManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice) {
@@ -600,6 +683,10 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		fail(w, http.StatusBadRequest, "counter must be the current one plus one")
 		return
 	}
+	if err := s.checkRoles(a, &sm, &m); err != nil {
+		fail(w, http.StatusForbidden, err.Error())
+		return
+	}
 	dir := s.accountDir(a)
 	live := map[string]bool{}
 	for _, e := range m.Entries {
@@ -616,13 +703,89 @@ func (s *Server) putManifest(w http.ResponseWriter, r *http.Request, _ ctxDevice
 		}
 		live[e.Hash] = true
 	}
+	if m.Claim != 0 && m.Claim == m.Counter {
+		// when the recovery kit claimed the account, the hand-over waits
+		// from here, written before the claim stands, a claim whose time
+		// is lost could never be handed over
+		err := os.MkdirAll(filepath.Join(dir, "claims"), 0o700)
+		if err == nil {
+			err = writeFile(filepath.Join(dir, "claims", strconv.FormatUint(m.Counter, 10)), []byte(strconv.FormatInt(s.now().Unix(), 10)))
+		}
+		if err != nil {
+			fail(w, http.StatusInternalServerError, "the time of the claim could not be kept: "+err.Error())
+			return
+		}
+	}
 	if err := writeFile(filepath.Join(dir, "manifests", fmt.Sprintf("%d.json", m.Counter)), data); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
 	s.collect(a, live)
 	w.Header().Set("ETag", strconv.FormatUint(m.Counter, 10))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// checkRoles applies the rule of the primary device to a new manifest
+// against the stored head (syncproto.CheckPrimary), a manifest that needs
+// the primary must carry a valid signature of the device it names as
+// signer, the server cannot check the MAC but it holds the signing keys of
+// the devices in the head, the clients check the same again
+func (s *Server) checkRoles(a string, sm *syncproto.Signed, m *syncproto.Manifest) error {
+	prev, prevSigned, err := s.head(a)
+	if err != nil {
+		return err
+	}
+	// a manifest every client refuses would still become the head and stop
+	// the account, what the server can check without the vault key it does
+	if m.Version > syncproto.FormatVersion {
+		return fmt.Errorf("manifest of format %d, this server knows up to %d", m.Version, syncproto.FormatVersion)
+	}
+	for _, d := range m.Devices {
+		if syncproto.DeviceID(d.SignPub) != d.ID {
+			return errors.New("the manifest lists a device whose id does not match its key")
+		}
+	}
+	if id := syncproto.RepeatedDevice(m.Devices); id != "" {
+		return errors.New("the manifest lists a device twice")
+	}
+	if prev == nil {
+		return nil
+	}
+	if m.Prev != syncproto.BodyHash(prevSigned.Body) {
+		return errors.New("the manifest does not follow the current one")
+	}
+	if m.Epoch < prev.Epoch {
+		return errors.New("the manifest goes back to an older vault key")
+	}
+	step, err := syncproto.CheckPrimary(prev, m, sm.Signer)
+	if err != nil {
+		return err
+	}
+	if m.Version < 2 {
+		return nil
+	}
+	if step == syncproto.StepRecover {
+		// the wait since the claim by the clock of the server, a stolen kit
+		// cannot hand the account over before the owner had time to cancel
+		b, err := os.ReadFile(filepath.Join(s.accountDir(a), "claims", strconv.FormatUint(prev.Claim, 10)))
+		at, perr := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+		if err != nil || perr != nil {
+			return errors.New("the claim of the recovery kit is not known to this server")
+		}
+		if left := time.Unix(at, 0).Add(time.Duration(prev.RecoveryWait) * time.Second).Sub(s.now()); left > 0 {
+			return fmt.Errorf("the recovery kit hands the account over only after the wait, %s left", left.Round(time.Minute))
+		}
+	}
+	for _, d := range prev.Devices {
+		if d.ID == sm.Signer {
+			if len(d.SignPub) != ed25519.PublicKeySize || !ed25519.Verify(d.SignPub, syncproto.SignInput(sm.Body), sm.Sig) {
+				return errors.New("the signature of the manifest does not verify")
+			}
+			return nil
+		}
+	}
+	return errors.New("the manifest is signed by a device that is not in the account")
 }
 
 // collect drops old manifests past keepHistory and blobs no manifest

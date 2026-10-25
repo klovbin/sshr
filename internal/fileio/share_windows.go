@@ -4,6 +4,7 @@ package fileio
 
 import (
 	"errors"
+	"math/rand/v2"
 	"os"
 	"syscall"
 	"time"
@@ -14,9 +15,10 @@ import (
 // shareWait is how long a rename or a read waits for another process that
 // has the file open, Windows refuses to replace or open a file in that
 // moment where Unix lets both go on, a held file is free again within
-// milliseconds, a lasting denial gives the same error, so the wait is short
-// and such an error comes back after it
-const shareWait = 500 * time.Millisecond
+// milliseconds, but writers that replace one file at once and a scanner
+// that opens each new copy can keep one writer losing for longer, a
+// lasting denial gives the same error and comes back after the wait
+const shareWait = 2 * time.Second
 
 // busyShare tells an error Windows gives for a file another process holds,
 // a read without FILE_SHARE_DELETE (Go's os.Open does not set it) blocks a
@@ -29,14 +31,19 @@ func busyShare(err error) bool {
 	return errno == windows.ERROR_ACCESS_DENIED || errno == windows.ERROR_SHARING_VIOLATION
 }
 
+// retryShare runs fn until it succeeds, fails another way or shareWait is
+// over, the pause grows from 5 to 40 ms with a random part, writers that
+// retry in step would meet at the file again and again
 func retryShare(fn func() error) error {
 	deadline := time.Now().Add(shareWait)
+	pause := 5 * time.Millisecond
 	for {
 		err := fn()
 		if err == nil || !busyShare(err) || time.Now().After(deadline) {
 			return err
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(pause + rand.N(pause))
+		pause = min(2*pause, 40*time.Millisecond)
 	}
 }
 

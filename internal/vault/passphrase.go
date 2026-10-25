@@ -31,6 +31,11 @@ const (
 // ErrBadPassphrase means the passphrase does not open the vault key file
 var ErrBadPassphrase = errors.New("bad_passphrase")
 
+// ErrKeychainCopyLeft means the passphrase vault is on and the system
+// keychain still gives the vault key, a backup of the keyring opens every
+// secret without the passphrase until it is removed
+var ErrKeychainCopyLeft = errors.New("keychain_copy_left")
+
 // ErrNoPassphrase means the passphrase vault is on and there is no way to
 // ask for the passphrase here (no terminal, no SSHR_ASKPASS)
 var ErrNoPassphrase = errors.New("no_passphrase")
@@ -176,8 +181,10 @@ func passphraseVaultKey() ([]byte, error) {
 
 // SetPassphrase wraps the current vault key with pass into the vault
 // key file and turns the passphrase vault on, the key stays the same, so
-// every saved secret still opens, a key in the system keychain stays there,
-// the named secrets are moved by MoveSecrets
+// every saved secret still opens, the named secrets are moved by
+// MoveSecrets, the copy of the key in the system keychain is removed last,
+// it cannot be put back by an undo, a copy that stays is
+// ErrKeychainCopyLeft with the mode already changed
 func SetPassphrase(pass string, secretNames []string) error {
 	// one mode change at a time, the setting and the files must agree
 	unlock, err := vaultModeLock()
@@ -189,9 +196,10 @@ func SetPassphrase(pass string, secretNames []string) error {
 		return fmt.Errorf("the passphrase is shorter than %d characters, the file it guards can be attacked offline", passphraseMin)
 	}
 	key, err := Key()
-	// a locked keychain or one that did not answer may hold the real key,
-	// only a keychain that is not there starts with a new one
-	if errors.Is(err, ErrNoKeychain) && !errors.Is(err, ErrKeychainLocked) && !errors.Is(err, ErrKeychainTimeout) {
+	// only a keychain the system reports missing starts with a new key,
+	// every keychain error carries ErrNoKeychain, a locked one, one that did
+	// not answer or failed another way may hold the real key
+	if errors.Is(err, ErrKeychainMissing) {
 		// a machine without a keychain, the case the passphrase vault is
 		// for, starts with a new key, unless a key check says secrets were
 		// sealed here with a key that is now out of reach
@@ -228,6 +236,15 @@ func SetPassphrase(pass string, secretNames []string) error {
 	if err := fileio.WriteFile(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
+	// the copy in the keychain goes at the end, the file must give the key
+	// back before anything else changes
+	if w, err := readWrappedKey(); err != nil {
+		undo()
+		return err
+	} else if got, err := unwrapKey(w, pass); err != nil || !bytes.Equal(got, key) {
+		undo()
+		return fmt.Errorf("%s does not give the vault key back after the write, nothing is changed: %v", path, err)
+	}
 	// the named secrets move before the mode changes, the mode never points
 	// at a file that does not hold them
 	moved, err := moveSecretsBack(secretNames, true)
@@ -241,13 +258,46 @@ func SetPassphrase(pass string, secretNames []string) error {
 	if err == nil {
 		st.Vault = ModePassphrase
 		if err = settings.Save(st); err == nil {
-			return nil
+			return dropKeychainCopy(key)
 		}
 	}
 	if berr := MoveSecrets(moved, false); berr != nil {
 		return fmt.Errorf("settings.json was not saved and the sync keys did not go back to the keychain, fix settings.json and run the same command again: %v, %v", err, berr)
 	}
 	return fmt.Errorf("the vault key is wrapped in %s but settings.json was not saved, the mode is not changed: %v", path, err)
+}
+
+// dropKeychainCopy removes the vault key from the system keychain and reads
+// it back as gone, the file holds it under the passphrase now and a copy in
+// the keychain would open every secret without it, only a keychain that is
+// not there counts as holding no copy, any other error leaves it, the key
+// check must name the key first, a later run in keychain mode then refuses
+// to make a second key instead of sealing with it
+func dropKeychainCopy(key []byte) error {
+	left := func(why string) error {
+		return fmt.Errorf("%w: the vault is under the passphrase, but the keychain item %s/%s stays, %s, remove it by hand", ErrKeychainCopyLeft, keyringService, keyringUser, why)
+	}
+	if want, err := readKeyCheck(); err != nil || want != keyCheckValue(key) {
+		return left(fmt.Sprintf("the key check of this machine does not name the key (%v)", err))
+	}
+	k, ok, err := getVaultKey()
+	switch {
+	case errors.Is(err, ErrKeychainMissing):
+		return nil
+	case err != nil:
+		return left(err.Error())
+	case !ok:
+		return nil
+	case !bytes.Equal(k, key):
+		return left("it holds another vault key")
+	}
+	if err := SecretDelete(keyringUser); err != nil {
+		return left(err.Error())
+	}
+	if _, ok, err := getVaultKey(); err != nil || ok {
+		return left(fmt.Sprintf("it still answers after the removal (%v)", err))
+	}
+	return nil
 }
 
 // UseKeychain stores the current vault key in the system keychain,
@@ -366,7 +416,8 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 	vaultMu.Lock()
 	defer vaultMu.Unlock()
 	if vaultKey != nil {
-		return vaultKey, nil
+		touchKey()
+		return bytes.Clone(vaultKey), nil
 	}
 	if keySetPending {
 		return nil, keychainError(fmt.Errorf("%w: a vault key may still reach the keychain from a call that ran out of time, start sshr again", errKeyringTimeout))
@@ -390,7 +441,8 @@ func newVaultKeyWithoutKeychain() ([]byte, error) {
 		return nil, err
 	}
 	vaultKey = key
-	return key, nil
+	touchKey()
+	return bytes.Clone(key), nil
 }
 
 // vaultModeLock is held while the vault mode changes, it is not the lock

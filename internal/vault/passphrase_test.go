@@ -46,6 +46,11 @@ func TestPassphraseVault(t *testing.T) {
 	if Mode() != ModePassphrase {
 		t.Fatalf("mode %s", Mode())
 	}
+	// the keychain keeps no copy that opens the secrets without the
+	// passphrase (#367)
+	if _, ok, err := getVaultKey(); ok || err != nil {
+		t.Fatalf("the keychain still gives the vault key: %v %v", ok, err)
+	}
 	// a machine without a keychain
 	keyring.MockInitWithError(errors.New("no bus"))
 	t.Cleanup(keyring.MockInit)
@@ -534,4 +539,58 @@ func forgetVaultKey() {
 	vaultMu.Lock()
 	vaultKey = nil
 	vaultMu.Unlock()
+}
+
+// a keychain error that does not say the keychain is missing leaves the
+// copy and says so, it is never taken as removed, a keychain that holds
+// another vault key keeps it (#367)
+func TestPassphraseVaultKeepsCopyItCannotRemove(t *testing.T) {
+	useMockKeychain(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if _, err := Key(); err != nil {
+		t.Fatal(err)
+	}
+	keyring.MockInitWithError(errors.New("org.freedesktop.DBus.Error.AccessDenied"))
+	t.Cleanup(keyring.MockInit)
+	if err := SetPassphrase(pass, nil); !errors.Is(err, ErrKeychainCopyLeft) {
+		t.Fatalf("an error of a keychain that is there: %v", err)
+	}
+	if Mode() != ModePassphrase {
+		t.Errorf("mode %s", Mode())
+	}
+
+	keyring.MockInit()
+	key, _ := Key()
+	other := make([]byte, len(key))
+	keyring.Set("sshr", keyringUser, base64.StdEncoding.EncodeToString(other))
+	if err := dropKeychainCopy(key); !errors.Is(err, ErrKeychainCopyLeft) {
+		t.Fatalf("another key in the keychain: %v", err)
+	}
+	if k, ok, _ := getVaultKey(); !ok || string(k) != string(other) {
+		t.Error("another vault key was removed")
+	}
+}
+
+// a keychain that is there and fails gives no new vault key, it may hold
+// the real one (#368)
+func TestPassphraseVaultMakesNoKeyOnKeychainError(t *testing.T) {
+	keyring.MockInitWithError(errors.New("org.freedesktop.DBus.Error.AccessDenied"))
+	resetVault(t)
+	t.Cleanup(keyring.MockInit)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	pass := "correct horse battery"
+	cheapPassphrase(t, &pass)
+	if err := SetPassphrase(pass, nil); err == nil {
+		t.Fatal("a vault key was made while the keychain failed")
+	}
+	if path, _ := passphraseFilePath(); fileExists(path) {
+		t.Error("a vault key file was written")
+	}
+	if Mode() != ModeKeychain {
+		t.Errorf("mode %s", Mode())
+	}
 }

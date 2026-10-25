@@ -26,7 +26,7 @@ func TestComplete(t *testing.T) {
 		{[]string{"run", "-t"}, "", []string{"eu", "prod"}},
 		{[]string{"tag", "web"}, "-", []string{"-prod"}},
 		{[]string{"export"}, "--", []string{"--install", "--uninstall"}},
-		{[]string{"sync"}, "re", []string{"remove-device"}},
+		{[]string{"sync"}, "re", []string{"recovery", "remove-device"}},
 		{[]string{"help"}, "imp", []string{"import"}},
 		{[]string{"send", "web"}, "", nil},
 	}

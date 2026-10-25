@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync"
 	"time"
 
@@ -73,6 +74,11 @@ type Settings struct {
 	// keychain, "passphrase" for a file wrapped with a passphrase (#98), off
 	// by default, a forgotten passphrase loses every saved secret
 	Vault string `json:"vault,omitempty"`
+	// VaultIdleMinutes is how long a running sshr keeps the vault key of
+	// the system keychain after its last use, 0 means 15, below 0 keeps it
+	// for the whole run, the window, sshr serve and sshr mcp run for hours
+	// and would hold the key all that time, a passphrase vault keeps it
+	VaultIdleMinutes int `json:"vault_idle_minutes,omitempty"`
 	// AuditLog keeps ~/.sshr/audit.jsonl, a record of every upload,
 	// command and host change made through sshr mcp and sshr serve, off by
 	// default: it is one more file that grows (up to six times AuditMaxMB) and
@@ -93,6 +99,16 @@ type Settings struct {
 	// to a hash of where it pointed then, settings never sync so another
 	// device cannot add a host here
 	CommandHosts map[string]string `json:"command_hosts,omitempty"`
+	// HardwareKey asks for a key on a FIDO token to connect: empty for
+	// none, "listed" for the hosts in HardwareKeyHosts, "all" for every
+	// host, a host under it that would log in with a password or a key
+	// outside a token is refused, it lives here and never syncs, a stolen
+	// sync device cannot turn it off
+	HardwareKey string `json:"hardware_key,omitempty"`
+	// HardwareKeyHosts are the host IDs sshr hwkey require listed, bound to
+	// the ID and not to the address, a host repointed elsewhere keeps the
+	// requirement
+	HardwareKeyHosts []string `json:"hardware_key_hosts,omitempty"`
 	// ConfirmCommands asks the user before every command from an assistant,
 	// through a question the MCP client shows, off by default: a client
 	// that cannot ask gets every command refused and the REST API refuses
@@ -106,6 +122,14 @@ type Settings struct {
 	// name refuse while it is off, off by default: nobody reviews the code
 	// of a catalog extension and it runs as the user
 	ExtCommunity bool `json:"ext_community,omitempty"`
+	// LocalCommands runs the commands of HostCommands before and after
+	// sshr connect, off by default: they run on this machine as the user,
+	// connect --local-commands and --no-local-commands decide for one run
+	LocalCommands bool `json:"local_commands,omitempty"`
+	// HostCommands are the commands to run on this machine around a
+	// session, by host ID, settings never sync and no import, REST, MCP or
+	// extension writes them, so a command never comes from elsewhere
+	HostCommands map[string]HostCommand `json:"host_commands,omitempty"`
 
 	// base is the file as Load read it, Save writes only
 	// the fields that differ from it, copies of the value share it
@@ -121,6 +145,22 @@ type Settings struct {
 const settingsFormat = 1
 
 var settingsKeys = record.JSONKeys(reflect.TypeOf(Settings{}))
+
+// DefaultVaultIdle is how long the vault key is kept after its last use
+// when vault_idle_minutes is not set
+const DefaultVaultIdle = 15 * time.Minute
+
+// VaultIdle is how long the vault key is kept after its last use, 0 for
+// the whole run
+func (s Settings) VaultIdle() time.Duration {
+	switch {
+	case s.VaultIdleMinutes < 0:
+		return 0
+	case s.VaultIdleMinutes == 0:
+		return DefaultVaultIdle
+	}
+	return time.Duration(s.VaultIdleMinutes) * time.Minute
+}
 
 // DefaultHealthInterval is how often the app checks the hosts when the
 // check is on and the interval is not set
@@ -178,7 +218,43 @@ func cloneSettings(s Settings) Settings {
 			c.CommandHosts[k] = v
 		}
 	}
+	if s.HostCommands != nil {
+		c.HostCommands = make(map[string]HostCommand, len(s.HostCommands))
+		for k, v := range s.HostCommands {
+			c.HostCommands[k] = v
+		}
+	}
+	if s.HardwareKeyHosts != nil {
+		c.HardwareKeyHosts = make([]string, len(s.HardwareKeyHosts))
+		copy(c.HardwareKeyHosts, s.HardwareKeyHosts)
+	}
 	return c
+}
+
+// HostCommand is what runs on this machine around a session to one host,
+// Before before ssh starts (a VPN up, a key unlocked), a failure stops the
+// connect, After when the session ended, with its exit code
+type HostCommand struct {
+	Before string `json:"before,omitempty"`
+	After  string `json:"after,omitempty"`
+}
+
+// SetHostCommand sets one command of host id, an empty one removes it
+func (s *Settings) SetHostCommand(id, when, command string) {
+	c := s.HostCommands[id]
+	if when == "before" {
+		c.Before = command
+	} else {
+		c.After = command
+	}
+	if c == (HostCommand{}) {
+		delete(s.HostCommands, id)
+		return
+	}
+	if s.HostCommands == nil {
+		s.HostCommands = map[string]HostCommand{}
+	}
+	s.HostCommands[id] = c
 }
 
 func readSettings() (Settings, error) {
@@ -346,8 +422,32 @@ func mergeChanged(dst *Settings, s, base Settings) {
 			d.Field(i).Set(reflect.ValueOf(mergeKeys(d.Field(i).Interface().(map[string]string), m, bv.Field(i).Interface().(map[string]string))))
 			continue
 		}
+		if sv.Type().Field(i).Name == "HardwareKeyHosts" {
+			// a set of host IDs changes ID by ID like a map, a host required by
+			// another process meanwhile is kept
+			d.Field(i).Set(reflect.ValueOf(mergeSet(d.Field(i).Interface().([]string), s.HardwareKeyHosts, base.HardwareKeyHosts)))
+			continue
+		}
 		d.Field(i).Set(sv.Field(i))
 	}
+}
+
+// mergeSet applies to cur the items that s added or removed against base
+func mergeSet(cur, s, base []string) []string {
+	var out []string
+	for _, v := range cur {
+		// kept unless this process removed it
+		if slices.Contains(s, v) || !slices.Contains(base, v) {
+			out = append(out, v)
+		}
+	}
+	for _, v := range s {
+		// added by this process
+		if !slices.Contains(base, v) && !slices.Contains(out, v) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // mergeKeys applies to cur the keys that s added, changed or removed

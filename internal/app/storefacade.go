@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"sshr.dev/internal/hosts"
+
+	"sshr.dev/internal/sshcmd"
 )
 
 // Store persists hosts as ~/.sshr/vault/hosts/<id>.json (0600).
@@ -71,35 +74,14 @@ func fillKeyPub(h *Host) error {
 // hostsChanged rewrites the ssh config export when it is installed, the
 // host is saved already, a failed export is reported and does not undo it
 func (s *Store) hostsChanged() {
-	if _, err := s.refreshSSHConfig(false); err != nil {
+	if _, err := s.confEnv().RefreshSSHConfig(false); err != nil {
 		fmt.Fprintf(os.Stderr, "sshr: ssh config export: %v\n", err)
 	}
 }
 
 // Unlock fills h.Password from the vault, 1Password or Bitwarden before
-// connecting, a host without a saved password is left as it is
-func Unlock(h *Host) error {
-	if h.Password != "" {
-		return nil
-	}
-	switch h.PasswordMode {
-	case PasswordOnePassword:
-		pw, err := opRead(h.PasswordRef)
-		if err != nil {
-			return err
-		}
-		h.Password = string(pw)
-		return nil
-	case PasswordBitwarden:
-		pw, err := bwPassword(h.PasswordRef)
-		if err != nil {
-			return err
-		}
-		h.Password = string(pw)
-		return nil
-	}
-	return unlockSaved(h)
-}
+// connecting, see sshcmd.Unlock
+func Unlock(h *Host) error { return sshcmd.Unlock(h) }
 
 // The methods below are the host store as the front ends and the code
 // that runs ssh know it, they hand the work to hostStore with the hooks
@@ -118,7 +100,7 @@ func (s *Store) db() *hostStore {
 // the ssh config export of this Store
 func (s *Store) hooks() hostHooks {
 	return hostHooks{
-		AgentKey:    prepareAgentKey,
+		AgentKey:    sshcmd.PrepareAgentKey,
 		KeyPub:      fillKeyPub,
 		StoreSecret: s.opStorePassword,
 		Changed: func(tx *hostStore) {
@@ -166,7 +148,18 @@ func (s *Store) Update(id string, in Host) (*Host, error) { return s.db().Update
 func (s *Store) Import(in Host) (*Host, error) { return s.db().Import(in) }
 
 // Delete removes a host
-func (s *Store) Delete(id string) error { return s.db().Delete(id) }
+func (s *Store) Delete(id string) error {
+	if err := s.db().Delete(id); err != nil {
+		return err
+	}
+	// a removed host leaves the hardware key list, the ID is never used
+	// again, a list with dead IDs hides which hosts it still holds
+	if st, err := LoadSettings(); err == nil && slices.Contains(st.HardwareKeyHosts, id) {
+		st.ReleaseHardwareKey(id)
+		return SaveSettings(st)
+	}
+	return nil
+}
 
 // Duplicate saves a copy of a host under another name
 func (s *Store) Duplicate(id, name string) (*Host, error) { return s.db().Duplicate(id, name) }

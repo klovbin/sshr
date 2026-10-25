@@ -17,8 +17,8 @@ import (
 	"golang.org/x/term"
 
 	"sshr.dev/internal/app"
-	"sshr.dev/internal/syncclient"
 	"sshr.dev/internal/desktop"
+	"sshr.dev/internal/syncclient"
 )
 
 func runCLI(args []string) {
@@ -121,6 +121,10 @@ func runCLI(args []string) {
 		cmdVault(args[1:])
 	case "commands":
 		cmdCommands(store, args[1:])
+	case "hwkey":
+		cmdHwkey(store, args[1:])
+	case "hooks":
+		cmdHooks(store, args[1:])
 	case "ext":
 		cmdExt(store, args[1:])
 	case "help", "--help", "-h":
@@ -454,12 +458,92 @@ func cmdRm(store *app.Store, args []string) {
 		fatal(err)
 	}
 	fmt.Printf("Removed %s (%s@%s:%d)\n", h.Name, h.User, h.Host, h.Port)
+	if st, err := app.LoadSettings(); err == nil && st.HostCommands[h.ID] != (app.HostCommand{}) {
+		st.SetHostCommand(h.ID, "before", "")
+		st.SetHostCommand(h.ID, "after", "")
+		if err := app.SaveSettings(st); err != nil {
+			fmt.Fprintf(os.Stderr, "sshr: the local commands of %s stay in settings.json: %v\n", h.Name, err)
+		}
+	}
+}
+
+const hooksUsage = `Usage: sshr hooks list
+       sshr hooks on|off
+       sshr hooks set <host> before|after <command>
+       sshr hooks unset <host> [before|after]`
+
+// cmdHooks keeps the commands that run on this machine around a session
+// to a host, they live in settings.json, which never syncs
+func cmdHooks(store *app.Store, args []string) {
+	st, err := app.LoadSettings()
+	if err != nil {
+		fatal(err)
+	}
+	usage := func() {
+		fmt.Fprintln(os.Stderr, hooksUsage)
+		os.Exit(1)
+	}
+	if len(args) == 0 {
+		usage()
+	}
+	switch {
+	case args[0] == "list" && len(args) == 1:
+		state := "off, sshr hooks on or connect --local-commands runs them"
+		if st.LocalCommands {
+			state = "on"
+		}
+		fmt.Println("Local commands: " + state)
+		list, err := store.List()
+		if err != nil {
+			fatal(err)
+		}
+		for i := range list {
+			c, ok := st.HostCommands[list[i].ID]
+			if !ok {
+				continue
+			}
+			fmt.Printf("  %s (%s)\n", list[i].Name, list[i].Dest())
+			if c.Before != "" {
+				fmt.Println("    before: " + c.Before)
+			}
+			if c.After != "" {
+				fmt.Println("    after:  " + c.After)
+			}
+		}
+		return
+	case args[0] == "on" && len(args) == 1:
+		st.LocalCommands = true
+	case args[0] == "off" && len(args) == 1:
+		st.LocalCommands = false
+	case args[0] == "set" && len(args) >= 4 && (args[2] == "before" || args[2] == "after"):
+		command := strings.TrimSpace(strings.Join(args[3:], " "))
+		if command == "" {
+			usage()
+		}
+		st.SetHostCommand(findHost(store, "hooks set", args[1]).ID, args[2], command)
+	case args[0] == "unset" && (len(args) == 2 || len(args) == 3 && (args[2] == "before" || args[2] == "after")):
+		id := findHost(store, "hooks unset", args[1]).ID
+		for _, when := range []string{"before", "after"} {
+			if len(args) == 2 || args[2] == when {
+				st.SetHostCommand(id, when, "")
+			}
+		}
+	default:
+		usage()
+	}
+	if err := app.SaveSettings(st); err != nil {
+		fatal(err)
+	}
+	if args[0] == "set" && !st.LocalCommands {
+		fmt.Println("Saved, local commands are off, sshr hooks on turns them on")
+	}
 }
 
 func cmdConnect(store *app.Store, args []string) {
-	settings, _ := app.LoadSettings()
+	settings, settingsErr := app.LoadSettings()
 	useMosh := settings.Mosh
 	plain := false
+	var localCommands *bool
 	var fwdNames []string
 	rest := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -476,12 +560,15 @@ func cmdConnect(store *app.Store, args []string) {
 			useMosh = false
 		case "--plain":
 			plain = true
+		case "--local-commands", "--no-local-commands":
+			on := a == "--local-commands"
+			localCommands = &on
 		default:
 			rest = append(rest, a)
 		}
 	}
 	if len(rest) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: sshr connect [--mosh|--ssh] [--plain] [-F <forward>|all] <name or id>")
+		fmt.Fprintln(os.Stderr, "Usage: sshr connect [--mosh|--ssh] [--plain] [--local-commands|--no-local-commands] [-F <forward>|all] <name or id>")
 		os.Exit(1)
 	}
 	query := strings.Join(rest, " ")
@@ -507,6 +594,20 @@ func cmdConnect(store *app.Store, args []string) {
 			fatal(err)
 		}
 	}
+	if settingsErr != nil {
+		// without the settings the local commands are unknown, a VPN the
+		// user expects would silently stay down
+		if localCommands != nil && *localCommands {
+			fatal(fmt.Errorf("settings.json does not read (%v), the local commands are unknown, not connecting", settingsErr))
+		}
+		fmt.Fprintf(os.Stderr, "sshr: settings.json does not read (%v), connecting without its settings and local commands\n", settingsErr)
+	}
+	// before the plan: it checks whether a host with a gateway answers
+	// directly, a VPN the command brings up changes the answer
+	local := beforeConnect(settings, h, localCommands)
+	if local != "" {
+		beforeExit = func() { afterConnect(local, h, 1) }
+	}
 	plan, err := store.PlanSession(h, app.LaunchOptions{Forwards: fwds, Mosh: useMosh, Plain: plain})
 	if err != nil {
 		fatal(err)
@@ -530,6 +631,7 @@ func cmdConnect(store *app.Store, args []string) {
 		code := runAttached(cmd, cleanup)
 		if !app.MoshStartFailed(code, time.Since(started)) {
 			markConnected(store, h, code)
+			afterConnect(local, h, code)
 			os.Exit(code)
 		}
 		fmt.Fprintln(os.Stderr, "sshr: mosh did not start, falling back to ssh")
@@ -556,7 +658,47 @@ func cmdConnect(store *app.Store, args []string) {
 	}
 	code := runAttached(cmd, cleanup)
 	markConnected(store, h, code)
+	afterConnect(local, h, code)
 	os.Exit(code)
+}
+
+// beforeConnect runs the local command set for h to run before a session,
+// a failure stops the connect, it returns the command for after, empty
+// when the commands are off or none is set
+func beforeConnect(st app.Settings, h *app.Host, force *bool) string {
+	cmd, on := app.LocalCommandsOf(st, h, force)
+	if cmd == (app.HostCommand{}) {
+		return ""
+	}
+	if !on {
+		fmt.Fprintln(os.Stderr, "sshr: "+h.Name+" has local commands, they are off (sshr hooks on, or connect --local-commands)")
+		return ""
+	}
+	if cmd.Before != "" {
+		fmt.Fprintln(os.Stderr, "sshr: running before connect: "+cmd.Before)
+		if err := app.RunLocalCommand(cmd.Before, h, -1, os.Stdin, os.Stdout, os.Stderr); err != nil {
+			fatal(fmt.Errorf("the command before connect failed (%v), not connecting", err))
+		}
+	}
+	return cmd.After
+}
+
+// afterConnect runs the local command after a session, its failure is
+// reported and the exit code stays the one of the session
+func afterConnect(command string, h *app.Host, code int) {
+	beforeExit = nil
+	if command == "" {
+		return
+	}
+	if code < 0 {
+		// ssh killed by a signal has no exit code, ssh itself says 255 for
+		// a connection that ended abnormally
+		code = 255
+	}
+	fmt.Fprintln(os.Stderr, "sshr: running after the session: "+command)
+	if err := app.RunLocalCommand(command, h, code, os.Stdin, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: the command after the session failed: %v\n", err)
+	}
 }
 
 // markConnected notes the session for sshr list --recent, 255 is ssh
@@ -611,7 +753,7 @@ func cmdProxy(store *app.Store, args []string) {
 		fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
 		os.Exit(1)
 	}
-	cmd := exec.Command("ssh", sshArgs...)
+	cmd := app.SSHCommand(sshArgs...)
 	// The askpass of the host behind this hop is in our environment, it must
 	// not answer this hop's password prompt
 	cmd.Env = app.StripAuthEnv(os.Environ())
@@ -920,8 +1062,17 @@ func fatal(err error) {
 		err = errors.New("the host was saved meanwhile (a sync or the app), nothing is changed, run the command again")
 	}
 	fmt.Fprintf(os.Stderr, "sshr: %v\n", err)
+	if f := beforeExit; f != nil {
+		beforeExit = nil
+		f()
+	}
 	os.Exit(1)
 }
+
+// beforeExit runs when fatal stops sshr, connect sets it to the local
+// command after once the one before ran, so a VPN brought up is taken down
+// when the connect fails later
+var beforeExit func()
 
 // cmdImportSSHConfig adds the hosts of ~/.ssh/config
 func cmdImportSSHConfig(store *app.Store, args []string) {
@@ -1158,10 +1309,15 @@ func cmdVault(args []string) {
 		if first != again {
 			fatal(fmt.Errorf("the two passphrases differ, nothing is changed"))
 		}
-		if err := app.SetVaultPassphrase(first, names); err != nil {
+		err = app.SetVaultPassphrase(first, names)
+		if err != nil && !errors.Is(err, app.ErrKeychainCopyLeft) {
 			fatal(err)
 		}
 		fmt.Println("The vault key and the sync keys are now in ~/.sshr/vault under the passphrase, a forgotten passphrase loses the saved passwords and keys")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Warning:", err)
+			os.Exit(1)
+		}
 	case "keychain":
 		if err := app.UseKeychainVault(names); err != nil {
 			fatal(err)

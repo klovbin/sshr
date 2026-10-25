@@ -107,7 +107,7 @@ func TestCloneSettingsCoversEveryList(t *testing.T) {
 		if !f.IsExported() {
 			continue
 		}
-		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" {
+		if k := f.Type.Kind(); (k == reflect.Slice || k == reflect.Map || k == reflect.Pointer) && f.Name != "OPAccounts" && f.Name != "CommandHosts" && f.Name != "HostCommands" && f.Name != "HardwareKeyHosts" {
 			t.Errorf("Settings.%s is a %s, copy it in cloneSettings and list it here", f.Name, k)
 		}
 	}
@@ -210,6 +210,34 @@ func TestCommandHostsMergeByKey(t *testing.T) {
 	got, _ := Load()
 	if _, back := got.CommandHosts["x"]; back || got.CommandHosts["y"] != "ty" {
 		t.Fatalf("command_hosts %v", got.CommandHosts)
+	}
+}
+
+// two processes that require a hardware key for different hosts keep
+// both, a release saved meanwhile is not undone (#353)
+func TestHardwareKeyHostsMergeByItem(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	st, _ := Load()
+	st.RequireHardwareKey("x")
+	if err := Save(st); err != nil {
+		t.Fatal(err)
+	}
+	p1, _ := Load()
+	p2, _ := Load()
+	p2.ReleaseHardwareKey("x")
+	p2.RequireHardwareKey("z")
+	if err := Save(p2); err != nil {
+		t.Fatal(err)
+	}
+	p1.RequireHardwareKey("y")
+	if err := Save(p1); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Load()
+	if got.HardwareKeyRequired("x") || !got.HardwareKeyRequired("y") || !got.HardwareKeyRequired("z") {
+		t.Fatalf("hardware_key_hosts %v", got.HardwareKeyHosts)
 	}
 }
 

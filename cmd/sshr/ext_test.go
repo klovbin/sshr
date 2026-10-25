@@ -300,7 +300,7 @@ JSON
 	}
 	out, errOut, code := run("ext", "import", "fake", "--source", "x")
 	if code != 1 || !strings.Contains(out, "+ alpha  deploy@10.0.0.5:2222") || !strings.Contains(out, "1 added, 0 already there, 1 failed") ||
-		!strings.Contains(errOut, "args=--source x") || !strings.Contains(errOut, `the field "password" is not read`) || !strings.Contains(errOut, "! b:") {
+		!strings.Contains(errOut, "args=--source x") || !strings.Contains(errOut, `the field "password" is not read`) || !strings.Contains(errOut, `! "b":`) {
 		t.Fatalf("first import: code %d\nout %q\nerr %q", code, out, errOut)
 	}
 	list, _, _ := run("list", "--json")

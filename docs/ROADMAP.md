@@ -13,6 +13,7 @@ Connecting
 - one command on many hosts by tag or name, `sshr run` ([#33](https://github.com/klovbin/sshr/issues/33))
 - copying files and folders, `sshr send` and `sshr get` ([#32](https://github.com/klovbin/sshr/issues/32))
 - a gateway per host, used only when the host does not answer directly, `sshr gateway` ([#28](https://github.com/klovbin/sshr/issues/28))
+- commands on this machine before and after connect, `sshr hooks`, off by default, never synced ([#29](https://github.com/klovbin/sshr/issues/29))
 
 Passwords and keys
 
@@ -26,7 +27,7 @@ Moving hosts in and out
 
 - import from `~/.ssh/config` through `ssh -G`
 - export to `~/.ssh/config` with an `Include` line, kept up to date, off by default
-- sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
+- sync between devices through our own server `sshr-sync`, end to end encrypted, conflicts keep both sides ([#1](https://github.com/klovbin/sshr/issues/1)), changes to different fields of one host on two devices merge into one host ([#152](https://github.com/klovbin/sshr/issues/152)), only the primary device adds and removes devices ([#292](https://github.com/klovbin/sshr/issues/292)), a paper recovery kit with a claim, a wait and a cancel ([#150](https://github.com/klovbin/sshr/issues/150)), 1Password references stay on the device where they were set ([#30](https://github.com/klovbin/sshr/issues/30))
 
 For other programs
 
@@ -52,16 +53,15 @@ Needed before a release
 Features
 
 3. Drag and drop files onto a host in the app ([#32](https://github.com/klovbin/sshr/issues/32))
-5. Local commands before and after connect, their fields go on the #30 list ([#29](https://github.com/klovbin/sshr/issues/29))
-6. Import from PuTTY on Windows (registry), MobaXterm, Termius, Royal TS as extensions of kind import, Remmina and PuTTY on Linux and macOS are done in `extensions/` ([#34](https://github.com/klovbin/sshr/issues/34))
+6. Import from PuTTY on Windows (registry), MobaXterm, Termius, Royal TS as extensions of kind import, Remmina, PuTTY (Linux, macOS, Windows), MobaXterm and WinSCP are done in `extensions/` ([#34](https://github.com/klovbin/sshr/issues/34))
 
 Later
 
 7. sshr on iOS and Android, ssh in process, keys in the phone's keystore, joins sync like any device ([#25](https://github.com/klovbin/sshr/issues/25))
-9. Sync: automatic background sync, a paper recovery key, pairing by QR code
+9. Sync: automatic background sync, pairing by QR code
 12. Sync through a store you already have, Supabase, a 1Password vault or a folder Syncthing or Dropbox syncs, still end to end encrypted, the store sees only ciphertext ([#128](https://github.com/klovbin/sshr/issues/128))
 10. Sync without a server: device to device over the local network or the user's own WireGuard tunnel, TLS 1.3 with device keys pinned at pairing
-11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required
+11. Optional hardware keys (YubiKey, FIDO2 `ed25519-sk`), not required: `sshr key new --sk` makes one and the handle is a key file, `sshr hwkey require` refuses hosts that would log in without one
 
 ## Not planned
 

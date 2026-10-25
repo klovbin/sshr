@@ -72,10 +72,18 @@ way, connect goes through the gateway when the host does not answer
 Examples:
   sshr show web`},
 	{name: "key", usage: `sshr key new [name] [--no-passphrase]
+sshr key new [name] --sk [--resident] [--verify-required]
 sshr key install <host> [public key file] [--use]`, short: "make a key, put it on a host",
 		details: `new makes an ed25519 key in ~/.ssh (sshr_ed25519 by default) with
 ssh-keygen, which asks for the passphrase, an existing key is never
 overwritten
+
+new --sk makes the key on a FIDO token (YubiKey and the like), the
+private half never leaves it, ~/.ssh gets a handle (sshr_sk by default)
+that is useless without the token, ed25519-sk first, ecdsa-sk when the
+token has no Ed25519, every login asks for a touch, the server needs
+OpenSSH 8.2 or newer, the handle is used as a key file (-k), it cannot be
+pasted into sshr
 
 install appends a public key to ~/.ssh/authorized_keys on the host,
 logging in the way the host does (a password is asked or taken from
@@ -83,11 +91,16 @@ sshr), a key already there is not added twice, the default is the first
 of ~/.ssh/sshr_ed25519.pub, id_ed25519.pub, id_ecdsa.pub, id_rsa.pub
 
 Options:
-  --no-passphrase   new: no passphrase on the key
+  --no-passphrase   new: no passphrase on the key or the handle of --sk
+  --sk              new: the key lives on a FIDO token
+  --resident        new --sk: keep the key on the token, ssh-keygen -K brings
+                    it to a new machine
+  --verify-required new --sk: ask the PIN of the token on every login too
   --use             install: the host logs in with this key from then on
 
 Examples:
   sshr key new
+  sshr key new --sk --verify-required
   sshr key install web --use`},
 	{name: "rm", aliases: []string{"remove"}, usage: "sshr rm <name or id>", short: "remove a host"},
 	{name: "connect", aliases: []string{"ssh"}, usage: "sshr connect [options] <name or id>", short: "ssh into a host",
@@ -96,6 +109,9 @@ Examples:
   --ssh              plain ssh even when mosh is on in the settings
   --plain            skip the tmux or zellij session of the host
   -F <forward>|all   also open saved forwards
+  --local-commands   run the commands of sshr hooks for this host, also on
+                     when local_commands is on in the settings
+  --no-local-commands  do not run them even when the setting is on
 
 A destination that is not saved works too: user@host[:port] or
 ssh://user@host[:port] connects once with the default keys, the agent or a
@@ -237,15 +253,49 @@ setting, --listed-hosts-only and --all-hosts for one run). allow lists a
 host for where it points now, a host that points elsewhere later, for
 example changed on another device, is refused until it is allowed again.
 The list is in settings.json and never syncs`},
+	{name: "hwkey", usage: `sshr hwkey status
+sshr hwkey require <host>... | --all
+sshr hwkey off [<host>...]
+sshr hwkey check <host>`, short: "hosts that connect only with a key on a hardware token",
+		details: `require lists hosts that connect only with a key on a FIDO token (a
+handle from sshr key new --sk as the key file, or an sk key of the agent),
+--all asks it of every host. Such a host is refused when it would log in
+with a password or a key outside a token, ssh gets only sk key types, no
+password and no shared connection, there is no way around it for one
+connect. off takes hosts off the list, without hosts it turns the
+requirement off. The list is in settings.json and never syncs, a stolen
+sync device cannot turn it off. The server decides in the end, sshr only
+keeps itself from logging in another way. check reads authorized_keys on
+the host, lists the keys that are not on a token and prints the lines of
+sshd_config that turn off passwords and the other ways in, keys sshd
+takes from other files or a command are not read, it changes nothing
+there`},
+	{name: "hooks", usage: `sshr hooks list
+sshr hooks on|off
+sshr hooks set <host> before|after <command>
+sshr hooks unset <host> [before|after]`, short: "commands to run on this machine around a session",
+		details: `A command before runs before ssh starts, to bring a VPN up or unlock a
+key, if it fails sshr does not connect, a command after runs when the
+session ends and gets its exit code in SSHR_EXIT. Both run through the
+shell of this machine with SSHR_HOST_NAME, SSHR_HOST, SSHR_PORT, SSHR_USER
+and SSHR_HOST_ID set. They are off until sshr hooks on (local_commands
+setting, connect --local-commands for one run). They live in settings.json,
+which never syncs, no import, sshr serve, sshr mcp or extension sets them,
+so a command never comes from another machine
+
+Examples:
+  sshr hooks set web before "wg-quick up office"
+  sshr hooks set web after "wg-quick down office"
+  sshr hooks on`},
 	{name: "vault", usage: "sshr vault status|passphrase|keychain", short: "keep the vault key in the keychain or under a passphrase",
 		details: `The vault key seals saved passwords and keys stored in sshr. It lives in
-the system keychain, passphrase moves a copy into ~/.sshr/vault/vault-key.json
+the system keychain, passphrase moves it into ~/.sshr/vault/vault-key.json
 wrapped with a passphrase (Argon2id) for a machine without a keychain, off by
 default: the passphrase is asked once per run, a forgotten one loses every
-saved secret, and the file can be attacked offline, keychain moves the key
-back and removes the file, the keys of the sync device move along, a key
-already in the keychain stays there, so on such a machine the passphrase
-does not stop a switch back to the keychain
+saved secret, and the file can be attacked offline, the copy in the keychain
+is removed, a keychain that is locked keeps it and sshr says so, keychain
+moves the key back and removes the file, the keys of the sync device move
+along
 
 Examples:
   sshr vault status

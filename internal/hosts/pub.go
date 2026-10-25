@@ -16,12 +16,20 @@ import (
 // none was given
 var ErrKeyPassphrase = errors.New("key_passphrase")
 
+// ErrHardwareKeyInVault means the pasted key is the handle of a key on a
+// FIDO token, the agent of sshr cannot sign with it, ssh needs the file
+// and the token
+var ErrHardwareKeyInVault = errors.New("this key lives on a hardware token, its file is only a handle, save it as a key file (sshr add -k, sshr edit -k) instead of pasting it")
+
 // prepareVaultKey checks a pasted private key and turns it into the form
 // that is sealed, a passphrase-protected key is opened with h.KeyPassphrase
 // and kept without it, the vault encryption replaces the passphrase, the
 // public key is kept in the clear for -i and for showing which key it is
 func prepareVaultKey(h *Host) error {
 	data := []byte(strings.TrimSpace(string(h.KeyData)) + "\n")
+	if HardwareKeyType(data) != "" {
+		return ErrHardwareKeyInVault
+	}
 	raw, err := ssh.ParseRawPrivateKey(data)
 	var missing *ssh.PassphraseMissingError
 	if errors.As(err, &missing) {

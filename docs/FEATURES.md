@@ -90,6 +90,36 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** two commands, the install logs in the way the host already does, a saved password or a jump host included
 - **Why this way:** ssh-keygen asks for the passphrase, so it never reaches a command line, an existing key is never overwritten, the public key goes to the server on stdin, so no quoting can break it, the remote script adds it once with umask 077, `--use` checks the private key is there before anything changes
 
+### Hosts that connect only with a hardware key
+- **What:** `sshr hwkey require <host>...|--all` makes hosts connect only with a key on a FIDO token, a host that would log in another way is refused with the reason, `sshr hwkey status` shows which hosts are ready, `sshr hwkey off` lifts it, `sshr hwkey check <host>` reads authorized_keys on the server, lists the keys that are not on a token and prints the sshd_config lines that turn off passwords and the other ways in, it only reads, keys sshd takes from other AuthorizedKeysFile paths, AuthorizedKeysCommand or TrustedUserCAKeys are named and not read
+- **What for:** with a key on a token in place, a password, a saved software key or a forgotten key file would still let sshr in without the token
+- **Why it helps:** for these hosts sshr never logs in without the token in reach and a touch, ssh is kept to sk key types and cannot fall back to a password or another key
+- **Why this way:** the list lives in settings.json, which never syncs, so a stolen sync device cannot turn it off, it is bound to the host ID, a host repointed elsewhere keeps it, ssh gets `-o` options that win over ssh_config and no ControlMaster, a shared connection could have logged in another way, there is no override for one connect, a token that is lost needs a second one or a key kept offline, which is the job of the server
+
+### The agent of sshr answers only its own ssh
+- **What:** the ssh agent that serves a key kept in sshr, 1Password or Bitwarden during a session accepts a connection only from sshr itself or a process it started (ssh, the ssh of a jump host, mosh), on Linux and macOS
+- **What for:** the socket path is in the environment of ssh, any program of the same user that found it could ask the agent to sign and log in elsewhere with the key while the session runs
+- **Why it helps:** a script or tool running as you outside sshr gets no use of the key, a program sshr started still can, in a long running `sshr serve` or `sshr mcp` the local commands of hosts and extension commands are such programs
+- **Why this way:** the kernel names the process at the other end of the socket (SO_PEERCRED on Linux, LOCAL_PEERPID on macOS) and sshr walks up its parents to its own process, 32 steps at most, a peer that cannot be named is refused, a Windows named pipe gives no such answer through the library sshr uses, there any process of the user is let in as before
+
+### The vault key forgotten when idle
+- **What:** with the system keychain a running sshr zeroes and forgets its cached vault key 15 minutes after its last use, the next use reads it from the keychain again without asking, `"vault_idle_minutes"` sets the time, below 0 keeps it for the whole run, under a passphrase the key is kept for the whole run
+- **What for:** the window, `sshr serve` and `sshr mcp` run for hours, the key they read once stayed in memory all that time
+- **Why it helps:** most of the time a long running sshr holds no cached key that a memory dump or a reader of its memory could take, copies inside ciphers made from it may still be on the heap until they are collected
+- **Why this way:** a timer per process that the use of the key moves on, the bytes are zeroed before they are let go, a cipher made from the key keeps a copy of its own, so a seal in progress finishes, with the system keychain reading the key again is silent, under a passphrase asking again would block sshr serve and sshr mcp with no one at the terminal, so that mode keeps the key
+
+### Process memory closed to other programs
+- **What:** every sshr process (the CLI, the window, the askpass helper, `sshr mcp` and `sshr serve`) makes itself not dumpable on Linux and refuses debuggers on macOS at start, and sets no core files, `SSHR_ALLOW_DEBUG=1` skips it
+- **What for:** the vault key and the passwords sshr opened sit in its memory while it runs, any program of the same user could read them with ptrace or `/proc/pid/mem`, a crash could write them to a core file
+- **Why it helps:** a script or tool running as you no longer reads secrets out of a running sshr without root, and a crash leaves no copy on disk
+- **Why this way:** one system call at start (`prctl(PR_SET_DUMPABLE, 0)`, `ptrace(PT_DENY_ATTACH)`, the soft `RLIMIT_CORE` set to 0), ssh and the shell of a session started from sshr are dumpable again after exec and may raise their core limit, the hard one stays, Windows has no such switch for processes of the same user
+
+### Keys on a hardware token
+- **What:** `sshr key new --sk [--resident] [--verify-required]` makes a key on a FIDO token (YubiKey and the like) with ssh-keygen, ed25519-sk first and ecdsa-sk when the token has no Ed25519, the handle file is a key file like any other (`-k`), `sshr show` names it a hardware key, pasting a handle into sshr is refused with the reason
+- **What for:** a key file in `~/.ssh` or in a backup can be copied and used anywhere, a key that never leaves a token cannot
+- **Why it helps:** a stolen laptop, backup or synced folder gives no working key, every login needs the token and a touch, with `--verify-required` its PIN too, `--resident` brings the key to a new machine with `ssh-keygen -K`
+- **Why this way:** OpenSSH talks to the token itself (8.2 and newer on both sides, 8.9 for the OpenSSH of Windows), so sshr only runs ssh-keygen with the right options and passes the handle with `-i`, the agent of sshr cannot sign with a token, so a handle is never sealed into the vault, the type is read from the public part of the file, which is not encrypted
+
 ### Saved passwords and ask mode
 - **What:** a password sealed with XChaCha20-Poly1305 under a key from the system keychain, or nothing stored and ssh asks each time
 - **What for:** routers, NAS boxes, cheap VPS panels and client machines where a key is not an option
@@ -170,6 +200,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the shell survives network changes and typing echoes at once
 - **Why this way:** off by default, it needs UDP ports and mosh-server, carries no forwards and has no Windows client
 
+### Local commands before and after connect
+- **What:** `sshr hooks set <host> before|after <command>` runs a command on this machine before ssh starts and after the session ends
+- **What for:** a host behind an office VPN or a key that needs unlocking, without typing the same command before every connect
+- **Why it helps:** a failing command before stops the connect instead of a long ssh timeout, the command after gets the exit code of the session in `SSHR_EXIT` and can take the VPN down again
+- **Why this way:** off until `sshr hooks on` or `connect --local-commands` since they run as the user, the commands live in settings.json, which never syncs, and nothing but `sshr hooks` writes them, so no other device, import, assistant or extension can put a command on this machine
+
 ### Health check
 - **What:** a TCP connect and the SSH banner with the round trip, in `sshr ping`, `list --ping` and a dot in the app, off by default
 - **What for:** know which servers are down before waiting on an ssh timeout
@@ -201,6 +237,24 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What for:** the same list on every machine without drift
 - **Why it helps:** add a host once and it appears everywhere, a host changed on two devices keeps both versions
 - **Why this way:** the server stores only ciphertext and cannot read hosts, add a device or rewrite history, devices are approved by comparing fingerprints, keys stored in sshr stay on their device
+
+### Primary device of a sync account
+- **What:** the device that made the account is its primary device, only it approves and removes devices, `sshr sync status` marks it
+- **What for:** a stolen or hostile device must not be able to throw the owner's devices out of the account
+- **Why it helps:** every device refuses a manifest that adds or removes a device or changes the vault key unless the primary device signed it, the owner's devices keep their hosts instead of taking such a change
+- **Why this way:** the primary is a plaintext field of the signed manifest, so a device that was offline through key changes can still check every step, the manifest format goes to 2 so an older sshr stops with "update sshr" instead of taking a removal from any device, an account made before gets the first device that syncs with this version as primary
+
+### Recovery kit
+- **What:** `sshr sync recovery create` prints a kit once, `sshr sync recovery restore` brings the account to a new machine from it when every device is lost
+- **What for:** a lost and a broken laptop must not take the hosts of every server with them
+- **Why it helps:** the new machine gets every host and becomes the primary device, a thief with the paper only claims the account, the owner's devices warn and the primary device cancels during the wait
+- **Why this way:** the kit is a device of the account that rotations reach like any other, the rules let it only claim and, after the wait (7 days by default), hand the account to one new device, sshr-sync and the owner's devices check the wait with their own clocks, an anchor entry only the seed opens shows the fresh machine that the account is the real one, an optional passphrase (Argon2id) makes a photo of the paper useless, typos are caught group by group
+
+### Merging changes made on two devices
+- **What:** a host changed on two devices before they synced is merged field by field, a rename on one and a new tag on the other give one host with both
+- **What for:** editing on a laptop and a desktop without ending up with `(conflict …)` copies to clean up
+- **Why it helps:** a copy appears only when both devices changed the same thing differently, the merged host is pushed once and the next syncs send nothing
+- **Why this way:** address, port, user, jump, gateway, password and key move together from one side, so a password never meets an address the other device chose, name and session merge per field, tags as a set, forwards by name, the version both started from is kept in `~/.sshr/sync/base/` sealed as on the server, without it the old copy rule applies
 
 ### Sync through an S3 bucket
 - **What:** `sshr sync init --backend s3` keeps the encrypted account in an S3 bucket (AWS S3, Cloudflare R2) instead of on `sshr-sync`
@@ -265,7 +319,7 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **What for:** your own commands under the same word `sshr` without a fork or a change of sshr, a deploy helper, a report of your hosts, a wrapper for your cloud
 - **Why it helps:** the tools around your hosts live in one place, a built-in command never changes whatever you install, and the extension can read your hosts back with `sshr list --json`
 - **Community catalog:** as Obsidian does with community plugins, it is off until `sshr ext community on`, which says that nobody reviews the code and the sshr authors take no responsibility for it, then `sshr ext search [words]` lists the catalog and `sshr ext install <name>` takes the git address and the commit from it, so what you install is the commit the entry was added with and never a newer one pushed later, the catalog is the file `extensions/catalog.json` in the sshr repository, an author adds an entry with a pull request and the code stays in the author's own repository, the catalog is read only when one of those runs, `ext_catalog` in settings points at your own
-- **Import sources:** an extension of kind `import` prints hosts as JSON and `sshr ext import <name>` saves them, for Remmina (`extensions/remmina`), PuTTY on Linux and macOS (`extensions/putty`), Termius or a company inventory, only a fixed list of fields is read and never a password or key, a second import skips hosts that are already there
+- **Import sources:** an extension of kind `import` prints hosts as JSON and `sshr ext import <name>` saves them, for Remmina (`extensions/remmina`), PuTTY on Linux, macOS and Windows (`extensions/putty`, on Windows the registry or a `.reg` file), MobaXterm and WinSCP on Windows (`extensions/mobaxterm`, `extensions/winscp`), Termius or a company inventory, only a fixed list of fields is read and never a password or key, a second import skips hosts that are already there
 - **Why this way:** an executable with a fixed protocol, not a Go plugin or WASM, so any language works and a crash stays in its own process, sshr asks before it installs and shows the manifest, the command, the commit and a hash, every file of the folder is pinned and a changed file stops the run until you install it again, the extension never gets a password, key or secret reference or the askpass and password manager variables of sshr, it is still a program that runs as you, which is said in `sshr ext install` and in [SECURITY.md](SECURITY.md)
 
 ### MCP server for AI assistants
