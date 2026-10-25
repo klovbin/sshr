@@ -288,7 +288,7 @@ Examples:
   sshr hooks set web after "wg-quick down office"
   sshr hooks on`},
 	{name: "vault", usage: `sshr vault status|passphrase|keychain|recovery|slots
-sshr vault add-token [--label <name>]
+sshr vault add-token [--label <name>] [--pin]
 sshr vault remove-slot <id>`, short: "keep the vault key in the keychain, under a passphrase or on a security key",
 		details: `The vault key seals saved passwords and keys stored in sshr. It lives in
 the system keychain, passphrase moves it into ~/.sshr/vault/vault-key.json
@@ -309,7 +309,9 @@ passphrase or the recovery code, the first key comes with a recovery code,
 slots lists what opens the vault, remove-slot removes one, a passphrase slot
 can go once a key and a recovery code are there, then a copy of ~/.sshr
 opens nothing without the key, the last way in that is not a key stays
-unless two keys are there
+unless two keys are there, --pin asks the PIN of the key every time the
+vault opens, a stolen key then opens nothing without its PIN, a key with a
+PIN set may ask it once to make its credential
 
 Examples:
   sshr vault status

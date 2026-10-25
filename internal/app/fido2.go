@@ -58,7 +58,7 @@ var fido2Say = func(msg string) {
 
 // runFIDO2 runs tool with input in a parameter file, device last, and
 // gives the lines it printed
-func runFIDO2(wait time.Duration, tool string, input []string, args []string, device string) ([]string, error) {
+func runFIDO2(wait time.Duration, tool string, input []string, args []string, device, pin string) ([]string, error) {
 	dir, err := os.MkdirTemp("", "sshr-fido2-")
 	if err != nil {
 		return nil, err
@@ -80,6 +80,11 @@ func runFIDO2(wait time.Duration, tool string, input []string, args []string, de
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	// without a terminal the tools read the PIN from stdin, without a PIN
+	// stdin stays empty and a question for one ends at once
+	if pin != "" {
+		cmd.Stdin = strings.NewReader(pin + "\n")
+	}
 	err = cmd.Run()
 	switch {
 	case sig.Err() != nil:
@@ -161,13 +166,17 @@ func randomB64(n int) (string, error) {
 // of salt when salt is set, touch asks for user presence, the output is
 // read strictly, a line missing or out of place is an error and never a
 // secret
-func fido2Assert(device, rp string, cred, salt []byte, touch, uv bool) ([]byte, error) {
+func fido2Assert(device, rp string, cred, salt []byte, touch, uv bool, pin string) ([]byte, error) {
 	cdh, err := randomB64(32)
 	if err != nil {
 		return nil, err
 	}
 	input := []string{cdh, rp, base64.StdEncoding.EncodeToString(cred)}
-	args := []string{"-G", "-t", fmt.Sprintf("up=%t", touch), "-t", fmt.Sprintf("uv=%t", uv)}
+	args := []string{"-G", "-t", fmt.Sprintf("up=%t", touch), "-t", "uv=false"}
+	if uv {
+		// -v asks the PIN and user verification together
+		args = []string{"-G", "-t", fmt.Sprintf("up=%t", touch), "-v"}
+	}
 	want := 4
 	if salt != nil {
 		input = append(input, base64.StdEncoding.EncodeToString(salt))
@@ -178,7 +187,7 @@ func fido2Assert(device, rp string, cred, salt []byte, touch, uv bool) ([]byte, 
 	if touch {
 		wait = fido2TouchWait
 	}
-	lines, err := runFIDO2(wait, "fido2-assert", input, args, device)
+	lines, err := runFIDO2(wait, "fido2-assert", input, args, device, pin)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +221,7 @@ func askFIDO2(r vault.TokenRequest) ([]byte, error) {
 	}
 	var failed error
 	for _, dev := range devs {
-		if _, err := fido2Assert(dev, r.RP, r.Cred, nil, false, false); err != nil {
+		if _, err := fido2Assert(dev, r.RP, r.Cred, nil, false, false, ""); err != nil {
 			if !noCredential(err) {
 				failed = err
 			}
@@ -222,8 +231,18 @@ func askFIDO2(r vault.TokenRequest) ([]byte, error) {
 		if name == "" {
 			name = dev
 		}
+		pin := ""
+		if r.UV {
+			if pin, err = askPIN(dev, name); err != nil {
+				return nil, err
+			}
+		}
 		fido2Say("touch the security key " + name + " to open the vault")
-		return fido2Assert(dev, r.RP, r.Cred, r.Salt, true, r.UV)
+		secret, err := fido2Assert(dev, r.RP, r.Cred, r.Salt, true, r.UV, pin)
+		if r.UV {
+			err = pinFailure(err)
+		}
+		return secret, err
 	}
 	if failed != nil {
 		return nil, fmt.Errorf("%w: no plugged security key answered as one that holds the credential of this vault: %v", vault.ErrNoToken, failed)
@@ -231,14 +250,99 @@ func askFIDO2(r vault.TokenRequest) ([]byte, error) {
 	return nil, fmt.Errorf("%w: none of the plugged security keys holds the credential of this vault", vault.ErrNoToken)
 }
 
+// fido2PIN asks the PIN of a security key on the terminal or from the
+// program in SSHR_PIN_ASKPASS, never from SSHR_ASKPASS, a helper that
+// prints the vault passphrase would hand it to the key as a PIN and burn
+// its tries, a key blocks itself after a few wrong PINs, so it is asked
+// once and never tried again on its own
+var fido2PIN = func(name string) (string, error) {
+	prompt := "PIN of the security key " + name + ": "
+	var pin string
+	var err error
+	switch prog := os.Getenv("SSHR_PIN_ASKPASS"); {
+	case prog != "":
+		ctx, cancel := context.WithTimeout(context.Background(), askpassWait)
+		defer cancel()
+		var out []byte
+		if out, err = exec.CommandContext(ctx, prog, prompt).Output(); err == nil {
+			pin = strings.TrimRight(string(out), "\r\n")
+		}
+	case NoTerminalPrompts:
+		err = errors.New("the vault needs the PIN of its security key and there is no terminal here, set SSHR_PIN_ASKPASS to a program that prints it")
+	default:
+		pin, err = AskTerminal(prompt)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", vault.ErrTokenPIN, err)
+	}
+	if len(pin) < 4 || len(pin) > 63 || strings.ContainsAny(pin, "\r\n") {
+		return "", fmt.Errorf("%w: a PIN of a security key is one line of 4 to 63 characters", vault.ErrTokenPIN)
+	}
+	return pin, nil
+}
+
+// fido2PINRetries reads how many PIN tries the key has left, ok is false
+// when it does not say
+func fido2PINRetries(device string) (n int, ok bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), fido2QuickWait)
+	defer cancel()
+	cmd, err := fido2Command(ctx, "fido2-token", "-I", "--", device)
+	if err != nil {
+		return 0, false
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, found := strings.CutPrefix(line, "pin retries: "); found {
+			if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// fido2PINMinRetries is the fewest PIN tries a key may have left for sshr
+// to ask its PIN, below that the person unlocks it with its own tools
+const fido2PINMinRetries = 4
+
+// askPIN asks the PIN of the key at device, refused when the key has few
+// tries left
+func askPIN(device, name string) (string, error) {
+	if n, ok := fido2PINRetries(device); ok && n < fido2PINMinRetries {
+		return "", fmt.Errorf("%w: the security key %s has %d PIN tries left, sshr does not spend them, enter the PIN with the tools of the key first", vault.ErrTokenPIN, name, n)
+	}
+	return fido2PIN(name)
+}
+
+// pinFailure marks the error of a tool that refused the PIN as one, the
+// vault then asks no PIN again in this run
+func pinFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	for _, s := range []string{"PIN_INVALID", "PIN_AUTH_BLOCKED", "PIN_BLOCKED", "invalid PIN length"} {
+		if strings.Contains(err.Error(), s) {
+			return fmt.Errorf("%w: %v", vault.ErrTokenPIN, err)
+		}
+	}
+	return err
+}
+
+// pinAsked tells the error of a tool that wanted a PIN and got none
+func pinAsked(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "invalid PIN length") || strings.Contains(err.Error(), "readpassphrase") || strings.Contains(err.Error(), "PIN_REQUIRED"))
+}
+
 // enrolFIDO2 makes a credential with hmac-secret on the one plugged token
-// and asks it for its first secret, two touches
+// and asks it for its first secret, two touches, a key with a PIN set may
+// want the PIN to make a credential, it is asked then, with uv the PIN is
+// asked from the start and every time the vault opens
 func enrolFIDO2(rp string, salt []byte, uv bool, known [][]byte) (cred, secret []byte, err error) {
 	if runtime.GOOS == "windows" {
 		return nil, nil, errors.New("a key on a FIDO2 token opens the vault on Linux and macOS, not on Windows yet")
-	}
-	if uv {
-		return nil, nil, errors.New("a PIN on the token is not supported yet, the key is touched only")
 	}
 	devs, err := fido2Devices()
 	if err != nil {
@@ -250,7 +354,7 @@ func enrolFIDO2(rp string, salt []byte, uv bool, known [][]byte) (cred, secret [
 	// the same key twice would pass for two keys and let the last other
 	// way in go
 	for _, c := range known {
-		if _, err := fido2Assert(devs[0], rp, c, nil, false, false); err == nil {
+		if _, err := fido2Assert(devs[0], rp, c, nil, false, false, ""); err == nil {
 			return nil, nil, errors.New("this security key opens the vault already, plug in another one")
 		}
 	}
@@ -262,10 +366,29 @@ func enrolFIDO2(rp string, salt []byte, uv bool, known [][]byte) (cred, secret [
 	if err != nil {
 		return nil, nil, err
 	}
+	pin := ""
+	args := []string{"-M", "-h"}
+	if uv {
+		// -t pin=true sends the PIN at once, -v asks user verification
+		// first, which a CTAP 2.0 key without a PIN token refuses
+		args = append(args, "-t", "pin=true")
+		if pin, err = askPIN(devs[0], devs[0]); err != nil {
+			return nil, nil, err
+		}
+	}
+	input := []string{cdh, rp, "sshr vault", user}
 	fido2Say("touch the security key to make its credential for the vault")
-	lines, err := runFIDO2(fido2TouchWait, "fido2-cred", []string{cdh, rp, "sshr vault", user}, []string{"-M", "-h"}, devs[0])
+	lines, err := runFIDO2(fido2TouchWait, "fido2-cred", input, args, devs[0], pin)
+	if pinAsked(err) && pin == "" {
+		// the key asked its PIN before any touch, the touch is still to come
+		if pin, err = askPIN(devs[0], devs[0]); err != nil {
+			return nil, nil, err
+		}
+		fido2Say("touch the security key to make its credential for the vault")
+		lines, err = runFIDO2(fido2TouchWait, "fido2-cred", input, args, devs[0], pin)
+	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, pinFailure(err)
 	}
 	// client data hash, relying party, format, authenticator data,
 	// credential ID, then signature and certificate
@@ -276,6 +399,9 @@ func enrolFIDO2(rp string, salt []byte, uv bool, known [][]byte) (cred, secret [
 		return nil, nil, errors.New("fido2-cred gave no credential ID")
 	}
 	fido2Say("touch the security key again to get its secret")
-	secret, err = fido2Assert(devs[0], rp, cred, salt, true, false)
-	return cred, secret, err
+	if !uv {
+		pin = ""
+	}
+	secret, err = fido2Assert(devs[0], rp, cred, salt, true, uv, pin)
+	return cred, secret, pinFailure(err)
 }

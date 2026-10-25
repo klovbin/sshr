@@ -37,6 +37,15 @@ const (
 // vault is then opened another way
 var ErrNoToken = errors.New("no_token")
 
+// ErrTokenPIN means the PIN of a security key was wrong, could not be
+// asked or the key holds its PIN blocked, a key counts wrong PINs and
+// blocks itself, so a process that met it asks no PIN again
+var ErrTokenPIN = errors.New("token_pin")
+
+// pinHold is set after a PIN failure, slots that need the PIN are not
+// asked again in this process, vaultMu
+var pinHold bool
+
 // fido2Slot wraps the key with HKDF of the hmac-secret the token gives for
 // Salt, Cred names the credential, UV is fixed at enrolment, a token gives
 // another secret with user verification than without
@@ -142,6 +151,9 @@ func openTokenSlots(f *keyFile) ([]byte, error) {
 		return nil, fmt.Errorf("%w: the security key gave no answer a moment ago, it is asked again in %s", ErrNoToken, tokenCooldown)
 	}
 	key, err := askTokenSlots(f)
+	if errors.Is(err, ErrTokenPIN) {
+		pinHold = true
+	}
 	if errors.Is(err, ErrNoToken) {
 		tokenFailedAt = time.Now()
 	} else if err == nil {
@@ -159,6 +171,10 @@ func askTokenSlots(f *keyFile) ([]byte, error) {
 	for _, s := range slots {
 		if len(s.Salt) != tokenSecretLen || len(s.Cred) == 0 {
 			last = fmt.Errorf("the token slot %s is damaged", s.ID)
+			continue
+		}
+		if s.UV && pinHold {
+			last = fmt.Errorf("%w: a PIN of the security key failed in this run, it is not asked again, start sshr again", ErrTokenPIN)
 			continue
 		}
 		secret, err := askToken(TokenRequest{RP: s.RP, Cred: s.Cred, Salt: s.Salt, UV: s.UV, Label: s.Label})

@@ -87,13 +87,14 @@ func VaultSlots() ([]VaultSlot, error) { return vault.Slots() }
 const vaultLabelMax = 64
 
 // AddVaultToken adds the one plugged FIDO2 token to the vault kept in
-// vault-key.json, confirm shows the recovery code the first token brings
-func AddVaultToken(label string, confirm func(code string) error) error {
+// vault-key.json, with pin the vault asks the PIN of the key every time it
+// opens, confirm shows the recovery code the first token brings
+func AddVaultToken(label string, pin bool, confirm func(code string) error) error {
 	label = cleanText(label)
 	if len(label) > vaultLabelMax {
 		return fmt.Errorf("the label is longer than %d bytes", vaultLabelMax)
 	}
-	return vault.AddToken(enrolFIDO2, false, label, confirm)
+	return vault.AddToken(enrolFIDO2, pin, label, confirm)
 }
 
 // RemoveVaultSlot removes a slot of vault-key.json, never the last way in

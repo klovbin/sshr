@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -58,8 +59,8 @@ func useFakeToken(t *testing.T) *fakeToken {
 	f := &fakeToken{device: bytes.Repeat([]byte{0x42}, 32), present: true}
 	old := askToken
 	SetToken(f.ask)
-	tokenFailedAt = time.Time{}
-	t.Cleanup(func() { askToken, tokenFailedAt = old, time.Time{} })
+	tokenFailedAt, pinHold = time.Time{}, false
+	t.Cleanup(func() { askToken, tokenFailedAt, pinHold = old, time.Time{}, false })
 	return f
 }
 
@@ -238,5 +239,28 @@ func TestTokenVaultIdleTime(t *testing.T) {
 	idleFor, idleLoaded = 0, false
 	if d := lockedIdle(); d != 0 {
 		t.Errorf("a token vault without a set time drops its key after %s", d)
+	}
+}
+
+// after a PIN failure a slot that needs the PIN is not asked again in this
+// run, a key counts wrong PINs and blocks itself
+func TestTokenPINHold(t *testing.T) {
+	answer := "correct horse battery"
+	passphraseVault(t, &answer)
+	tok := useFakeToken(t)
+	if err := AddToken(tok.enrol, true, "yubi", func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	SetToken(func(TokenRequest) ([]byte, error) {
+		tok.asked++
+		return nil, fmt.Errorf("%w: FIDO_ERR_PIN_INVALID", ErrTokenPIN)
+	})
+	forgetVaultKey()
+	Key()
+	asked := tok.asked
+	forgetVaultKey()
+	Key()
+	if tok.asked != asked {
+		t.Error("the PIN was asked again after it failed")
 	}
 }
