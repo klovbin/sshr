@@ -228,8 +228,8 @@ func TestPassphraseFileTighterLimits(t *testing.T) {
 	}
 	resetVault(t)
 	path, _ := passphraseFilePath()
-	os.WriteFile(path, make([]byte, 5000), 0o600)
-	if _, err := readWrappedKey(); err == nil || !strings.Contains(err.Error(), "larger") {
+	os.WriteFile(path, make([]byte, keyFileMax+1), 0o600)
+	if _, _, err := readKeyFile(); err == nil || !strings.Contains(err.Error(), "larger") {
 		t.Errorf("a big file: %v", err)
 	}
 }
