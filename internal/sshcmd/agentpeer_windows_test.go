@@ -41,7 +41,7 @@ func TestFromOwnChildOnWindows(t *testing.T) {
 	if err != nil || !ok || pid != child.Process.Pid {
 		t.Fatalf("peer %d %v %v, the child is %d", pid, ok, err, child.Process.Pid)
 	}
-	if err := checkAgentPeer(c); err != nil {
+	if err := checkAgentPeer(c, os.Getpid()); err != nil {
 		t.Errorf("a child of sshr was refused: %v", err)
 	}
 	if p, err := parentPID(os.Getpid()); err != nil || p == 0 {
