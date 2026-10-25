@@ -23,6 +23,7 @@ const module = "sshr.dev/"
 var allowed = map[string][]string{
 	"assets":              {},
 	"internal/fileio":     {},
+	"internal/handcode":   {},
 	"internal/record":     {},
 	"internal/settings":   {"internal/fileio", "internal/record"},
 	"internal/vault":      {"internal/fileio", "internal/settings"},
@@ -37,7 +38,7 @@ var allowed = map[string][]string{
 	"internal/clip":       {},
 	"internal/i18n":       {},
 	"internal/archtest":   {},
-	"internal/syncclient": {"internal/fileio", "internal/record", "internal/vault", "internal/hosts", "internal/syncproto"},
+	"internal/syncclient": {"internal/fileio", "internal/record", "internal/vault", "internal/hosts", "internal/syncproto", "internal/handcode"},
 	"internal/s3store":    {"internal/syncclient"},
 	"internal/davstore":   {"internal/syncclient"},
 	"internal/supastore":  {"internal/syncclient"},
@@ -55,11 +56,11 @@ var allowed = map[string][]string{
 // noExec lists the packages that start no program themselves, the GUI,
 // the assistant and the sync server ask the core for anything that runs
 var noExec = []string{"internal/ui", "internal/mcp", "internal/syncserver", "internal/syncclient",
-	"internal/syncproto", "internal/fileio", "internal/record", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/s3store", "internal/davstore", "internal/supastore", "internal/audit", "internal/i18n", "assets", "cmd/sshr-sync"}
+	"internal/syncproto", "internal/fileio", "internal/record", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/s3store", "internal/davstore", "internal/supastore", "internal/audit", "internal/i18n", "internal/handcode", "assets", "cmd/sshr-sync"}
 
 // phoneCore lists the packages a phone build links, os/exec is not in
 // them even through another package, what runs ssh stays in app
-var phoneCore = []string{"internal/syncproto", "internal/syncclient", "internal/s3store", "internal/davstore", "internal/supastore", "internal/fileio", "internal/record", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/i18n", "internal/syncserver", "cmd/sshr-sync"}
+var phoneCore = []string{"internal/syncproto", "internal/syncclient", "internal/s3store", "internal/davstore", "internal/supastore", "internal/fileio", "internal/record", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/i18n", "internal/handcode", "internal/syncserver", "cmd/sshr-sync"}
 
 // gioOnly is the one package that may import Gio
 const gioOnly = "internal/ui"
