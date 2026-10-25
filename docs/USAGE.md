@@ -72,7 +72,7 @@ sshr vault keychain      # back to the system keychain, the file is removed
 - off by default: the passphrase is asked once per run, a forgotten one loses every saved secret, the file can be attacked offline with a weak passphrase (8 characters at least)
 - it is asked on the terminal, or from the program in `SSHR_ASKPASS`, `sshr mcp` never asks on its terminal, `SSHR_VAULT=keychain|passphrase` picks the mode for one run
 - the keys of the sync device move along into `~/.sshr/vault/secrets.json`, each sealed with the vault key, so a machine without a keychain syncs too, `keychain` moves them back
-- with the system keychain a running sshr (the window, `sshr serve`, `sshr mcp`) forgets the vault key 15 minutes after its last use and reads it from the keychain again without asking when it is needed, `"vault_idle_minutes"` in settings.json changes the time, a value below 0 keeps the key for the whole run, under a passphrase the key is kept for the whole run, asking again would stop `sshr serve` and `sshr mcp` with no one to answer
+- with the system keychain a running sshr (the window, `sshr serve`, `sshr mcp`) forgets the vault key 15 minutes after its last use and reads it from the keychain again without asking when it is needed, `"vault_idle_minutes"` in settings.json changes the time, a value below 0 keeps the key for the whole run, under a passphrase the key is kept for the whole run, with a security key in the vault a `vault_idle_minutes` above 0 drops it there too and the next use asks for a touch, asking again would stop `sshr serve` and `sshr mcp` with no one to answer
 
 ## Keys stored in sshr
 

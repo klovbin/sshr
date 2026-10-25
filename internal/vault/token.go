@@ -295,7 +295,11 @@ func AddToken(enrol TokenEnrolment, uv bool, label string, confirm func(code str
 		// asked past the pause, the person is at the key right now
 		return askTokenSlots(&keyFile{Version: keyFileVersion, Slots: written})
 	}
-	return writeKeyFileChecked(path, old, b, check, key)
+	if err := writeKeyFileChecked(path, old, b, check, key); err != nil {
+		return err
+	}
+	slotsChanged()
+	return nil
 }
 
 // terminalText puts ? for control characters, a label read from the file

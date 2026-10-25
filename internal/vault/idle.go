@@ -28,9 +28,11 @@ var (
 )
 
 // keyIdle is how long the key is kept after its last use, 0 for the whole
-// run, always 0 under a passphrase, read once per process, a settings file
-// that does not read gives the default this time and is read again next
-// time, vaultMu is held
+// run, read once per process, a settings file that does not read gives the
+// default this time and is read again next time, vaultMu is held, a vault
+// in vault-key.json keeps the key for the whole run, sshr serve and sshr
+// mcp have no one to ask the passphrase, a vault with a token slot drops
+// it when vault_idle_minutes is set, the key can be touched again
 func keyIdle() time.Duration {
 	if idleOverride != 0 {
 		return idleOverride
@@ -39,8 +41,21 @@ func keyIdle() time.Duration {
 		return idleFor
 	}
 	if Mode() == ModePassphrase {
+		st, err := settings.Load()
+		if err != nil || st.VaultIdleMinutes <= 0 {
+			// the key is kept, a broken settings file is read again next time
+			idleFor, idleLoaded = 0, err == nil
+			return 0
+		}
+		token, err := tokenVault()
+		if err != nil {
+			return 0
+		}
 		idleFor, idleLoaded = 0, true
-		return 0
+		if token {
+			idleFor = st.VaultIdle()
+		}
+		return idleFor
 	}
 	st, err := settings.Load()
 	if err != nil {
@@ -86,4 +101,18 @@ func stopIdle() {
 		idleTimer.Stop()
 		idleTimer = nil
 	}
+}
+
+// tokenVault tells whether vault-key.json has a token slot
+func tokenVault() (bool, error) {
+	_, kf, err := readKeyFile()
+	return err == nil && hasSlot(kf, slotFIDO2), err
+}
+
+// slotsChanged makes the idle time read again, a token slot added or
+// removed in this run changes it
+func slotsChanged() {
+	vaultMu.Lock()
+	idleLoaded = false
+	vaultMu.Unlock()
 }
