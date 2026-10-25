@@ -200,9 +200,11 @@ func TestPrimaryAfterAFailedPull(t *testing.T) {
 	blob := filepath.Join(filepath.Dir(w.manifestDir()), "blobs", w.a.st.Entries[web.ID].Blob)
 	saved, err := os.ReadFile(blob)
 	must(t, err)
-	must(t, os.Remove(blob))
+	// a blob that does not match its hash stops the apply, a missing one
+	// only leaves its host out
+	must(t, os.WriteFile(blob, []byte("not the blob"), 0o600))
 	if err := w.b.Pull(); err == nil {
-		t.Fatal("the pull did not fail without the blob")
+		t.Fatal("the pull did not fail with a damaged blob")
 	}
 	must(t, os.WriteFile(blob, saved, 0o600))
 	must(t, w.b.Pull())

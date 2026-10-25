@@ -1358,12 +1358,16 @@ func (c *Client) apply(m *syncproto.Manifest) error {
 		// CLI is seen and a failed download leaves nothing behind
 		var p *payload
 		if !e.Deleted {
-			if p, err = c.fetchPayload(id, e, key, m.Epoch); errors.Is(err, errBadPayload) {
-				// a payload this sshr cannot read (a newer field type) is
-				// carried on and tried again on every pull, as a host Import
-				// refuses is, the other hosts go on
+			if p, err = c.fetchPayload(id, e, key, m.Epoch); errors.Is(err, errBadPayload) || errors.Is(err, ErrNotFound) {
+				// a payload this sshr cannot read (a newer field type) or a
+				// blob the store lost is carried on and tried again on every
+				// pull, as a host Import refuses is, the other hosts go on
 				c.st.Skipped[id] = e
-				c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", short(id, 8), err)
+				if errors.Is(err, ErrNotFound) {
+					c.logf("skipped %s: %v, it stays as it is here, edit the host on a device that has it to send it again", short(id, 8), err)
+				} else {
+					c.logf("skipped %s: %v, it stays as it is here until this sshr can take it", short(id, 8), err)
+				}
 				c.leaveOut(id, err.Error())
 				continue
 			} else if err != nil {
@@ -1539,6 +1543,9 @@ func (c *Client) mergeEdit(store *hosts.Store, id string, known entryState, e sy
 // fetchBlob downloads the blob hash of entry id and opens it
 func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
 	blob, err := c.backend().GetBlob(hash)
+	if errors.Is(err, ErrNotFound) {
+		return c.restoreBlob(id, hash, key, epoch)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1550,6 +1557,27 @@ func (c *Client) fetchBlob(id, hash string, key []byte, epoch int) ([]byte, erro
 		return nil, err
 	}
 	c.keepBase(epoch, blob)
+	return plain, nil
+}
+
+// restoreBlob opens the blob the store lost from the base kept here and
+// puts the same sealed bytes back for the other devices, only a blob that
+// opens as entry id of this account goes back
+func (c *Client) restoreBlob(id, hash string, key []byte, epoch int) ([]byte, error) {
+	lost := fmt.Errorf("%w: the store lost the blob of %s", ErrNotFound, short(id, 8))
+	kept := c.keptBlob(hash)
+	if kept == nil {
+		return nil, lost
+	}
+	plain, err := openEntry(key, c.st.Account, id, epoch, kept)
+	if err != nil {
+		return nil, lost
+	}
+	if err := c.backend().PutBlob(hash, kept); err != nil {
+		c.logf("WARNING: the store lost the blob of %s and putting it back failed (%v), the other devices skip that host until it is edited again", short(id, 8), err)
+	} else {
+		c.logf("the store lost the blob of %s, put it back from this device", short(id, 8))
+	}
 	return plain, nil
 }
 
@@ -1802,6 +1830,13 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 				continue
 			}
 			plain, err := c.fetchBlob(id, e.Hash, oldKey, c.st.Epoch)
+			if errors.Is(err, ErrNotFound) {
+				// a blob the store lost cannot be sealed again, the entry
+				// goes on as it is so the key change is not stuck, the
+				// devices with the new key skip it until it is edited
+				c.logf("%v, it goes on under the old key", err)
+				continue
+			}
 			if err != nil {
 				return false, err
 			}

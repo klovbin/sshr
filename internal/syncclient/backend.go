@@ -123,7 +123,7 @@ func (h httpBackend) PutBlob(hash string, blob []byte) error {
 }
 
 func (h httpBackend) GetBlob(hash string) ([]byte, error) {
-	b, _, err := h.want("GET", "/blobs/"+hash, nil, nil, http.StatusOK, nil)
+	b, _, err := h.want("GET", "/blobs/"+hash, nil, nil, http.StatusOK, map[int]error{http.StatusNotFound: ErrNotFound})
 	return b, err
 }
 

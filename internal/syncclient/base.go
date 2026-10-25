@@ -46,6 +46,23 @@ func (c *Client) keepBase(epoch int, blob []byte) {
 
 // basePayload opens the base of entry id with blob hash h, nil when there
 // is none, it does not match or its key is gone
+// keptBlob is the sealed blob h as this device keeps it for merges, nil
+// when it is not kept or does not match its hash
+func (c *Client) keptBlob(h string) []byte {
+	if !validHash(h) {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(c.baseDir(), h))
+	if err != nil {
+		return nil
+	}
+	var f baseFile
+	if json.Unmarshal(b, &f) != nil || blobHash(f.Blob) != h {
+		return nil
+	}
+	return f.Blob
+}
+
 func (c *Client) basePayload(id, h string) *payload {
 	if !validHash(h) {
 		return nil
