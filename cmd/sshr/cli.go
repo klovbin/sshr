@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,9 @@ func runCLI(args []string) {
 		os.Exit(1)
 	}
 	hintStore = store
+	// a recovery code that opened the vault was typed somewhere, a command
+	// that ends normally on a terminal gives a new one
+	defer replaceUsedRecoveryCode()
 
 	switch args[0] {
 	case "list", "ls":
@@ -1280,7 +1284,7 @@ func cmdDesktopEntry(args []string) {
 // keychain and a file under a passphrase
 func cmdVault(args []string) {
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
+		fmt.Fprintln(os.Stderr, vaultUsage)
 		os.Exit(1)
 	}
 	// the keys of the sync device move with the vault key
@@ -1323,9 +1327,57 @@ func cmdVault(args []string) {
 			fatal(err)
 		}
 		fmt.Println("The vault key and the sync keys are in the system keychain again, the passphrase files are removed")
+	case "recovery":
+		if err := app.NewVaultRecoveryCode(confirmRecoveryCode); err != nil {
+			fatal(err)
+		}
+		fmt.Println("The new recovery code is saved, an older one no longer opens the vault")
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: sshr vault status|passphrase|keychain")
+		fmt.Fprintln(os.Stderr, vaultUsage)
 		os.Exit(1)
+	}
+}
+
+const vaultUsage = "Usage: sshr vault status|passphrase|keychain|recovery"
+
+// confirmRecoveryCode shows a new recovery code on a terminal and asks for
+// one of its groups picked at random, so the code is written down before
+// it replaces the old one, the last group is never asked, it holds only
+// the check of the whole and can be read off the screen
+func confirmRecoveryCode(code string) error {
+	// a code in a pipe or a log is a code someone else may read
+	if !term.IsTerminal(int(os.Stdout.Fd())) || !term.IsTerminal(int(os.Stdin.Fd())) {
+		return errors.New("a recovery code is shown only on a terminal, nothing is changed")
+	}
+	fmt.Printf("Recovery code, it opens the vault without the passphrase or the token, write it down and keep it away from this machine:\n\n%s\n\n", code)
+	groups := strings.Fields(code)
+	n := rand.IntN(len(groups) - 1)
+	got, err := app.AskTerminal(fmt.Sprintf("Type group %d of it to confirm: ", n+1))
+	if err != nil {
+		return fmt.Errorf("the code is confirmed on a terminal, nothing is changed: %v", err)
+	}
+	norm := strings.NewReplacer(" ", "", "-", "", "O", "0", "I", "1", "L", "1")
+	if norm.Replace(strings.ToUpper(got)) != groups[n] {
+		return fmt.Errorf("that is not group %d, nothing is changed, run sshr vault recovery again", n+1)
+	}
+	return nil
+}
+
+// replaceUsedRecoveryCode gives a new recovery code after one opened the
+// vault in this run, without a terminal it says how to get one
+func replaceUsedRecoveryCode() {
+	// sshr vault keychain may have moved the key out of the file
+	if !app.VaultRecoveryUsed() || app.VaultMode() != "passphrase" {
+		return
+	}
+	// sshr mcp and the scripts read stdout, a code must not land there
+	if app.NoTerminalPrompts || !term.IsTerminal(int(os.Stdout.Fd())) || !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(os.Stderr, "sshr: the used recovery code still works, run sshr vault recovery on a terminal to replace it")
+		return
+	}
+	fmt.Println("The recovery code opened the vault, here is a new one, the used one stops working")
+	if err := app.NewVaultRecoveryCode(confirmRecoveryCode); err != nil {
+		fmt.Fprintf(os.Stderr, "sshr: the used recovery code still works, run sshr vault recovery to replace it: %v\n", err)
 	}
 }
 

@@ -88,6 +88,23 @@ func Decode(text string) ([]byte, error) {
 	return raw[:len(raw)-sumLen], nil
 }
 
+// Shaped tells whether text, as Decode reads it, is made only of the
+// characters of a code and is at least groups groups long, a code typed
+// with a typo is still shaped, a passphrase rarely is
+func Shaped(text string, groups int) bool {
+	n := 0
+	for _, r := range strings.ToUpper(text) {
+		switch {
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '-':
+		case r == 'I' || r == 'L' || r == 'O' || strings.ContainsRune(alphabet, r):
+			n++
+		default:
+			return false
+		}
+	}
+	return n >= groups*(Group+1)
+}
+
 // groupCheck is the check character of group n, weighted so a swap of two
 // characters or a group typed in another place is caught too
 func groupCheck(g string, n int) byte {

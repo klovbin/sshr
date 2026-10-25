@@ -57,8 +57,12 @@ sshr add db.example.com -u admin --ask-password   # nothing saved, ssh asks ever
 ```sh
 sshr vault passphrase    # move the vault key into a file under a passphrase
 sshr vault status        # keychain or passphrase
+sshr vault recovery      # a recovery code that opens the vault without the passphrase
 sshr vault keychain      # back to the system keychain, the file is removed
 ```
+
+- `sshr vault recovery` shows a recovery code once on a terminal and asks for one of its groups, picked at random, before it saves it: 128 random bits in groups of letters and digits, each group with a check character, so a typo is named by its group, the passphrase prompt takes the code instead of the passphrase, it cannot be guessed offline, a new code replaces the old one, after the code opened the vault sshr gives a new one on the terminal
+- a replaced code or passphrase no longer opens `vault-key.json` on this machine, a copy of the file made before (a backup, a synced folder) still opens with the old one, the vault key itself stays the same
 
 - the vault key that seals saved passwords and stored keys lives in the system keychain, on a server or a machine without one `passphrase` wraps it into `~/.sshr/vault/vault-key.json` with Argon2id and removes it from the keychain, the key stays the same, so everything saved before still opens, a locked keychain keeps its copy and sshr warns
 - off by default: the passphrase is asked once per run, a forgotten one loses every saved secret, the file can be attacked offline with a weak passphrase (8 characters at least)

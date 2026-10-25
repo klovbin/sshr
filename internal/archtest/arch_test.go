@@ -26,7 +26,7 @@ var allowed = map[string][]string{
 	"internal/handcode":   {},
 	"internal/record":     {},
 	"internal/settings":   {"internal/fileio", "internal/record"},
-	"internal/vault":      {"internal/fileio", "internal/settings"},
+	"internal/vault":      {"internal/fileio", "internal/settings", "internal/handcode"},
 	"internal/hosts":      {"internal/fileio", "internal/record", "internal/vault"},
 	"internal/health":     {"internal/hosts"},
 	"internal/pwmgr":      {"internal/settings"},

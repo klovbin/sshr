@@ -42,10 +42,20 @@ type slotHead struct {
 }
 
 // passphraseSlot wraps the key with Argon2id of a passphrase, the wrap is
-// the one of format 1, bound to the kind and the ID of its slot
+// the one of format 1, bound to the kind and the ID of its slot, a legacy
+// slot is the wrap of a file of format 1 moved as it was into format 2,
+// bound as format 1 binds, the next passphrase change binds it to its slot
 type passphraseSlot struct {
 	slotHead
 	wrappedKey
+	Legacy bool `json:"legacy,omitempty"`
+}
+
+func (s *passphraseSlot) aad() []byte {
+	if s.Legacy {
+		return wrapAAD
+	}
+	return slotAAD(slotPassphrase, s.ID)
 }
 
 // slotAAD binds a wrap to its slot, a wrap moved to another slot or a slot
@@ -143,7 +153,7 @@ func openPassphraseSlots(v1 *wrappedKey, f *keyFile, pass string) ([]byte, error
 	// every open pay Argon2 for each, a damaged slot does not hide the next
 	var last error = ErrBadPassphrase
 	for _, s := range slots[:min(len(slots), passphraseSlotsMax)] {
-		key, err := unwrapKeyAAD(&s.wrappedKey, pass, slotAAD(slotPassphrase, s.ID))
+		key, err := unwrapKeyAAD(&s.wrappedKey, pass, s.aad())
 		if err == nil {
 			return key, nil
 		}
@@ -190,7 +200,7 @@ func withPassphrase(old []byte, key []byte, pass string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	slot, err := json.Marshal(passphraseSlot{slotHead{ID: id, Type: slotPassphrase}, *w})
+	slot, err := json.Marshal(passphraseSlot{slotHead: slotHead{ID: id, Type: slotPassphrase}, wrappedKey: *w})
 	if err != nil {
 		return nil, err
 	}

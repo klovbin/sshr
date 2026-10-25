@@ -47,7 +47,7 @@ func TestPassphraseSlotKeepsOtherSlots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pslot, _ := json.Marshal(passphraseSlot{slotHead{ID: "p1", Type: slotPassphrase}, *w})
+	pslot, _ := json.Marshal(passphraseSlot{slotHead: slotHead{ID: "p1", Type: slotPassphrase}, wrappedKey: *w})
 	other := json.RawMessage(`{"id":"s9","type":"server","url":"https://example.org","sealed":"AAAA"}`)
 	b, _ := json.Marshal(keyFile{Version: keyFileVersion, Slots: []json.RawMessage{pslot, other}})
 
@@ -88,7 +88,7 @@ func TestSlotWrapIsBoundToItsSlot(t *testing.T) {
 	cheapArgon(t)
 	key := bytes.Repeat([]byte{3}, 32)
 	w, _ := wrapKeyAAD(key, "a passphrase", slotAAD(slotPassphrase, "p1"))
-	moved, _ := json.Marshal(passphraseSlot{slotHead{ID: "p2", Type: slotPassphrase}, *w})
+	moved, _ := json.Marshal(passphraseSlot{slotHead: slotHead{ID: "p2", Type: slotPassphrase}, wrappedKey: *w})
 	b, _ := json.Marshal(keyFile{Version: keyFileVersion, Slots: []json.RawMessage{moved}})
 	_, kf, err := parseKeyFile(b)
 	if err != nil {
