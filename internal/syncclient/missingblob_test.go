@@ -81,3 +81,38 @@ func TestKeyChangeWithALostBlob(t *testing.T) {
 		t.Fatalf("a key change with a lost blob: %v", err)
 	}
 }
+
+// a blob a push uploaded that a cleanup took before the manifest went in
+// is put back right after it, the other devices read the host
+func TestPushPutsBackItsBlob(t *testing.T) {
+	store, a, b := objWorld(t)
+	before, err := store.List(objBlobs)
+	must(t, err)
+	had := map[string]bool{}
+	for _, n := range before {
+		had[n] = true
+	}
+	store.beforeCreate = func(name string) {
+		if !strings.HasPrefix(name, objManifests) {
+			return
+		}
+		names, _ := store.List(objBlobs)
+		for _, n := range names {
+			if !had[n] {
+				store.Delete(n)
+			}
+		}
+	}
+	hs, err := a.Store.List()
+	must(t, err)
+	h, err := a.Store.Find(hs[0].ID)
+	must(t, err)
+	h.Port = 2400
+	_, err = a.Store.Update(h.ID, *h)
+	must(t, err)
+	must(t, a.Push())
+	must(t, b.Pull())
+	if got, _ := b.Store.Find(h.ID); got == nil || got.Port != 2400 {
+		t.Fatalf("b after a push whose blob was taken: %+v\n%s", got, b.Log)
+	}
+}

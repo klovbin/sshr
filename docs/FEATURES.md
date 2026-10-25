@@ -298,6 +298,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** the folder holds only ciphertext, a device takes part as soon as its folder synced
 - **Why this way:** a sync tool has no compare and swap between devices, two devices that push at once while they do not see each other fork the account, a pull finds that through the head, the losing device goes back to the state before its push, which it kept for that, takes the kept change and pushes its edits again, a conflict copy of a change in the folder stops push and pull until one of the pair is deleted, every path stays inside the folder (`os.Root`), only names of the account shapes are read or listed, a change iCloud moved off the machine is an error and not a shorter history, init refuses a folder that holds an account, off by default, the weakest of the stores
 
+### A push keeps its blobs in the store
+- **What:** after a push to a bucket, WebDAV, Supabase or a synced folder writes its manifest, sshr checks that every blob it uploaded is there and puts a missing one back from the copy it keeps for merges
+- **What for:** a store cleanup, a lifecycle rule or a laptop that slept in the middle of a push can take a blob between the upload and the manifest
+- **Why it helps:** the manifest never names a blob that is gone, the other devices read every host of the push
+- **Why this way:** the check runs after the manifest went in, so no gap is left between the check and the write, the copy is the same sealed bytes under the same hash, sshr-sync checks the blobs itself when it takes the manifest
+
 ### Safe saves from several sshr processes
 - **What:** every change of hosts runs under a lock file, the sync takes it per host from reading the local version to writing the remote one, one sync run at a time on a machine
 - **What for:** the app, the CLI, `sshr serve`, `sshr mcp` and a sync can run at the same time

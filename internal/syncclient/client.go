@@ -2072,6 +2072,22 @@ func (c *Client) pushOnce(plan pushPlan) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// the blobs this push uploaded are the hashes the head before it did
+	// not list, a reseal and a recovery anchor upload some too
+	known := map[string]bool{}
+	for _, e := range c.st.Entries {
+		known[e.Blob] = true
+	}
+	for _, e := range c.st.Skipped {
+		known[e.Hash] = true
+	}
+	var newBlobs []string
+	for _, e := range entries {
+		if e.Hash != "" && !known[e.Hash] {
+			newBlobs = append(newBlobs, e.Hash)
+		}
+	}
+	c.keepUploaded(newBlobs)
 	// the first unconfirmed push keeps the state before it, later pushes
 	// on top only move Pushed on, a fork at the first one undoes them all
 	plain := plan.devices == nil && !reseal && plan.primary == "" && plan.recovery == nil &&

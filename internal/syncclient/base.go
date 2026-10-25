@@ -3,6 +3,7 @@ package syncclient
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -112,4 +113,41 @@ func (c *Client) pruneBase() {
 			os.Remove(filepath.Join(c.baseDir(), n.Name()))
 		}
 	}
+}
+
+// keepUploaded makes sure the blobs a push uploaded are in an object store
+// after its manifest went in, a cleanup of the store may have taken one
+// the push uploaded before a sleep of the machine, the head names it now,
+// so it goes back from the base kept here, a store that cannot put it back
+// is said, the other devices skip that host until it changes again
+func (c *Client) keepUploaded(hashes []string) {
+	ob, ok := c.backend().(ObjectBackend)
+	if !ok {
+		return
+	}
+	for _, h := range hashes {
+		// one more try rides out a request the network dropped
+		var err error
+		for try := 0; try < 2; try++ {
+			if err = c.keepBlob(ob, h); err == nil {
+				break
+			}
+		}
+		if err != nil {
+			c.logf("WARNING: a blob of this push may be missing from the store (%v), the other devices skip that host until it is edited again", err)
+		}
+	}
+}
+
+// keepBlob puts blob h back when the store lacks it
+func (c *Client) keepBlob(ob ObjectBackend, h string) error {
+	have, err := ob.hasBlob(h)
+	if err != nil || have {
+		return err
+	}
+	blob := c.keptBlob(h)
+	if blob == nil {
+		return errors.New("this device does not keep it")
+	}
+	return ob.PutBlob(h, blob)
 }
