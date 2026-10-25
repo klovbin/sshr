@@ -270,6 +270,15 @@ the host, lists the keys that are not on a token and prints the lines of
 sshd_config that turn off passwords and the other ways in, keys sshd
 takes from other files or a command are not read, it changes nothing
 there`},
+	{name: "cert", usage: `sshr cert ca init --software [--replace]
+sshr cert ca show`, short: "short certificates signed on this machine, off by default",
+		details: `ca init makes the certificate authority of this machine, --software keeps
+its key sealed with the vault key in ~/.sshr/cert-ca.json, whoever opens
+the vault here can log in wherever the authority is trusted, --replace
+makes a new one and every server then needs its key again. ca show prints
+the key and the lines that make a server trust it, TrustedUserCAKeys in
+sshd_config for every account or cert-authority in one authorized_keys.
+The authority never syncs`},
 	{name: "hooks", usage: `sshr hooks list
 sshr hooks on|off
 sshr hooks set <host> before|after <command>

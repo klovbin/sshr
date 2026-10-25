@@ -31,6 +31,19 @@ var ErrAsksPassword = sshcmd.ErrAsksPassword
 
 var ErrHardwareKeyRequired = sshcmd.ErrHardwareKeyRequired
 
+// CertCA is the certificate authority of this machine, see sshcmd.CertCA
+type CertCA = sshcmd.CertCA
+
+// ErrNoCA means no certificate authority is set up on this machine
+var ErrNoCA = sshcmd.ErrNoCA
+
+// LoadCertCA reads the certificate authority of this machine
+func LoadCertCA() (*CertCA, error) { return sshcmd.LoadCertCA() }
+
+// InitSoftwareCA makes a certificate authority whose key is sealed with
+// the vault key, an authority there stays unless replace
+func InitSoftwareCA(replace bool) (*CertCA, error) { return sshcmd.InitSoftwareCA(replace) }
+
 // CheckHardwareKey tells why h would be refused under the hardware key
 // requirement, nil when its login is a key on a token
 func CheckHardwareKey(h *Host) error { return sshcmd.CheckHardwareKey(h) }

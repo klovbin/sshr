@@ -110,6 +110,18 @@ type Settings struct {
 	// the ID and not to the address, a host repointed elsewhere keeps the
 	// requirement
 	HardwareKeyHosts []string `json:"hardware_key_hosts,omitempty"`
+	// Cert signs a short certificate for every login to the hosts in
+	// CertHosts: empty for none, "listed" for those, off by default, the
+	// key of the certificate lives only in memory for one login, it lives
+	// here and never syncs, a stolen sync device cannot turn it on
+	Cert string `json:"cert,omitempty"`
+	// CertValidity is the life of a certificate in minutes, 0 for 10
+	CertValidity int `json:"cert_validity,omitempty"`
+	// CertHosts are the hosts sshr cert on listed, host ID to a hash of
+	// where it pointed then, CertPrincipals the principals of each, comma
+	// separated, they never come from a host file
+	CertHosts      map[string]string `json:"cert_hosts,omitempty"`
+	CertPrincipals map[string]string `json:"cert_principals,omitempty"`
 	// ConfirmCommands asks the user before every command from an assistant,
 	// through a question the MCP client shows, off by default: a client
 	// that cannot ask gets every command refused and the REST API refuses
@@ -228,6 +240,20 @@ func cloneSettings(s Settings) Settings {
 	if s.HardwareKeyHosts != nil {
 		c.HardwareKeyHosts = make([]string, len(s.HardwareKeyHosts))
 		copy(c.HardwareKeyHosts, s.HardwareKeyHosts)
+	}
+	c.CertHosts = cloneMap(s.CertHosts)
+	c.CertPrincipals = cloneMap(s.CertPrincipals)
+	return c
+}
+
+// cloneMap is a copy of m, nil stays nil
+func cloneMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	c := make(map[string]string, len(m))
+	for k, v := range m {
+		c[k] = v
 	}
 	return c
 }
