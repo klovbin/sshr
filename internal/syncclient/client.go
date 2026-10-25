@@ -875,9 +875,22 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 		return nil, fmt.Errorf("the server skipped changes %d to %d, the history does not add up", cut, m.Counter-1)
 	}
 	if len(out) == 0 && c.st.Counter > 0 {
-		cur, _, err := c.backend().Head()
+		cur, signed, err := c.backend().Head()
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
+		}
+		// the head carries the number this device pushed last, it must be
+		// the change this device pushed too, a store without a true compare
+		// and swap (a synced folder) can keep the change of another device
+		// under the same number
+		if cur == c.st.Counter && c.st.Head != "" && signed != nil {
+			var sm syncproto.Signed
+			if err := json.Unmarshal(signed, &sm); err != nil {
+				return nil, err
+			}
+			if syncproto.BodyHash(sm.Body) != c.st.Head {
+				return nil, fmt.Errorf("%w: the store keeps another change %d than the one this device made, two devices wrote it at the same time, the edits of this device are still here, do not leave and join again, that would overwrite them", ErrFork, cur)
+			}
 		}
 		if cur < c.st.Counter && !c.AcceptReset {
 			return nil, fmt.Errorf("the server shows change %d, this device has seen %d, the server rolled the account back or lost data, run with --accept-reset only if the server was restored from a backup", cur, c.st.Counter)
@@ -889,6 +902,11 @@ func (c *Client) fetchHistory() ([]syncproto.Signed, error) {
 	}
 	return out, nil
 }
+
+// ErrFork means the account went two ways: the store keeps a change under
+// the number this device used for its own, a store without a true compare
+// and swap lets two devices write the same number
+var ErrFork = errors.New("sync_fork")
 
 // verify checks one manifest against what this device trusts and returns
 // it, it then becomes the trusted state, the MAC is checked only when

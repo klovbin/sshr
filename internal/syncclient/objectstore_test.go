@@ -506,3 +506,27 @@ func TestLockedCreates(t *testing.T) {
 		t.Errorf("locked envelope: %v", err)
 	}
 }
+
+// a store that kept the change of another device under the number this
+// device pushed is a fork, the device does not take it for its own change
+// and says so (#128)
+func TestForkIsSeen(t *testing.T) {
+	store, a, b := objWorld(t)
+	_, err := a.Store.Add(hosts.Host{Name: "from-a", Host: "10.0.0.3", User: "u"})
+	must(t, err)
+	must(t, a.Push())
+	// a synced folder that has not brought the change of a to b yet
+	var mine string
+	for name := range store.m {
+		if strings.HasPrefix(name, "manifests/") && (mine == "" || name > mine) {
+			mine = name
+		}
+	}
+	delete(store.m, mine)
+	_, err = b.Store.Add(hosts.Host{Name: "from-b", Host: "10.0.0.4", User: "u"})
+	must(t, err)
+	must(t, b.Push())
+	if err := a.Pull(); !errors.Is(err, ErrFork) {
+		t.Fatalf("a pull after a fork: %v", err)
+	}
+}
