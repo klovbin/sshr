@@ -102,6 +102,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** a script or tool running as you outside sshr gets no use of the key, a program sshr started still can, in a long running `sshr serve` or `sshr mcp` the local commands of hosts and extension commands are such programs
 - **Why this way:** the kernel names the process at the other end of the socket (SO_PEERCRED on Linux, LOCAL_PEERPID on macOS) and sshr walks up its parents to its own process, 32 steps at most, a peer that cannot be named is refused, a Windows named pipe gives no such answer through the library sshr uses, there any process of the user is let in as before
 
+### Vault opened with a security key
+- **What:** `sshr vault add-token` adds the plugged FIDO2 security key to the vault kept in `vault-key.json`, the vault then opens with a touch and no question, `sshr vault slots` lists what opens it, `sshr vault remove-slot` removes a slot, on Linux and macOS through `fido2-cred` and `fido2-assert` of libfido2
+- **What for:** a copy of `~/.sshr` from a backup or a synced folder could be guessed open through its passphrase
+- **Why it helps:** with a key and a recovery code and the passphrase slot removed, the saved passwords and keys open only with the key in hand or the code on paper
+- **Why this way:** the hmac-secret of the token wraps the vault key, sshr links no C and runs the tools of libfido2 in a session of their own so they never ask in another terminal, the token is found with a question that needs no touch, the output is read strictly, the first key brings a recovery code, a lost key must not lose the secrets, the token is asked once more before the written file is kept, Windows and a PIN on the key come later, `webauthn.dll` needs a resident credential and the tools are not shipped for Windows any more
+
 ### Recovery code of the vault
 - **What:** `sshr vault recovery` makes a recovery code for a vault kept in `vault-key.json`, shown once on a terminal and saved after one of its groups, picked at random, is typed back, the passphrase prompt takes the code instead of the passphrase, after the code opened the vault sshr gives a new one on the terminal, `vault-key.json` holds slots that each open the same key, a passphrase slot and a recovery slot now
 - **What for:** a forgotten passphrase lost every saved secret, a key on a hardware token comes next and a lost token must not lose them either

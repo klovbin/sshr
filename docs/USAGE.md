@@ -58,10 +58,14 @@ sshr add db.example.com -u admin --ask-password   # nothing saved, ssh asks ever
 sshr vault passphrase    # move the vault key into a file under a passphrase
 sshr vault status        # keychain or passphrase
 sshr vault recovery      # a recovery code that opens the vault without the passphrase
+sshr vault add-token --label yubikey   # the plugged FIDO2 key opens the vault with a touch
+sshr vault slots         # what opens the vault: passphrase, recovery code, keys
+sshr vault remove-slot <id>            # e.g. the passphrase once a key and a code are there
 sshr vault keychain      # back to the system keychain, the file is removed
 ```
 
 - `sshr vault recovery` shows a recovery code once on a terminal and asks for one of its groups, picked at random, before it saves it: 128 random bits in groups of letters and digits, each group with a check character, so a typo is named by its group, the passphrase prompt takes the code instead of the passphrase, it cannot be guessed offline, a new code replaces the old one, after the code opened the vault sshr gives a new one on the terminal
+- `sshr vault add-token` (Linux and macOS, needs `fido2-cred` and `fido2-assert` of libfido2) makes a credential on the one plugged security key, two touches and one more to check, the first key also gets a recovery code, from then on the vault opens with a touch and no question, without the key the passphrase or the recovery code is asked, after `sshr vault remove-slot` of the passphrase slot a copy of `~/.sshr` opens nothing without the key or the code, a background `sshr mcp` or `sshr serve` asks for a touch at its first use of the vault, sshr says on stderr when the key waits for a touch, 45 s at most
 - a replaced code or passphrase no longer opens `vault-key.json` on this machine, a copy of the file made before (a backup, a synced folder) still opens with the old one, the vault key itself stays the same
 
 - the vault key that seals saved passwords and stored keys lives in the system keychain, on a server or a machine without one `passphrase` wraps it into `~/.sshr/vault/vault-key.json` with Argon2id and removes it from the keychain, the key stays the same, so everything saved before still opens, a locked keychain keeps its copy and sshr warns

@@ -1,12 +1,17 @@
 package app
 
-import "sshr.dev/internal/vault"
+import (
+	"fmt"
+
+	"sshr.dev/internal/vault"
+)
 
 // The vault lives in package vault, it runs no program, the system
 // keychain and the passphrase prompt that run programs are set here
 func init() {
 	vault.SetKeychain(systemKeychain{})
 	vault.SetPrompt(promptPassphrase)
+	vault.SetToken(askFIDO2)
 }
 
 // keyringService is the service name of every item sshr keeps in the
@@ -71,6 +76,29 @@ func MoveSecrets(names []string, toFile bool) error { return vault.MoveSecrets(n
 func NewVaultRecoveryCode(confirm func(code string) error) error {
 	return vault.NewRecoveryCode(confirm)
 }
+
+// VaultSlot describes a slot of vault-key.json
+type VaultSlot = vault.SlotInfo
+
+// VaultSlots lists the slots of the vault kept in vault-key.json
+func VaultSlots() ([]VaultSlot, error) { return vault.Slots() }
+
+// vaultLabelMax is the longest label a token slot gets
+const vaultLabelMax = 64
+
+// AddVaultToken adds the one plugged FIDO2 token to the vault kept in
+// vault-key.json, confirm shows the recovery code the first token brings
+func AddVaultToken(label string, confirm func(code string) error) error {
+	label = cleanText(label)
+	if len(label) > vaultLabelMax {
+		return fmt.Errorf("the label is longer than %d bytes", vaultLabelMax)
+	}
+	return vault.AddToken(enrolFIDO2, false, label, confirm)
+}
+
+// RemoveVaultSlot removes a slot of vault-key.json, never the last way in
+// that is not a token unless two tokens stay
+func RemoveVaultSlot(id string) error { return vault.RemoveSlot(id) }
 
 // VaultRecoveryUsed tells whether a recovery code opened the vault in
 // this run
