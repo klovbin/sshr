@@ -65,6 +65,8 @@ func runCLI(args []string) {
 		cmdKey(store, args[1:])
 	case "tag":
 		cmdTag(store, args[1:])
+	case "folder":
+		cmdFolder(store, args[1:])
 	case "gateway":
 		cmdGateway(store, args[1:])
 	case "run":
@@ -206,7 +208,7 @@ func cmdList(store *app.Store, args []string) {
 	if recent {
 		fmt.Fprint(w, "LAST\t")
 	}
-	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tAUTH\tTAGS\tID")
+	fmt.Fprintln(w, "NAME\tHOST\tUSER\tPORT\tAUTH\tFOLDER\tTAGS\tID")
 	for _, h := range hosts {
 		keyCol := h.AuthShort()
 		id := h.ID
@@ -219,11 +221,15 @@ func cmdList(store *app.Store, args []string) {
 		if recent {
 			fmt.Fprint(w, app.Ago(h.LastConnected, now)+"\t")
 		}
+		folderCol := h.Folder
+		if folderCol == "" {
+			folderCol = "-"
+		}
 		tagCol := strings.Join(h.Tags, ",")
 		if tagCol == "" {
 			tagCol = "-"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n", h.Name, h.Host, h.User, h.Port, keyCol, tagCol, id)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n", h.Name, h.Host, h.User, h.Port, keyCol, folderCol, tagCol, id)
 	}
 	w.Flush()
 }
@@ -241,12 +247,18 @@ func cmdAdd(store *app.Store, args []string) {
 	var agentName, agentKey string
 	useAgent := false
 	var tags []string
+	var folder string
 	port := 22
 	positional := make([]string, 0)
 
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if strings.HasPrefix(a, "--name=") || strings.HasPrefix(a, "-n=") {
+		if strings.HasPrefix(a, "--folder=") {
+			folder = strings.SplitN(a, "=", 2)[1]
+		} else if a == "--folder" && i+1 < len(args) {
+			i++
+			folder = args[i]
+		} else if strings.HasPrefix(a, "--name=") || strings.HasPrefix(a, "-n=") {
 			name = strings.SplitN(a, "=", 2)[1]
 		} else if strings.HasPrefix(a, "--user=") || strings.HasPrefix(a, "-u=") {
 			user = strings.SplitN(a, "=", 2)[1]
@@ -407,7 +419,7 @@ func cmdAdd(store *app.Store, args []string) {
 		Key: key, KeyData: keyData, KeyMode: keyMode, KeyRef: keyRef,
 		Agent: agentName, AgentKey: agentKey,
 		PasswordMode: passwordMode, Password: password, PasswordRef: passwordRef,
-		Jump: jump, Gateway: gateway, Session: session, Tags: tags,
+		Jump: jump, Gateway: gateway, Session: session, Tags: tags, Folder: folder,
 	}
 	h, err := store.Add(in)
 	if errors.Is(err, app.ErrKeyPassphrase) {
@@ -1527,6 +1539,98 @@ func cmdGateway(store *app.Store, args []string) {
 		return
 	}
 	fmt.Printf("%s: through %s when it does not answer directly\n", saved.Name, saved.Gateway)
+}
+
+func cmdFolder(store *app.Store, args []string) {
+	if len(args) == 0 || args[0] == "list" {
+		list, err := store.ListFolders()
+		if err != nil {
+			fatal(err)
+		}
+		hosts, err := store.List()
+		if err != nil {
+			fatal(err)
+		}
+		count := map[string]int{}
+		for _, h := range hosts {
+			if h.Folder != "" {
+				count[h.Folder]++
+			}
+		}
+		if len(list) == 0 {
+			fmt.Println("No folders. Use `sshr folder add <name>` or `sshr folder <host> <name>`.")
+			return
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "FOLDER\tHOSTS")
+		for _, f := range list {
+			fmt.Fprintf(w, "%s\t%d\n", f, count[f])
+		}
+		w.Flush()
+		return
+	}
+	switch args[0] {
+	case "add":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "Usage: sshr folder add <path>")
+			os.Exit(1)
+		}
+		path, err := store.AddFolder(args[1])
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Folder %s\n", path)
+		return
+	case "rm", "remove":
+		force := false
+		path := ""
+		for _, a := range args[1:] {
+			if a == "--force" {
+				force = true
+				continue
+			}
+			if path != "" || strings.HasPrefix(a, "-") {
+				fmt.Fprintln(os.Stderr, "Usage: sshr folder rm <path> [--force]")
+				os.Exit(1)
+			}
+			path = a
+		}
+		if path == "" {
+			fmt.Fprintln(os.Stderr, "Usage: sshr folder rm <path> [--force]")
+			os.Exit(1)
+		}
+		if err := store.RemoveFolder(path, force); err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Removed folder %s\n", path)
+		return
+	}
+	if len(args) > 2 {
+		fmt.Fprintln(os.Stderr, "Usage: sshr folder <name or id> [<folder>|--off]")
+		os.Exit(1)
+	}
+	h := findHost(store, "folder", args[0])
+	if len(args) == 1 {
+		if h.Folder == "" {
+			fmt.Printf("%s: root list\n", h.Name)
+			return
+		}
+		fmt.Printf("%s: %s\n", h.Name, h.Folder)
+		return
+	}
+	folder := args[1]
+	if folder == "--off" {
+		folder = ""
+	}
+	saved, err := store.SetFolder(h.ID, folder)
+	if err != nil {
+		fatal(err)
+	}
+	if saved.Folder == "" {
+		fmt.Printf("%s: root list\n", saved.Name)
+		return
+	}
+	fmt.Printf("%s: %s\n", saved.Name, saved.Folder)
 }
 
 func cmdTag(store *app.Store, args []string) {

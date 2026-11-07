@@ -55,8 +55,9 @@ func (h *Host) HasTag(t string) bool {
 }
 
 // Matches tells whether h fits a search, every word has to match, "tag:x"
-// or "#x" needs the exact tag, any other word is looked for in the name,
-// address, user and tags, case does not matter
+// or "#x" needs the exact tag, "folder:x" needs that folder path (or a
+// nested one under it), any other word is looked for in the name, address,
+// user, folder and tags, case does not matter
 func (h *Host) Matches(query string) bool {
 	for _, w := range strings.Fields(strings.ToLower(query)) {
 		if t, ok := strings.CutPrefix(w, "tag:"); ok {
@@ -71,7 +72,20 @@ func (h *Host) Matches(query string) bool {
 			}
 			continue
 		}
-		hay := strings.ToLower(h.Name + " " + h.Host + " " + h.User + " " + strings.Join(h.Tags, " "))
+		if f, ok := strings.CutPrefix(w, "folder:"); ok {
+			f = strings.Trim(f, "/")
+			if f == "" {
+				if h.Folder != "" {
+					return false
+				}
+				continue
+			}
+			if h.Folder != f && !strings.HasPrefix(h.Folder, f+"/") {
+				return false
+			}
+			continue
+		}
+		hay := strings.ToLower(h.Name + " " + h.Host + " " + h.User + " " + h.Folder + " " + strings.Join(h.Tags, " "))
 		if !strings.Contains(hay, w) {
 			return false
 		}

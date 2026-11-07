@@ -18,6 +18,7 @@ type HostSummary struct {
 	Jump     string   `json:"jump,omitempty"`
 	Gateway  string   `json:"gateway,omitempty"`
 	Session  string   `json:"session,omitempty"`
+	Folder   string   `json:"folder,omitempty"`
 	Forwards []string `json:"forwards,omitempty"`
 	Tags     []string `json:"tags,omitempty"`
 	// LastConnected is when this machine last had a session to the host
@@ -72,7 +73,7 @@ func (h *Host) AuthShort() string {
 
 // Summary is h without its secrets
 func (h *Host) Summary() HostSummary {
-	sum := HostSummary{Name: h.Name, ID: h.ID, Address: h.Host, User: h.User, Port: h.Port, Auth: h.AuthLabel(), Jump: h.Jump, Gateway: h.Gateway, Session: h.Session, Tags: h.Tags, LastConnected: h.LastConnected}
+	sum := HostSummary{Name: h.Name, ID: h.ID, Address: h.Host, User: h.User, Port: h.Port, Auth: h.AuthLabel(), Jump: h.Jump, Gateway: h.Gateway, Session: h.Session, Folder: h.Folder, Tags: h.Tags, LastConnected: h.LastConnected}
 	for _, f := range h.Forwards {
 		sum.Forwards = append(sum.Forwards, f.String())
 	}

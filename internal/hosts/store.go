@@ -113,9 +113,13 @@ type Host struct {
 	// Forwards are named port forwards, started with connect -F or as a
 	// tunnel with sshr tunnel
 	Forwards []Forward `json:"forwards,omitempty"`
-	// Tags group hosts (prod, db, client-x), lower case, sorted
-	Tags      []string  `json:"tags,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+		// Tags group hosts (prod, db, client-x), lower case, sorted
+		Tags []string `json:"tags,omitempty"`
+		// Folder is a path of folders this host sits in ("work" or
+		// "work/prod"), empty means the root list, lower case, "/" between
+		// segments, orthogonal to Tags
+		Folder    string    `json:"folder,omitempty"`
+		CreatedAt time.Time `json:"created_at"`
 	// LastConnected is the end of the last session ssh opened, set by
 	// MarkConnected, it stays on this machine and does not sync
 	LastConnected *time.Time `json:"last_connected,omitempty"`
@@ -409,6 +413,9 @@ func cleanHost(h Host, agentKey func(*Host) error) (Host, error) {
 	if h.Tags, err = CleanTags(h.Tags); err != nil {
 		return h, err
 	}
+	if h.Folder, err = CleanFolder(h.Folder); err != nil {
+		return h, err
+	}
 	return h, nil
 }
 
@@ -429,8 +436,12 @@ func (s *Store) ListAll() ([]Host, []string, error) {
 	}
 	out := make([]Host, 0, len(entries))
 	var broken []string
-	for _, e := range entries {
+		for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		// folders.json is the empty-folder registry, not a host
+		if e.Name() == foldersFile {
 			continue
 		}
 		b, err := fileio.ReadFileShared(filepath.Join(s.Dir, e.Name()))
@@ -538,6 +549,21 @@ func (s *Store) SetGateway(id, gateway string) (out *Host, err error) {
 		in := *cur
 		in.Gateway, in.Rev = gateway, 0
 		out, err = tx.update(id, in, true)
+		return err
+	})
+	return out, err
+}
+
+// SetFolder puts host id into folder, empty moves it to the root list
+func (s *Store) SetFolder(id, folder string) (out *Host, err error) {
+	err = s.locked(func(tx *Store) error {
+		cur, err := tx.Find(id)
+		if err != nil {
+			return err
+		}
+		in := *cur
+		in.Folder, in.Rev = folder, 0
+		out, err = tx.update(id, in, false)
 		return err
 	})
 	return out, err

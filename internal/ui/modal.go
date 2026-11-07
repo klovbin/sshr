@@ -59,6 +59,7 @@ func (s *state) openDeleteConfirm(h sshrapp.Host) {
 
 func (s *state) openAddForm() {
 	s.modal.close()
+	s.folderModal.close()
 	s.clearForm()
 	s.form.editID = ""
 	s.form.err = ""
@@ -69,6 +70,7 @@ func (s *state) openAddForm() {
 
 func (s *state) openEditForm(h sshrapp.Host) {
 	s.modal.close()
+	s.folderModal.close()
 	s.clearForm()
 	s.nameEd.SetText(h.Name)
 	s.hostEd.SetText(h.Host)
@@ -83,6 +85,7 @@ func (s *state) openEditForm(h sshrapp.Host) {
 	s.passEd.Mask = '•'
 	s.jumpEd.SetText(h.Jump)
 	s.tagsEd.SetText(strings.Join(h.Tags, " "))
+	s.folderEd.SetText(h.Folder)
 	s.session = h.Session
 	s.fwdEd.SetText(sshrapp.FormatForwards(h.Forwards))
 	s.form.editID = h.ID
@@ -111,6 +114,51 @@ func layoutModals(gtx layout.Context, th *material.Theme, s *state) {
 	layoutConfirmModal(gtx, th, s)
 	layoutOPModal(gtx, th, s)
 	layoutFormModal(gtx, th, s)
+	layoutFolderModal(gtx, th, s)
+}
+
+func layoutFolderModal(gtx layout.Context, th *material.Theme, s *state) {
+	if !s.folderModal.open {
+		return
+	}
+	layoutModalCard(gtx, unit.Dp(360), 0, &s.folderModal.scrim, &s.folderModal.card, func(gtx layout.Context) layout.Dimensions {
+		children := []layout.FlexChild{
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				t := material.H6(th, s.t("modal.folder.title"))
+				t.Color = colFG
+				return t.Layout(gtx)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+			field(th, s.t("field.folder"), &s.folderModal.nameEd),
+			hintChild(th, s.t("field.folder.hint")),
+		}
+		if s.folderModal.err != "" {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				e := material.Caption(th, s.folderModal.err)
+				e.Color = colErr
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, e.Layout)
+			}))
+		}
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Spacing: layout.SpaceEnd}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(th, &s.folderModal.cancel, s.t("btn.cancel"))
+						btn.Background = colMuted
+						return btn.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(th, &s.folderModal.save, s.t("btn.save"))
+						btn.Background = colAccent
+						return btn.Layout(gtx)
+					}),
+				)
+			}),
+		)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 // layoutModalCard draws scrim and card as Stack siblings.

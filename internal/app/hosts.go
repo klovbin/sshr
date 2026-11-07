@@ -105,6 +105,9 @@ func SplitTags(s string) []string { return hosts.SplitTags(s) }
 // CleanTags normalizes tags
 func CleanTags(in []string) ([]string, error) { return hosts.CleanTags(in) }
 
+// CleanFolder normalizes a folder path
+func CleanFolder(s string) (string, error) { return hosts.CleanFolder(s) }
+
 // Filter keeps the hosts that match query
 func Filter(list []Host, query string) []Host { return hosts.Filter(list, query) }
 

@@ -16,7 +16,7 @@ const completeCommand = "__complete"
 
 // hostCommands take a host name as their first argument
 var hostCommands = map[string]bool{
-	"connect": true, "show": true, "rm": true, "ping": true, "tag": true, "gateway": true, "send": true, "get": true,
+	"connect": true, "show": true, "rm": true, "ping": true, "tag": true, "folder": true, "gateway": true, "send": true, "get": true,
 	"forward": true, "tunnel": true, "close": true, "paste": true, "run": true,
 }
 
@@ -66,6 +66,15 @@ func complete(store *app.Store, words []string, cur string) []string {
 		return filter([]string{"status", "passphrase", "keychain", "recovery", "slots", "add-token", "remove-slot"}, cur)
 	case c.name == "gateway" && len(words) == 2:
 		return filter(append(savedNames(store), "--off"), cur)
+	case c.name == "folder" && len(words) == 1:
+		return filter(append([]string{"list", "add", "rm"}, savedNames(store)...), cur)
+	case c.name == "folder" && len(words) == 2 && (words[1] == "add" || words[1] == "rm" || words[1] == "remove"):
+		if words[1] == "rm" || words[1] == "remove" {
+			return filter(append(foldersOf(store), "--force"), cur)
+		}
+		return nil
+	case c.name == "folder" && len(words) == 2 && words[1] != "list" && words[1] != "add" && words[1] != "rm" && words[1] != "remove":
+		return filter(append(foldersOf(store), "--off"), cur)
 	case c.name == "tag" && len(words) == 2:
 		var out []string
 		for _, t := range tagsOf(store, words[1]) {
@@ -153,6 +162,11 @@ func tagsOf(store *app.Store, query string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func foldersOf(store *app.Store) []string {
+	list, _ := store.ListFolders()
+	return list
 }
 
 func forwardsOf(store *app.Store, query string) []string {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"sort"
 	"strings"
 
 	"gioui.org/app"
@@ -68,6 +69,7 @@ type state struct {
 	passEd       widget.Editor
 	jumpEd       widget.Editor
 	tagsEd       widget.Editor // "prod, db"
+	folderEd     widget.Editor // "work" or "work/prod"
 	searchEd     widget.Editor // filters the host list
 	fwdEd        widget.Editor // one forward per line, "db -L 5432:localhost:5432"
 	authKind     authKind
@@ -98,6 +100,11 @@ type state struct {
 	sessionZellijBtn widget.Clickable
 
 	addBtn           widget.Clickable
+	addFolderBtn     widget.Clickable
+	folderModal      folderModal
+	folders          []string
+	folderOpen       map[string]bool
+	folderHdr        map[string]*widget.Clickable
 	settingsBtn      widget.Clickable
 	hostsBtn         widget.Clickable
 	backBtn          widget.Clickable
@@ -168,6 +175,31 @@ func (m *hostContextMenu) close() {
 	m.hostID = ""
 }
 
+// folderModal asks for a new empty folder path
+type folderModal struct {
+	open       bool
+	blockScrim bool
+	err        string
+	nameEd     widget.Editor
+	save       widget.Clickable
+	cancel     widget.Clickable
+	scrim      widget.Clickable
+	card       widget.Clickable
+}
+
+func (m *folderModal) close() {
+	m.open = false
+	m.err = ""
+	m.blockScrim = false
+	m.nameEd.SetText("")
+}
+
+// sideItem is one row in the servers sidebar: a folder header or a host
+type sideItem struct {
+	folder string // set for folder headers
+	hostI  int    // index into s.hosts for host rows; -1 for folders
+}
+
 // splitDrag tracks sidebar resize via window-X pointer events.
 type splitDrag struct {
 	dragging bool
@@ -185,6 +217,23 @@ func (s *state) reload() {
 		return
 	}
 	s.allHosts = hosts
+	if folders, err := s.store.ListFolders(); err == nil {
+		s.folders = folders
+	}
+	if s.folderOpen == nil {
+		s.folderOpen = map[string]bool{}
+	}
+	if s.folderHdr == nil {
+		s.folderHdr = map[string]*widget.Clickable{}
+	}
+	for _, f := range s.folders {
+		if _, ok := s.folderOpen[f]; !ok {
+			s.folderOpen[f] = true
+		}
+		if s.folderHdr[f] == nil {
+			s.folderHdr[f] = new(widget.Clickable)
+		}
+	}
 	s.kickHealth()
 	s.applySearch()
 	if len(hosts) == 0 {
@@ -198,6 +247,8 @@ func (s *state) reload() {
 func (s *state) applySearch() {
 	s.lastSearch = s.searchEd.Text()
 	s.hosts = sshrapp.Filter(s.allHosts, s.lastSearch)
+	// same folder together, root hosts first, then by name
+	sortHostsByFolder(s.hosts)
 	if len(s.hostRows) != len(s.hosts) {
 		s.hostRows = make([]hostRowHit, len(s.hosts))
 	}
@@ -213,6 +264,56 @@ func (s *state) applySearch() {
 			s.hostMenu.close()
 		}
 	}
+}
+
+func sortHostsByFolder(hosts []sshrapp.Host) {
+	sort.SliceStable(hosts, func(i, j int) bool {
+		if hosts[i].Folder != hosts[j].Folder {
+			return hosts[i].Folder < hosts[j].Folder
+		}
+		return hosts[i].Name < hosts[j].Name
+	})
+}
+
+// sideItems builds folder headers and host rows for the sidebar tree
+func (s *state) sideItems() []sideItem {
+	tops := map[string]bool{}
+	for _, f := range s.folders {
+		top, _, _ := strings.Cut(f, "/")
+		if top != "" {
+			tops[top] = true
+		}
+	}
+	for _, h := range s.hosts {
+		if h.Folder == "" {
+			continue
+		}
+		top, _, _ := strings.Cut(h.Folder, "/")
+		tops[top] = true
+	}
+	var names []string
+	for t := range tops {
+		names = append(names, t)
+	}
+	sort.Strings(names)
+	var items []sideItem
+	for _, top := range names {
+		items = append(items, sideItem{folder: top, hostI: -1})
+		if !s.folderOpen[top] {
+			continue
+		}
+		for i, h := range s.hosts {
+			if h.Folder == top || strings.HasPrefix(h.Folder, top+"/") {
+				items = append(items, sideItem{hostI: i})
+			}
+		}
+	}
+	for i, h := range s.hosts {
+		if h.Folder == "" {
+			items = append(items, sideItem{hostI: i})
+		}
+	}
+	return items
 }
 
 func (s *state) refreshStatus() {
@@ -255,7 +356,40 @@ func (s *state) handle(gtx layout.Context) {
 	if s.addBtn.Clicked(gtx) {
 		s.langOpen = false
 		s.hostMenu.close()
+		s.folderModal.close()
 		s.openAddForm()
+	}
+	if s.addFolderBtn.Clicked(gtx) {
+		s.langOpen = false
+		s.hostMenu.close()
+		s.form.close()
+		s.folderModal.open = true
+		s.folderModal.blockScrim = true
+		s.folderModal.err = ""
+		s.folderModal.nameEd.SetText("")
+	}
+	for f, btn := range s.folderHdr {
+		if btn != nil && btn.Clicked(gtx) {
+			s.folderOpen[f] = !s.folderOpen[f]
+		}
+	}
+	if s.folderModal.open {
+		_ = s.folderModal.card.Clicked(gtx)
+		if s.folderModal.scrim.Clicked(gtx) {
+			if s.folderModal.blockScrim {
+				s.folderModal.blockScrim = false
+			} else {
+				s.folderModal.close()
+			}
+		} else if s.folderModal.blockScrim {
+			s.folderModal.blockScrim = false
+		}
+		if s.folderModal.cancel.Clicked(gtx) {
+			s.folderModal.close()
+		}
+		if s.folderModal.save.Clicked(gtx) {
+			s.saveNewFolder()
+		}
 	}
 	if s.form.open {
 		_ = s.form.card.Clicked(gtx) // absorb; never dismiss
@@ -472,6 +606,7 @@ func (s *state) clearForm() {
 	s.passEd.Mask = '•'
 	s.jumpEd.SetText("")
 	s.tagsEd.SetText("")
+	s.folderEd.SetText("")
 	s.fwdEd.SetText("")
 	s.session = ""
 	s.authKind = authPassword
@@ -539,6 +674,7 @@ func (s *state) saveHost() {
 		Session:       s.session,
 		Forwards:      forwards,
 		Tags:          sshrapp.SplitTags(s.tagsEd.Text()),
+		Folder:        strings.TrimSpace(s.folderEd.Text()),
 	}
 	if s.form.editID != "" {
 		h, err = s.store.Update(s.form.editID, in)
@@ -559,4 +695,16 @@ func (s *state) saveHost() {
 	} else {
 		s.status = s.t("status.added", h.Name)
 	}
+}
+
+func (s *state) saveNewFolder() {
+	path := strings.TrimSpace(s.folderModal.nameEd.Text())
+	got, err := s.store.AddFolder(path)
+	if err != nil {
+		s.folderModal.err = s.mapErr(err)
+		return
+	}
+	s.folderModal.close()
+	s.reload()
+	s.status = s.t("status.folder_added", got)
 }

@@ -169,6 +169,20 @@ func (s *Store) MarkConnected(id string) error { return s.db().MarkConnected(id)
 // SetGateway sets or removes the gateway of a host
 func (s *Store) SetGateway(id, gateway string) (*Host, error) { return s.db().SetGateway(id, gateway) }
 
+// SetFolder puts a host into a folder, empty moves it to the root list
+func (s *Store) SetFolder(id, folder string) (*Host, error) { return s.db().SetFolder(id, folder) }
+
+// ListFolders is every folder path: the registry plus folders hosts sit in
+func (s *Store) ListFolders() ([]string, error) { return s.db().ListFolders() }
+
+// AddFolder registers an empty folder path
+func (s *Store) AddFolder(path string) (string, error) { return s.db().AddFolder(path) }
+
+// RemoveFolder drops a folder from the registry; force moves hosts out
+func (s *Store) RemoveFolder(path string, force bool) error {
+	return s.db().RemoveFolder(path, force)
+}
+
 // upgradeSeals seals passwords of an older sshr again, see hostStore
 func (s *Store) upgradeSeals() { s.db().UpgradeSeals() }
 

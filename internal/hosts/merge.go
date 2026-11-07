@@ -16,7 +16,7 @@ var (
 	// side, the unknown keys a newer sshr wrote go with them
 	mergeAccess = []string{"Host", "Port", "User", "Jump", "Gateway", "PasswordMode", "Password", "KeyMode", "KeyPub", "extra"}
 	// mergeField merge one by one
-	mergeField = []string{"Name", "Session"}
+	mergeField = []string{"Name", "Session", "Folder"}
 	// mergeSet merge by element, Tags as a set, Forwards by name
 	mergeSet = []string{"Tags", "Forwards"}
 	// mergeKept are not compared, they belong to this device or do not
@@ -121,6 +121,11 @@ func MergeThreeWay(base, local, remote Host) (merged Host, ok bool) {
 	} else if useRemote {
 		merged.Session = remote.Session
 	}
+	if useRemote, ok = pick(base.Folder, local.Folder, remote.Folder); !ok {
+		return local, false
+	} else if useRemote {
+		merged.Folder = remote.Folder
+	}
 	merged.Tags = mergeTags(base.Tags, local.Tags, remote.Tags)
 	if merged.Forwards, ok = mergeForwards(base.Forwards, local.Forwards, remote.Forwards); !ok {
 		return local, false
@@ -132,7 +137,7 @@ func MergeThreeWay(base, local, remote Host) (merged Host, ok bool) {
 // merges, a merge result that equals the remote version has nothing new to
 // push
 func SameSynced(a, b Host) bool {
-	return accessOf(a) == accessOf(b) && a.Name == b.Name && a.Session == b.Session &&
+	return accessOf(a) == accessOf(b) && a.Name == b.Name && a.Session == b.Session && a.Folder == b.Folder &&
 		slices.Equal(a.Tags, b.Tags) && slices.Equal(a.Forwards, b.Forwards)
 }
 

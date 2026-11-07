@@ -18,16 +18,20 @@ func TestCleanTags(t *testing.T) {
 }
 
 func TestMatches(t *testing.T) {
-	h := Host{Name: "Web Prod", Host: "10.0.0.5", User: "deploy", Tags: []string{"prod", "web"}}
+	h := Host{Name: "Web Prod", Host: "10.0.0.5", User: "deploy", Folder: "work/prod", Tags: []string{"prod", "web"}}
 	for q, want := range map[string]bool{
-		"":             true,
-		"web":          true,
-		"PROD 10.0":    true,
-		"tag:prod":     true,
-		"#web deploy":  true,
-		"tag:pro":      false,
-		"#db":          false,
-		"prod staging": false,
+		"":              true,
+		"web":           true,
+		"PROD 10.0":     true,
+		"tag:prod":      true,
+		"#web deploy":   true,
+		"tag:pro":       false,
+		"#db":           false,
+		"prod staging":  false,
+		"folder:work":   true,
+		"folder:work/prod": true,
+		"folder:home":   false,
+		"folder:":       false,
 	} {
 		if got := h.Matches(q); got != want {
 			t.Errorf("%q: %v", q, got)

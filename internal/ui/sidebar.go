@@ -57,9 +57,20 @@ func layoutSidebarHosts(gtx layout.Context, th *material.Theme, s *state) layout
 		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			btn := material.Button(th, &s.addBtn, s.t("btn.add"))
-			btn.Background = colAccent
-			return btn.Layout(gtx)
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					btn := material.Button(th, &s.addBtn, s.t("btn.add"))
+					btn.Background = colAccent
+					return btn.Layout(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					btn := material.Button(th, &s.addFolderBtn, s.t("btn.add_folder"))
+					btn.Background = colPanel
+					btn.Color = colFG
+					return btn.Layout(gtx)
+				}),
+			)
 		}),
 	)
 }

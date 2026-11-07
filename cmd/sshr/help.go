@@ -137,6 +137,19 @@ Options:
   sshr tag web               show the tags
   sshr tag web +prod eu      add prod and eu
   sshr tag web -eu           remove eu`},
+	{name: "folder", usage: "sshr folder [list|add <path>|rm <path>] | sshr folder <host> [<folder>|--off]", short: "group hosts in folders",
+		details: `Folders are paths like work or work/prod, orthogonal to tags, empty
+means the root list, empty folders live in folders.json next to the hosts,
+a host's folder syncs with the host
+
+Examples:
+  sshr folder                    list folders and how many hosts sit in each
+  sshr folder add work/prod      create an empty folder
+  sshr folder web work/prod      put web into work/prod
+  sshr folder web --off          move web back to the root list
+  sshr folder rm work --force    remove the folder and move its hosts out
+  sshr add h -u u --folder work  add a host already in a folder
+  sshr list folder:work          hosts in work or under it`},
 	{name: "gateway", usage: "sshr gateway <name or id> [<gateway>|--off]", short: "fall back to a jump host when a host does not answer",
 		details: `With a gateway, connect, run, send, get and tunnel check the host
 directly first (a TCP connect and the SSH banner, up to 3 s each) and go

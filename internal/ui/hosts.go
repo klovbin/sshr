@@ -17,9 +17,10 @@ import (
 	"gioui.org/widget/material"
 )
 
-// layoutHostsList renders hosts in the left Servers sidebar.
+// layoutHostsList renders folder headers and hosts in the left Servers sidebar.
 func layoutHostsList(gtx layout.Context, th *material.Theme, s *state) layout.Dimensions {
-	if len(s.hosts) == 0 {
+	items := s.sideItems()
+	if len(items) == 0 {
 		msg := s.t("list.empty")
 		if len(s.allHosts) > 0 {
 			msg = s.t("list.noMatch")
@@ -28,10 +29,32 @@ func layoutHostsList(gtx layout.Context, th *material.Theme, s *state) layout.Di
 		empty.Color = colMuted
 		return empty.Layout(gtx)
 	}
-	return material.List(th, &s.list).Layout(gtx, len(s.hosts), func(gtx layout.Context, i int) layout.Dimensions {
+	return material.List(th, &s.list).Layout(gtx, len(items), func(gtx layout.Context, i int) layout.Dimensions {
 		return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layoutHostRow(gtx, th, s, i)
+			it := items[i]
+			if it.hostI < 0 {
+				return layoutFolderHeader(gtx, th, s, it.folder)
+			}
+			return layoutHostRow(gtx, th, s, it.hostI)
 		})
+	})
+}
+
+func layoutFolderHeader(gtx layout.Context, th *material.Theme, s *state, folder string) layout.Dimensions {
+	btn := s.folderHdr[folder]
+	if btn == nil {
+		btn = new(widget.Clickable)
+		s.folderHdr[folder] = btn
+	}
+	mark := "▾ "
+	if !s.folderOpen[folder] {
+		mark = "▸ "
+	}
+	return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		t := material.Caption(th, mark+folder)
+		t.Color = colAccent
+		t.Font.Weight = 600
+		return t.Layout(gtx)
 	})
 }
 
@@ -78,15 +101,24 @@ func layoutHostRow(gtx layout.Context, th *material.Theme, s *state, i int) layo
 						sub.MaxLines = 1
 						return sub.Layout(gtx)
 					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if len(h.Tags) == 0 {
-							return layout.Dimensions{}
-						}
-						sub := material.Caption(th, "#"+strings.Join(h.Tags, " #"))
-						sub.Color = colAccent
-						sub.MaxLines = 1
-						return sub.Layout(gtx)
-					}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if h.Folder == "" || !strings.Contains(h.Folder, "/") {
+								return layout.Dimensions{}
+							}
+							sub := material.Caption(th, h.Folder)
+							sub.Color = colMutedSoft
+							sub.MaxLines = 1
+							return sub.Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if len(h.Tags) == 0 {
+								return layout.Dimensions{}
+							}
+							sub := material.Caption(th, "#"+strings.Join(h.Tags, " #"))
+							sub.Color = colAccent
+							sub.MaxLines = 1
+							return sub.Layout(gtx)
+						}),
 				)
 			})
 		}),
@@ -203,6 +235,9 @@ func layoutForm(gtx layout.Context, th *material.Theme, s *state) layout.Dimensi
 		spacer(12),
 		multilineField(th, s.t("field.forwards"), &s.fwdEd),
 		hintChild(th, s.t("field.forwards.hint")),
+		spacer(12),
+		field(th, s.t("field.folder"), &s.folderEd),
+		hintChild(th, s.t("field.folder.hint")),
 		spacer(12),
 		field(th, s.t("field.tags"), &s.tagsEd),
 		hintChild(th, s.t("field.tags.hint")))

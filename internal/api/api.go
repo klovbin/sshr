@@ -248,6 +248,7 @@ type newHost struct {
 	Jump        string   `json:"jump"`
 	Gateway     string   `json:"gateway"`
 	Session     string   `json:"session"`
+	Folder      string   `json:"folder"`
 	Forwards    []string `json:"forwards"`
 	Tags        []string `json:"tags"`
 	Password    string   `json:"password"`
@@ -270,7 +271,7 @@ func (a *api) addHost(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, errors.New("1Password and Bitwarden references are not taken through the API, link them in the app or with sshr add"))
 		return
 	}
-	h := app.Host{Name: in.Name, Host: in.Host, User: in.User, Port: in.Port, Key: in.Key, Jump: in.Jump, Gateway: in.Gateway, Session: in.Session, Tags: in.Tags}
+	h := app.Host{Name: in.Name, Host: in.Host, User: in.User, Port: in.Port, Key: in.Key, Jump: in.Jump, Gateway: in.Gateway, Session: in.Session, Folder: in.Folder, Tags: in.Tags}
 	switch {
 	case in.Key != "":
 		h.Key = app.ExpandHome(in.Key)

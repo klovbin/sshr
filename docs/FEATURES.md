@@ -10,6 +10,12 @@ Every sshr feature outside the GUI with four answers: what it is, what problem i
 - **Why it helps:** `sshr connect web` replaces a long ssh line, the same list feeds the app, the CLI, sync, MCP and the API
 - **Why this way:** plain files on your machine work offline, survive any crash of sshr and can be backed up or read without it, one file per host keeps a broken file from taking the others with it
 
+### Folders for hosts
+- **What:** `sshr folder add|rm|list` and `sshr folder <host> <path|--off>`, optional `--folder` on `sshr add`, a Folder field on each host, empty folders in `folders.json` next to the host files, the GUI shows collapsible folders and a New folder button
+- **What for:** dozens of hosts need a tree (work/prod), not only flat tags
+- **Why it helps:** put a server in a folder once, find it in the sidebar or with `sshr list folder:work`, tags stay for labels that cut across folders
+- **Why this way:** the folder path lives on the host and syncs with it, empty folders stay local in `folders.json` so you can create a place before any host sits there, segments use the same rules as tags
+
 ### Short help
 - **What:** `sshr help` lists every command in one line each, `sshr help <command>` shows its usage, other names and options
 - **What for:** the full help had grown to 115 lines, the command you look for scrolled away
