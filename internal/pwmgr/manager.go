@@ -27,9 +27,9 @@ type managerCLI struct {
 	hint func(msg string) string
 	// resolve finds the binary when LookPath is not enough (signed op paths).
 	resolve func() (string, error)
-	// env builds the process environment; nil keeps the default.
+	// env builds the process environment, nil keeps the default
 	env func(args []string) []string
-	// errMsg picks the useful stderr line; nil uses the last line.
+	// errMsg picks the useful stderr line, nil uses the last line
 	errMsg func(stderr string) string
 }
 

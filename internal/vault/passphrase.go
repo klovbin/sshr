@@ -310,12 +310,12 @@ func SetPassphrase(pass string, secretNames []string, opts ...PassphraseOptions)
 	}
 	undo := func() {
 		if old != nil {
-			fileio.WriteFile(path, old, 0o600)
+			fileio.WriteFileAtomic(path, old, 0o600)
 		} else {
 			os.Remove(path)
 		}
 	}
-	if err := fileio.WriteFile(path, b, 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(path, b, 0o600); err != nil {
 		return err
 	}
 	// the copy in the keychain goes at the end, the file must give the key

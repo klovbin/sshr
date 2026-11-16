@@ -30,7 +30,7 @@ How sshr is built, which package may use which, where data lives and how the mai
 | Package | Does | May import (sshr packages) |
 |----|----|----|
 | `internal/audit` | the audit log of MCP and REST actions | `fileio` |
-| `internal/pwmgr` | 1Password and Bitwarden through their CLIs: read a password or a key, create a login item, the accounts op knows | `settings` |
+| `internal/pwmgr` | 1Password and Bitwarden through their CLIs: read a password or a key, create a login item, the accounts op knows | `fileio`, `settings` |
 | `internal/health` | whether a host answers (TCP and the SSH banner) and the key it shows against known_hosts, no login, no program | `hosts` |
 | `internal/hosts` | hosts and their files: Host, the store with its lock, checks, records across versions, forwards, tags, summaries, runs no program, the steps that do come as hooks from `app` | `fileio`, `record`, `vault` |
 | `internal/vault` | the vault key in a keychain or under a passphrase, seals bound to a host and field, named secrets of the sync device, runs no program, the system keychain and the prompt are set by `app`, vault-key.json holds slots (passphrase, recovery code, a key on a FIDO2 token) that open the same key, the token is asked through a function `app` sets | `fileio`, `settings`, `handcode` |
@@ -102,7 +102,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/vault/hosts/.lock` | lock for changing hosts, holds the pid of the holder | `Store.locked` |
 | keychain, service `sshr`, entry `vault-key` | the vault key that seals the secrets | `VaultKey` |
 | 1Password items | a password saved with `--store 1password` | `opStorePassword` |
-| `~/.sshr/settings.json` | settings, fields a newer sshr wrote are kept, never synced | `settings.Save` through `fileio.WriteFile` |
+| `~/.sshr/settings.json` | settings, fields a newer sshr wrote are kept, never synced | `settings.Save` through `fileio.WriteFileAtomic` |
 | `~/.sshr/settings.json.lock` | lock for saving settings, holds the pid of the holder | `settings.Save` |
 | `~/.sshr/ssh_config` | the export | `refreshSSHConfig` through `WriteFileAtomic` |
 | `~/.ssh/config` | the user's own file, sshr adds or removes one Include line, a link is left alone | `editUserConfig` through `WriteFileAtomic`, its mode kept |
@@ -177,7 +177,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 ## Planned changes
 
-In this order, each one its own issue and commits, the order was checked against the research and the code (`opus-check-2026-10-23`), the bugs #144 and #145 come before 3:
+In this order, each one its own issue and commits, the bugs #144 and #145 come before 3:
 
 1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is fixed by #106 and #107
 2. (#96) done: `PlanSession` and `SessionPlan.Command` in `app` plan connect, tunnel and the API tunnels, the CLI keeps running the process and its signals, the app can build its connect on it (#90)

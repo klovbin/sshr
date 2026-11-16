@@ -170,7 +170,7 @@ func certCAInitToken(replace bool) {
 	if replace {
 		// the old handle is kept aside, a server may still trust its key
 		for _, f := range []string{handle, handle + ".pub"} {
-			if fileExists(f) {
+			if app.IsFile(f) {
 				if err := os.Rename(f, f+".old"); err != nil {
 					fatal(err)
 				}

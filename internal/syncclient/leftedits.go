@@ -51,7 +51,7 @@ func (c *Client) keepEdits() error {
 	if err != nil {
 		return err
 	}
-	if err := fileio.WriteFile(c.leftEditsPath(), b, 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(c.leftEditsPath(), b, 0o600); err != nil {
 		return err
 	}
 	c.logf("%d hosts changed here since the last sync, a join of this account again keeps the changes", len(kept))

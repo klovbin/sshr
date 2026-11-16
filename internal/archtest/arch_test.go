@@ -29,7 +29,7 @@ var allowed = map[string][]string{
 	"internal/vault":       {"internal/fileio", "internal/settings", "internal/handcode"},
 	"internal/hosts":       {"internal/fileio", "internal/record", "internal/vault"},
 	"internal/health":      {"internal/hosts"},
-	"internal/pwmgr":       {"internal/settings"},
+	"internal/pwmgr":       {"internal/fileio", "internal/settings"},
 	"internal/audit":       {"internal/fileio"},
 	"internal/sshcmd":      {"internal/fileio", "internal/settings", "internal/vault", "internal/hosts", "internal/health", "internal/pwmgr"},
 	"internal/sshconf":     {"internal/fileio", "internal/hosts", "internal/sshcmd"},

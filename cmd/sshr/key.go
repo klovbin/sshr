@@ -157,7 +157,7 @@ func cmdKeyInstall(store *app.Store, args []string) {
 	} else {
 		home, _ := os.UserHomeDir()
 		for _, n := range []string{app.DefaultKeyName, "id_ed25519", "id_ecdsa", "id_rsa"} {
-			if p := filepath.Join(home, ".ssh", n+".pub"); fileExists(p) {
+			if p := filepath.Join(home, ".ssh", n+".pub"); app.IsFile(p) {
 				pub = p
 				break
 			}
@@ -206,9 +206,4 @@ func cmdKeyInstall(store *app.Store, args []string) {
 		}
 		fmt.Printf("%s now logs in with %s\n", h.Name, priv)
 	}
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }

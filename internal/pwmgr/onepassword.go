@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/settings"
 )
 
@@ -111,7 +112,7 @@ func OpenOnePasswordCLIInstall() error {
 }
 
 // ListOPAccounts lists accounts added to the 1Password desktop app
-// (`op account list` — https://developer.1password.com/docs/cli/use-multiple-accounts/).
+// (`op account list`, https://developer.1password.com/docs/cli/use-multiple-accounts/)
 func ListOPAccounts() ([]OPAccount, error) {
 	out, err := opRun(nil, "account", "list", "--format=json")
 	if err != nil {
@@ -204,7 +205,7 @@ func resolveOpBin() (string, error) {
 		return bin, nil
 	}
 	for _, p := range opPathCandidates {
-		if fileExists(p) {
+		if fileio.IsFile(p) {
 			return p, nil
 		}
 	}
@@ -213,7 +214,7 @@ func resolveOpBin() (string, error) {
 			home + "/.local/bin/op",
 			home + "/bin/op",
 		} {
-			if fileExists(p) {
+			if fileio.IsFile(p) {
 				return p, nil
 			}
 		}
@@ -222,11 +223,6 @@ func resolveOpBin() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: the 1Password CLI (op) is not installed, see %s", ErrNoOP, opCLIInstallURL)
-}
-
-func fileExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
 }
 
 // findGrokBotOp picks the newest ~/.grokbot/onepassword-cli/<ver>/<arch>/op.
@@ -243,7 +239,7 @@ func findGrokBotOp(home string) string {
 			continue
 		}
 		p := filepath.Join(root, e.Name(), arch, "op")
-		if !fileExists(p) {
+		if !fileio.IsFile(p) {
 			continue
 		}
 		if bestVer == "" || e.Name() > bestVer {
@@ -254,7 +250,7 @@ func findGrokBotOp(home string) string {
 }
 
 // opErrMessage picks the useful line from op stderr. op often appends
-// Connect-server help after the real error — that must not become the message.
+// Connect-server help after the real error, that must not become the message
 func opErrMessage(stderr string) string {
 	var first string
 	for _, line := range strings.Split(stderr, "\n") {

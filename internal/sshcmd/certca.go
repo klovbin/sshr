@@ -120,7 +120,7 @@ func InitSoftwareCA(replace bool) (*CertCA, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := fileio.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return nil, err
 	}
 	return ca, nil
@@ -152,7 +152,7 @@ func InitTokenCA(handle string, replace bool) (*CertCA, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := fileio.WriteFile(path, append(out, '\n'), 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(path, append(out, '\n'), 0o600); err != nil {
 		return nil, err
 	}
 	return ca, nil

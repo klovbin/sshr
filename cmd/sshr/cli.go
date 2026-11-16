@@ -452,7 +452,7 @@ func cmdAdd(store *app.Store, args []string) {
 	fmt.Println(msg)
 }
 
-// mustPort parses -p for add and exits on anything outside 1–65535.
+// mustPort parses -p for add and exits on anything outside 1-65535
 func mustPort(v string) int {
 	n, err := app.ParsePort(v)
 	if err != nil {
@@ -1052,8 +1052,8 @@ func findSSHKeys() []string {
 	return keys
 }
 
-// findFailed reports a failed Find and exits; on ambiguity it lists the
-// matches so the user can retry with an ID.
+// findFailed reports a failed Find and exits, on ambiguity it lists the
+// matches so the user can retry with an ID
 func findFailed(cmd, query string, err error) {
 	var amb *app.AmbiguousError
 	switch {

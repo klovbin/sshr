@@ -49,5 +49,5 @@ func CheckPrivateKey(path string) error { return hosts.CheckPrivateKey(path) }
 func ReadFileShared(path string) ([]byte, error) { return fileio.ReadFileShared(path) }
 
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
-	return fileio.WriteFile(path, data, mode)
+	return fileio.WriteFileAtomic(path, data, mode)
 }

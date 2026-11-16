@@ -119,16 +119,16 @@ func fido2Devices() ([]string, error) {
 		// a line of another shape is not a device, a path that starts with
 		// "-" would read as an option
 		dev, _, ok := strings.Cut(line, ": ")
-		if ok && fido2DevicePath(dev) {
+		if ok && isFIDO2DevicePath(dev) {
 			devs = append(devs, dev)
 		}
 	}
 	return devs, nil
 }
 
-// fido2DevicePath tells a device path of libfido2: a hidraw or uhid node
+// isFIDO2DevicePath tells a device path of libfido2: a hidraw or uhid node
 // on Linux and the BSDs, an IOKit entry on macOS, a PC/SC reader
-func fido2DevicePath(dev string) bool {
+func isFIDO2DevicePath(dev string) bool {
 	for _, p := range []string{"/dev/", "ioreg://", "pcsc://", "nfc:", "hid:"} {
 		if strings.HasPrefix(dev, p) {
 			return !strings.ContainsAny(dev, "\n\r")

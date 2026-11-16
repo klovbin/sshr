@@ -263,7 +263,7 @@ func checkVaultKey(key []byte) error {
 		// keep a working key from opening the secrets, the check only
 		// starts protecting once it is written
 		if path, err := keyCheckPath(); err == nil {
-			if err := fileio.WriteFile(path, []byte(got+"\n"), 0o600); err != nil {
+			if err := fileio.WriteFileAtomic(path, []byte(got+"\n"), 0o600); err != nil {
 				fmt.Fprintf(os.Stderr, "sshr: could not record the vault key check: %v\n", err)
 			}
 		}

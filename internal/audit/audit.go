@@ -116,7 +116,7 @@ func loadKey(path, lock string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	return key, fileio.WriteFile(path, []byte(hex.EncodeToString(key)+"\n"), 0o600)
+	return key, fileio.WriteFileAtomic(path, []byte(hex.EncodeToString(key)+"\n"), 0o600)
 }
 
 // Begin writes the start record of an action and returns what writes its

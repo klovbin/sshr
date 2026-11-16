@@ -43,7 +43,7 @@ func SSHArgs(h *Host) []string {
 
 // UploadImage copies data to ~/.cache/sshr/pasted/ on the host over a
 // separate ssh and returns the path there. The file is removed after
-// UploadTTL by a detached sleep; each upload also sweeps older files in case
+// UploadTTL by a detached sleep, each upload also sweeps older files in case
 // that sleep was killed by a logout.
 //
 // batch disables prompts on the terminal (ssh -o BatchMode=yes), set it when

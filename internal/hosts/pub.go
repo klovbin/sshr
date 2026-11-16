@@ -71,5 +71,5 @@ func (s *Store) WritePub(h *Host) error {
 		}
 		return nil
 	}
-	return fileio.WriteFile(path, []byte(h.KeyPub+"\n"), 0o600)
+	return fileio.WriteFileAtomic(path, []byte(h.KeyPub+"\n"), 0o600)
 }

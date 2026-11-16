@@ -132,7 +132,7 @@ func readX11() (*Image, error) {
 }
 
 // readDarwin asks AppleScript for the PNG flavour of the clipboard and has it
-// write the bytes to a temp file; there is no stdout form for binary data.
+// write the bytes to a temp file, there is no stdout form for binary data
 func readDarwin() (*Image, error) {
 	return readViaTempFile(func(path string) *exec.Cmd {
 		return exec.Command("osascript",
@@ -151,8 +151,8 @@ func readDarwin() (*Image, error) {
 	})
 }
 
-// readWindows uses System.Windows.Forms, which needs an STA thread; Windows
-// PowerShell 5 runs STA by default and -STA makes it explicit.
+// readWindows uses System.Windows.Forms, which needs an STA thread, Windows
+// PowerShell 5 runs STA by default and -STA makes it explicit
 func readWindows() (*Image, error) {
 	const script = `Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $i = [System.Windows.Forms.Clipboard]::GetImage()

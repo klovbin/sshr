@@ -28,7 +28,7 @@ func writeFile(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := fileio.WriteFile(path, data, mode); err != nil {
+	if err := fileio.WriteFileAtomic(path, data, mode); err != nil {
 		return fmt.Errorf("%s: %v", path, err)
 	}
 	return nil
