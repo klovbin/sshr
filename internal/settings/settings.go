@@ -422,7 +422,7 @@ func Save(s Settings) error {
 	}
 	// through a temp file, the app and the CLI may save at once and a torn
 	// file would load as defaults
-	if err := fileio.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	if s.base != nil {

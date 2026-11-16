@@ -1062,7 +1062,7 @@ func (s *Store) save(h *Host) error {
 		return err
 	}
 	path := filepath.Join(s.Dir, h.ID+".json")
-	if err := fileio.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(path, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	if err := s.WritePub(h); err != nil {

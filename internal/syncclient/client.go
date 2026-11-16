@@ -364,7 +364,7 @@ func (c *Client) save() error {
 	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
 		return err
 	}
-	if err := fileio.WriteFile(c.statePath(), b, 0o600); err != nil {
+	if err := fileio.WriteFileAtomic(c.statePath(), b, 0o600); err != nil {
 		return err
 	}
 	c.pruneBase()

@@ -12,9 +12,9 @@ import (
 	"sync"
 )
 
-// WriteFile writes through a temporary file of its own next to path,
+// WriteFileAtomic writes through a temporary file of its own next to path,
 // a reader never sees half of it and two writers never share a temp file
-func WriteFile(path string, data []byte, mode os.FileMode) error {
+func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err

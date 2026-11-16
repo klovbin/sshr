@@ -102,7 +102,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 | `~/.sshr/vault/hosts/.lock` | lock for changing hosts, holds the pid of the holder | `Store.locked` |
 | keychain, service `sshr`, entry `vault-key` | the vault key that seals the secrets | `VaultKey` |
 | 1Password items | a password saved with `--store 1password` | `opStorePassword` |
-| `~/.sshr/settings.json` | settings, fields a newer sshr wrote are kept, never synced | `settings.Save` through `fileio.WriteFile` |
+| `~/.sshr/settings.json` | settings, fields a newer sshr wrote are kept, never synced | `settings.Save` through `fileio.WriteFileAtomic` |
 | `~/.sshr/settings.json.lock` | lock for saving settings, holds the pid of the holder | `settings.Save` |
 | `~/.sshr/ssh_config` | the export | `refreshSSHConfig` through `WriteFileAtomic` |
 | `~/.ssh/config` | the user's own file, sshr adds or removes one Include line, a link is left alone | `editUserConfig` through `WriteFileAtomic`, its mode kept |

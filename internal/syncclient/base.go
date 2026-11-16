@@ -38,7 +38,7 @@ func (c *Client) keepBase(epoch int, blob []byte) {
 		err = os.MkdirAll(c.baseDir(), 0o700)
 	}
 	if err == nil {
-		err = fileio.WriteFile(filepath.Join(c.baseDir(), h), b, 0o600)
+		err = fileio.WriteFileAtomic(filepath.Join(c.baseDir(), h), b, 0o600)
 	}
 	if err != nil {
 		c.logf("could not keep the synced version of a host, a later conflict on it gives a copy: %v", err)

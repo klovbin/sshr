@@ -95,7 +95,7 @@ func (fileKeychain) change(edit func(map[string]string) error) error {
 	if err != nil {
 		return err
 	}
-	return fileio.WriteFile(path, append(b, '\n'), 0o600)
+	return fileio.WriteFileAtomic(path, append(b, '\n'), 0o600)
 }
 
 func (k fileKeychain) Set(name, value string) error {

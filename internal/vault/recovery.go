@@ -283,7 +283,7 @@ func legacyKept(f *keyFile, v1 *wrappedKey) error {
 	return errors.New("the passphrase wrap did not survive the move into format 2")
 }
 
-func writeKeyFile(path string, b []byte) error { return fileio.WriteFile(path, b, 0o600) }
+func writeKeyFile(path string, b []byte) error { return fileio.WriteFileAtomic(path, b, 0o600) }
 
 // writeKeyFileChecked writes b to path, reads it back and opens it with
 // open, a file that does not give key back is replaced by old

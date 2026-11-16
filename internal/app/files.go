@@ -15,7 +15,7 @@ type BusyError = fileio.BusyError
 
 // WriteFileAtomic writes path through a temp file of its own and a rename
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
-	return fileio.WriteFile(path, data, mode)
+	return fileio.WriteFileAtomic(path, data, mode)
 }
 
 // IsFile tells whether path names a file that is not a folder

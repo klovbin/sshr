@@ -229,5 +229,5 @@ func (c *Client) writeCleanupSeen(s cleanupSeen) error {
 	if err != nil {
 		return err
 	}
-	return fileio.WriteFile(c.cleanupSeenPath(), b, 0o600)
+	return fileio.WriteFileAtomic(c.cleanupSeenPath(), b, 0o600)
 }

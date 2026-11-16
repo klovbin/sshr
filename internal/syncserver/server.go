@@ -200,7 +200,7 @@ func (s *Server) saveDevices(a string, ds []deviceFile) error {
 // writeFile replaces path through a temp file of its own and a rename, two
 // requests writing the same file never share a temp file
 func writeFile(path string, data []byte) error {
-	return fileio.WriteFile(path, data, 0o600)
+	return fileio.WriteFileAtomic(path, data, 0o600)
 }
 
 func newToken() (token, hash string, err error) {
