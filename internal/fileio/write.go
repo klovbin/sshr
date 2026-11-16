@@ -79,3 +79,9 @@ func syncDir(dir string) {
 		d.Close()
 	}
 }
+
+// IsFile tells whether path names a file that is not a folder
+func IsFile(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}

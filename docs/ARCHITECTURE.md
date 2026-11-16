@@ -30,7 +30,7 @@ How sshr is built, which package may use which, where data lives and how the mai
 | Package | Does | May import (sshr packages) |
 |----|----|----|
 | `internal/audit` | the audit log of MCP and REST actions | `fileio` |
-| `internal/pwmgr` | 1Password and Bitwarden through their CLIs: read a password or a key, create a login item, the accounts op knows | `settings` |
+| `internal/pwmgr` | 1Password and Bitwarden through their CLIs: read a password or a key, create a login item, the accounts op knows | `fileio`, `settings` |
 | `internal/health` | whether a host answers (TCP and the SSH banner) and the key it shows against known_hosts, no login, no program | `hosts` |
 | `internal/hosts` | hosts and their files: Host, the store with its lock, checks, records across versions, forwards, tags, summaries, runs no program, the steps that do come as hooks from `app` | `fileio`, `record`, `vault` |
 | `internal/vault` | the vault key in a keychain or under a passphrase, seals bound to a host and field, named secrets of the sync device, runs no program, the system keychain and the prompt are set by `app`, vault-key.json holds slots (passphrase, recovery code, a key on a FIDO2 token) that open the same key, the token is asked through a function `app` sets | `fileio`, `settings`, `handcode` |

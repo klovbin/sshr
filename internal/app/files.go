@@ -18,6 +18,9 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return fileio.WriteFile(path, data, mode)
 }
 
+// IsFile tells whether path names a file that is not a folder
+func IsFile(path string) bool { return fileio.IsFile(path) }
+
 // ReadFileShared reads a file another sshr process may be replacing
 func ReadFileShared(path string) ([]byte, error) { return fileio.ReadFileShared(path) }
 

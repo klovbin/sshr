@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"sshr.dev/internal/fileio"
 )
 
 // The ssh sshr runs (#154): the first one on PATH, except on Windows where
@@ -26,12 +28,12 @@ func SSHPath() (string, error) {
 	if own := os.Getenv("SSHR_SSH"); own != "" {
 		// the user names the ssh, the msys one of Git included (its agent,
 		// its config), nothing is picked instead
-		if !fileExists(own) {
+		if !fileio.IsFile(own) {
 			return "", fmt.Errorf("SSHR_SSH names %s, there is no such file", own)
 		}
 		return own, nil
 	}
-	return pickSSH(runtime.GOOS, exec.LookPath, os.Getenv("SystemRoot"), fileExists)
+	return pickSSH(runtime.GOOS, exec.LookPath, os.Getenv("SystemRoot"), fileio.IsFile)
 }
 
 // sshCommand is exec.Command for the ssh of SSHPath, a missing ssh runs
@@ -65,7 +67,7 @@ func childSSH(goos string, path func() (string, error), own string, mosh bool) s
 // SCPPath is the scp to run, the one next to the chosen ssh when sshr
 // tells scp which ssh to start, so both come from one OpenSSH
 func SCPPath() (string, error) {
-	return pickSCP(runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileExists, exec.LookPath)
+	return pickSCP(runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileio.IsFile, exec.LookPath)
 }
 
 // KeygenPath is the ssh-keygen to run, on Windows (and with SSHR_SSH) the
@@ -73,7 +75,7 @@ func SCPPath() (string, error) {
 // often finds first has no FIDO support, so a key on a token needs the
 // one of the OpenSSH sshr connects with
 func KeygenPath() (string, error) {
-	return pickTool("ssh-keygen", runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileExists, exec.LookPath)
+	return pickTool("ssh-keygen", runtime.GOOS, SSHPath, os.Getenv("SSHR_SSH"), fileio.IsFile, exec.LookPath)
 }
 
 // pickSCP chooses scp, on Windows (and with SSHR_SSH) scp gets -S with the
@@ -112,11 +114,6 @@ func pickTool(name, goos string, sshPath func() (string, error), own string, exi
 		return "", fmt.Errorf("%s not found in PATH, it comes with OpenSSH", name)
 	}
 	return p, nil
-}
-
-func fileExists(p string) bool {
-	fi, err := os.Stat(p)
-	return err == nil && !fi.IsDir()
 }
 
 // pickSSH chooses the ssh, the lookups come in so a test can stand in for

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"sshr.dev/internal/fileio"
 	"sshr.dev/internal/settings"
 )
 
@@ -204,7 +205,7 @@ func resolveOpBin() (string, error) {
 		return bin, nil
 	}
 	for _, p := range opPathCandidates {
-		if fileExists(p) {
+		if fileio.IsFile(p) {
 			return p, nil
 		}
 	}
@@ -213,7 +214,7 @@ func resolveOpBin() (string, error) {
 			home + "/.local/bin/op",
 			home + "/bin/op",
 		} {
-			if fileExists(p) {
+			if fileio.IsFile(p) {
 				return p, nil
 			}
 		}
@@ -222,11 +223,6 @@ func resolveOpBin() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: the 1Password CLI (op) is not installed, see %s", ErrNoOP, opCLIInstallURL)
-}
-
-func fileExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
 }
 
 // findGrokBotOp picks the newest ~/.grokbot/onepassword-cli/<ver>/<arch>/op.
@@ -243,7 +239,7 @@ func findGrokBotOp(home string) string {
 			continue
 		}
 		p := filepath.Join(root, e.Name(), arch, "op")
-		if !fileExists(p) {
+		if !fileio.IsFile(p) {
 			continue
 		}
 		if bestVer == "" || e.Name() > bestVer {
