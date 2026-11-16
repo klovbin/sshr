@@ -177,7 +177,7 @@ The core builds the ssh, scp and remote command lines and runs `op`, `bw`, `scp`
 
 ## Planned changes
 
-In this order, each one its own issue and commits, the order was checked against the research and the code (`opus-check-2026-10-23`), the bugs #144 and #145 come before 3:
+In this order, each one its own issue and commits, the bugs #144 and #145 come before 3:
 
 1. (#95) done: a lock around every change of hosts and one over a whole sync run, see Processes, what it cannot cover is fixed by #106 and #107
 2. (#96) done: `PlanSession` and `SessionPlan.Command` in `app` plan connect, tunnel and the API tunnels, the CLI keeps running the process and its signals, the app can build its connect on it (#90)
