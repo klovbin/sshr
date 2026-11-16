@@ -70,7 +70,7 @@ func Install() (string, error) {
 	if err := writeFile(filepath.Join(app, "Contents", "Info.plist"), []byte(infoPlist), 0o644); err != nil {
 		return "", err
 	}
-	// Ad-hoc sign the bundle only — do not use --deep (would break nested tools).
+	// Ad-hoc sign the bundle only, --deep would break the nested tools
 	if p, err := exec.LookPath("codesign"); err == nil {
 		exec.Command(p, "--force", "--sign", "-", app).Run()
 	}

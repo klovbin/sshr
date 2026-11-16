@@ -50,7 +50,7 @@ type Settings struct {
 	OPVault string `json:"op_vault,omitempty"`
 	// OPAccount is the default 1Password account for OP_ACCOUNT (url, email or uuid)
 	OPAccount string `json:"op_account,omitempty"`
-	// OPEmail is the human label for OPAccount (legacy; prefer OPAccounts)
+	// OPEmail is the human label for OPAccount (legacy, prefer OPAccounts)
 	OPEmail string `json:"op_email,omitempty"`
 	// OPAccounts are all linked 1Password accounts (user can add several)
 	OPAccounts []OPLinkedAccount `json:"op_accounts,omitempty"`

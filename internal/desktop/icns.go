@@ -22,7 +22,7 @@ var icnsTypes = []struct {
 	{"ic07", 128},
 	{"ic08", 256},
 	{"ic09", 512},
-	{"ic10", 1024}, // 512@2x — needed so 1Password / macOS do not upscale 16px mush
+	{"ic10", 1024}, // 512@2x, needed so 1Password / macOS do not upscale 16px mush
 	{"ic11", 32},   // 16@2x
 	{"ic12", 64},   // 32@2x
 	{"ic13", 256},  // 128@2x

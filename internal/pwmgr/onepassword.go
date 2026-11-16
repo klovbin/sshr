@@ -112,7 +112,7 @@ func OpenOnePasswordCLIInstall() error {
 }
 
 // ListOPAccounts lists accounts added to the 1Password desktop app
-// (`op account list` — https://developer.1password.com/docs/cli/use-multiple-accounts/).
+// (`op account list`, https://developer.1password.com/docs/cli/use-multiple-accounts/)
 func ListOPAccounts() ([]OPAccount, error) {
 	out, err := opRun(nil, "account", "list", "--format=json")
 	if err != nil {
@@ -250,7 +250,7 @@ func findGrokBotOp(home string) string {
 }
 
 // opErrMessage picks the useful line from op stderr. op often appends
-// Connect-server help after the real error — that must not become the message.
+// Connect-server help after the real error, that must not become the message
 func opErrMessage(stderr string) string {
 	var first string
 	for _, line := range strings.Split(stderr, "\n") {

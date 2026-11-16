@@ -36,7 +36,7 @@ var (
 	ErrChanged = errors.New("host_changed")
 )
 
-// ParsePort reads a TCP port: digits only, 1–65535.
+// ParsePort reads a TCP port: digits only, 1-65535
 func ParsePort(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil || n < 1 || n > 65535 {
@@ -45,8 +45,8 @@ func ParsePort(s string) (int, error) {
 	return n, nil
 }
 
-// AmbiguousError means a query matched several hosts; Hosts lists them so the
-// caller can ask for an exact ID instead of guessing.
+// AmbiguousError means a query matched several hosts, Hosts lists them so the
+// caller can ask for an exact ID instead of guessing
 type AmbiguousError struct {
 	Query string
 	Hosts []Host

@@ -1,4 +1,4 @@
-// Package assets holds the logo. Linux and macOS install it via desktop-entry;
+// Package assets holds the logo. Linux and macOS install it via desktop-entry,
 // Windows links the same PNGs into .exe resources (cmd/sshr/*.syso).
 package assets
 
