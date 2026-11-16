@@ -1,7 +1,8 @@
 name: release
 
 # a tag like v1.2.3 builds the CLI for linux, darwin and windows on amd64 and
-# arm64, attests the files and publishes them with sha256sums.txt, the names
+# arm64, signs sha256sums.txt with the release key, attests the files and
+# publishes them with sha256sums.txt and its signature, the names
 # are the ones install.sh and the packages look for
 on:
   push:
@@ -32,6 +33,13 @@ jobs:
 
       - name: build the release files
         run: scripts/release.sh "$GITHUB_REF_NAME" dist
+
+      # sha256sums.txt signed with the key install.sh pins, a release
+      # without the key stops here
+      - name: sign the checksums
+        env:
+          SSHR_RELEASE_KEY: ${{ secrets.SSHR_RELEASE_KEY }}
+        run: scripts/sign-release.sh dist "$GITHUB_REF_NAME"
 
       - name: attest the files
         uses: actions/attest-build-provenance@v2

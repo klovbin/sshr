@@ -5,13 +5,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/klovbin/sshr/main/install.sh | sh
 #   sh install.sh --help
 #
-# A release binary is downloaded when one exists for this system and its
+# A release binary is downloaded when one exists for this system, the
+# checksum list carries a signature of the pinned release key and the
 # checksum matches, otherwise sshr is built from source with Go, the GUI
 # needs cgo and a C compiler, without them the CLI is built and the script
 # says so
 set -eu
 
 REPO="klovbin/sshr"
+# RELEASE_KEY is the public key that signs sha256sums.txt of every
+# release, a binary is used only when its list carries a signature of it
+RELEASE_KEY=""
 PREFIX="${SSHR_PREFIX:-$HOME/.local/bin}"
 VERSION="latest"
 MODIFY_PATH=1
@@ -129,15 +133,42 @@ sha256() {
 	fi
 }
 
+# verify_sums checks the signature over the line "sshr-release <tag>" and
+# sha256sums.txt with RELEASE_KEY, the tag in it keeps an old signed
+# release from passing for the one asked, a list that is unsigned, signed
+# by another key or for another tag, or not checkable here, means building
+# from source, a checksum from the same place as the binary only proves
+# the download is whole
+verify_sums() {
+	if ! fetch "$1/sha256sums.txt.sig" "$WORK/sums.sig" 2>/dev/null; then
+		say "the release has no signature of sha256sums.txt, not using an unchecked binary"
+		return 1
+	fi
+	have ssh-keygen || { say "no ssh-keygen to check the signature, building from source"; return 1; }
+	printf 'sshr-release %s\n' "$RELEASE_KEY" >"$WORK/allowed"
+	{ printf 'sshr-release %s\n' "$2"; cat "$WORK/sums"; } >"$WORK/signed"
+	if ! ssh-keygen -Y verify -f "$WORK/allowed" -I sshr-release -n sshr-release -s "$WORK/sums.sig" <"$WORK/signed" >/dev/null 2>&1; then
+		say "the signature of sha256sums.txt does not check with the pinned key for $2 (or ssh-keygen is older than 8.1), not using the binary"
+		return 1
+	fi
+}
+
 # download_release fetches sshr_<os>_<arch> and checks it against
 # sha256sums.txt of the same release, any failure means building from source
 download_release() {
 	asset="sshr_${OS}_${ARCH}"
-	if [ "$VERSION" = latest ]; then
-		base="https://github.com/$REPO/releases/latest/download"
-	else
-		base="https://github.com/$REPO/releases/download/$VERSION"
+	[ -n "$RELEASE_KEY" ] || { say "this install.sh pins no release key yet, building from source"; return 1; }
+	tag="$VERSION"
+	if [ "$tag" = latest ]; then
+		# the tag of the latest release, the signature names it
+		fetch "https://api.github.com/repos/$REPO/releases/latest" "$WORK/latest" 2>/dev/null &&
+			tag="$(sed -n 's/^ *"tag_name": *"\([A-Za-z0-9._-]*\)".*/\1/p' "$WORK/latest" | head -n 1)"
+		if [ -z "$tag" ] || [ "$tag" = latest ]; then
+			say "cannot tell the latest release, building from source"
+			return 1
+		fi
 	fi
+	base="https://github.com/$REPO/releases/download/$tag"
 	if ! fetch "$base/$asset" "$WORK/sshr" 2>/dev/null; then
 		say "no release binary $asset ($VERSION), building from source"
 		return 1
@@ -146,6 +177,7 @@ download_release() {
 		say "the release has no sha256sums.txt, not using an unchecked binary"
 		return 1
 	fi
+	verify_sums "$base" "$tag" || return 1
 	want="$(awk -v a="$asset" '$2 == a || $2 == "*"a {print $1}' "$WORK/sums")"
 	got="$(sha256 "$WORK/sshr")" || { say "no sha256sum or shasum to check the download"; return 1; }
 	if [ -z "$want" ] || [ "$want" != "$got" ]; then
@@ -155,7 +187,7 @@ download_release() {
 	chmod 755 "$WORK/sshr"
 	# release files are the CLI, built without cgo, there is no GUI to add to
 	# the menu
-	say "downloaded release $VERSION for $OS/$ARCH"
+	say "downloaded release $tag for $OS/$ARCH"
 }
 
 # go_ok checks for Go 1.21 or newer, newer toolchains named in go.mod are
